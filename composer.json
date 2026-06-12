@@ -1,0 +1,14 @@
+{
+    "name": "automattic/woocommerce-subscriptions-lite",
+    "description": "Free subscriptions package for WooCommerce, built on the WooCommerce subscriptions engine.",
+    "type": "library",
+    "license": "GPL-2.0-or-later",
+    "require": {
+        "php": ">=7.4"
+    },
+    "autoload": {
+        "psr-4": {
+            "WooCommerce\\SubscriptionsLite\\": "src/"
+        }
+    }
+}
