@@ -5,7 +5,7 @@ WooCommerce Subscriptions Lite: a free subscriptions package + thin wrapper plug
 Repository: `https://github.com/Automattic/woocommerce-subscriptions-lite`
 Default branch: `trunk`
 Status: scaffold - no functional code yet
-License: GPL-2.0-or-later
+License: GPL-3.0-or-later
 
 ## IMPORTANT: this is a PUBLIC repository
 

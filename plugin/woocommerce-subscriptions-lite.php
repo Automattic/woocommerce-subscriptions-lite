@@ -6,8 +6,8 @@
  * Author: Automattic
  * Author URI: https://automattic.com
  * Version: 0.0.1-dev
- * License: GPLv2 or later
- * License URI: https://www.gnu.org/licenses/gpl-2.0.html
+ * License: GPLv3 or later
+ * License URI: https://www.gnu.org/licenses/gpl-3.0.html
  * Text Domain: woocommerce-subscriptions-lite
  * Requires Plugins: woocommerce
  *

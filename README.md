@@ -11,7 +11,7 @@ Free subscriptions for WooCommerce: a base package plus a thin wrapper plugin, b
 
 ## License
 
-GPLv2 or later. See [LICENSE](LICENSE).
+GPLv3 or later. See [LICENSE](LICENSE).
 
 ## Contributing
 
