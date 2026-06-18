@@ -14,10 +14,14 @@ Everything here is published: source code, comments, docs, commit messages, bran
 ## Repository layout
 
 ```
-composer.json    # the lite package: automattic/woocommerce-subscriptions-lite
-src/             # package code, PSR-4: WooCommerce\SubscriptionsLite\
-plugin/          # thin wrapper plugin - the WordPress.org distribution
-LICENSE          # GPL-2.0
+composer.json         # the lite package: automattic/woocommerce-subscriptions-lite
+src/                  # package code, PSR-4: Automattic\WooCommerce\SubscriptionsLite\
+templates/            # front-end and email templates
+tests/                # PHPUnit suites (Unit; Integration to follow)
+version-register.php  # highest-version-wins shim, required explicitly by consumers
+plugin/               # thin wrapper plugin - the WordPress.org distribution
+package.json          # build tooling (@wordpress/scripts, webpack)
+LICENSE               # GPL-3.0
 ```
 
 The package lives at the repository root so it is directly consumable from Packagist (which reads the root `composer.json`). The wrapper plugin under `plugin/` is assembled into the WordPress.org distribution by a build step (CI pending). Layout is provisional until the release pipeline is built.
@@ -32,6 +36,7 @@ The package lives at the repository root so it is directly consumable from Packa
 
 ## Conventions
 
-- PHP namespace: `WooCommerce\SubscriptionsLite\` (PSR-4 from `src/`).
+- PHP namespace: `Automattic\WooCommerce\SubscriptionsLite\` (PSR-4 from `src/`).
+- PHP floor: 7.4 (matches the engine package); no syntax newer than 7.4.
 - WordPress coding standards for plugin-facing code; tooling configuration pending.
 - Default branch `trunk`; work in feature branches, PRs into `trunk`.
