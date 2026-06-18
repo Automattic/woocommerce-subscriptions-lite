@@ -40,6 +40,15 @@ final class Bootstrap {
 		}
 		self::$initialized = true;
 
+		// Boot the subscriptions engine. The engine is consumed as a bundled
+		// composer package; while it is not yet part of WooCommerce core, the
+		// consumer is responsible for initializing it (the engine's own
+		// Package::init wires its integration layer - storage, schema, services).
+		// Guarded so Lite degrades gracefully if the engine class is unavailable.
+		if ( class_exists( \Automattic\WooCommerce\SubscriptionsEngine\Package::class ) ) {
+			\Automattic\WooCommerce\SubscriptionsEngine\Package::init();
+		}
+
 		// Product detail page: render the subscription plan picker and feed the
 		// chosen plan into the add-to-cart flow.
 		// TODO: PDP module - register once the engine catalog surface lands.
