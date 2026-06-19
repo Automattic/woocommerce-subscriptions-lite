@@ -7,7 +7,7 @@ Free subscriptions for WooCommerce: a base package plus a thin wrapper plugin, b
 ## What this repository will contain
 
 - **The lite package** (`automattic/woocommerce-subscriptions-lite`) - the free subscriptions feature set, consumable as a composer dependency. Lives at the repository root (`composer.json` + `src/`).
-- **A thin wrapper plugin** (`plugin/`) - the WordPress.org distribution that bundles the package and its dependencies.
+- **The WordPress.org plugin** - the same repository root is also the plugin: `woocommerce-subscriptions-lite.php` carries the plugin header and bootstraps the package (the standard "package is also a plugin" layout).
 
 ## License
 

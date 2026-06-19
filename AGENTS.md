@@ -19,12 +19,12 @@ src/                  # package code, PSR-4: Automattic\WooCommerce\Subscription
 templates/            # front-end and email templates
 tests/                # PHPUnit suites (Unit; Integration to follow)
 version-register.php  # highest-version-wins shim, required explicitly by consumers
-plugin/               # thin wrapper plugin - the WordPress.org distribution
+woocommerce-subscriptions-lite.php  # plugin entry (header + bootstrap) - the wp.org plugin main file
 package.json          # build tooling (@wordpress/scripts, webpack)
 LICENSE               # GPL-3.0
 ```
 
-The package lives at the repository root so it is directly consumable from Packagist (which reads the root `composer.json`). The wrapper plugin under `plugin/` is assembled into the WordPress.org distribution by a build step (CI pending). Layout is provisional until the release pipeline is built.
+The repository root serves as both the composer package (Packagist reads the root `composer.json`, so Premium consumes it directly) and the WordPress.org plugin (the root `woocommerce-subscriptions-lite.php` carries the plugin header and bootstraps the package). This is the standard "package is also a plugin" layout (cf. WooCommerce, Action Scheduler), and it keeps the wrapper next to the `vendor/`/`src/`/`version-register.php` it loads. The wp.org distribution is the repo with dev-only files excluded by the release build (CI pending). Layout is provisional until the release pipeline is built.
 
 ## Architecture ground rules
 
