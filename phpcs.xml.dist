@@ -1,0 +1,60 @@
+<?xml version="1.0"?>
+<ruleset name="WooCommerce Subscriptions Lite">
+	<description>WordPress Coding Standards for WooCommerce Subscriptions Lite</description>
+
+	<!-- What to scan -->
+	<file>.</file>
+	<exclude-pattern>/vendor/</exclude-pattern>
+	<exclude-pattern>/node_modules/</exclude-pattern>
+	<exclude-pattern>/build/</exclude-pattern>
+
+	<!-- How to scan -->
+	<arg value="sp"/>
+	<arg name="basepath" value="."/>
+	<arg name="colors"/>
+	<arg name="extensions" value="php"/>
+	<arg name="parallel" value="8"/>
+
+	<!-- Rules: WordPress Coding Standards (matches the engine package). -->
+	<rule ref="WordPress">
+		<!-- Allow short array syntax. -->
+		<exclude name="Universal.Arrays.DisallowShortArraySyntax"/>
+	</rule>
+	<rule ref="Generic.Arrays.DisallowLongArraySyntax"/>
+
+	<!--
+		The package is PSR-4 (file name = PascalCase class name), so the
+		WordPress class-file naming conventions do not apply to src/.
+	-->
+	<rule ref="WordPress.Files.FileName">
+		<exclude-pattern>src/*</exclude-pattern>
+	</rule>
+
+	<!-- Minimum supported WordPress version. -->
+	<config name="minimum_wp_version" value="6.9"/>
+
+	<!-- Cross-version PHP compatibility (matches the package floor). -->
+	<config name="testVersion" value="7.4-"/>
+
+	<!-- Text domain for i18n. -->
+	<rule ref="WordPress.WP.I18n">
+		<properties>
+			<property name="text_domain" type="array">
+				<element value="woocommerce-subscriptions-lite"/>
+			</property>
+		</properties>
+	</rule>
+
+	<!-- Prefixes for hooks, options, globals, etc. -->
+	<rule ref="WordPress.NamingConventions.PrefixAllGlobals">
+		<properties>
+			<property name="prefixes" type="array">
+				<element value="wc_subscriptions_lite"/>
+				<element value="Automattic\WooCommerce\SubscriptionsLite"/>
+			</property>
+		</properties>
+		<!-- Test bootstraps define WP-standard constants (ABSPATH) and local
+		     helper variables that are not part of the plugin's global surface. -->
+		<exclude-pattern>tests/*</exclude-pattern>
+	</rule>
+</ruleset>
