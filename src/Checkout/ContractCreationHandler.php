@@ -28,6 +28,7 @@ use Automattic\WooCommerce\SubscriptionsEngine\Integration\Checkout\ContractFact
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Checkout\OrderLinkage;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\ContractRepository;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\PlanRepository;
+use Automattic\WooCommerce\SubscriptionsLite\Renewal\RenewalWiring;
 
 defined( 'ABSPATH' ) || exit;
 
