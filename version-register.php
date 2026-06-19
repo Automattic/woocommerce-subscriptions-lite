@@ -2,23 +2,14 @@
 /**
  * Version-register shim for the woocommerce-subscriptions-lite package.
  *
- * Lite is a shared package: the wrapper plugin ships it, and a Premium plugin
- * may vendor its own copy too. Multiple copies can therefore be present on one
- * site at once. This shim makes that safe by resolving exactly one copy at
- * runtime - the highest version wins - mirroring how the engine package
- * resolves itself.
+ * Multiple copies of Lite can be present on one site (the wrapper plugin ships
+ * one; a Premium plugin may vendor another). This shim resolves exactly one at
+ * runtime - the highest version wins - mirroring the engine package.
  *
- * Every consumer requires its OWN vendored copy of this file EXPLICITLY
- * (`require .../version-register.php` from the plugin bootstrap). It is NOT
- * wired through Composer "files" autoload on purpose: Composer dedupes
- * files-autoload entries by md5(package . ':' . path), which is identical for
- * every vendored copy of this package, so the second consumer's copy would
- * silently never be included. Action Scheduler avoids files autoload for the
- * same reason.
- *
- * All definitions are guarded so any number of copies can be included safely:
- * the first include wins the function definitions, every include registers its
- * own copy's version + directory, and the highest version is initialized once.
+ * Each consumer requires its own copy explicitly from its bootstrap, never via
+ * Composer "files" autoload: Composer dedupes identical vendored copies, so the
+ * second consumer's copy would never load. All definitions are guarded, so any
+ * number of includes is safe.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite
  */
@@ -55,15 +46,17 @@ if ( ! function_exists( 'wc_subscriptions_lite_register' ) ) {
 	/**
 	 * Resolve and initialize exactly one copy: the highest registered version.
 	 *
-	 * Runs on `plugins_loaded` priority 0, after every active plugin has
-	 * required its vendored shim at plugin-load time. Registers a PSR-4-style
-	 * autoloader pointed at the winning copy's `src/` directory so the
-	 * `Automattic\WooCommerce\SubscriptionsLite\` namespace always resolves to
-	 * a single copy, regardless of which Composer autoloaders are present.
+	 * Run resolution on `plugins_loaded` priority 0, which is after all active
+	 * plugins have loaded their files and registered any Subscriptions Lite
+	 * versions. Once the version has been picked, create a PSR-4 autoloader for
+	 * the chosen version's `src/` directory.
 	 *
 	 * @return void
 	 */
 	function wc_subscriptions_lite_initialize() {
+		if ( ! isset( $GLOBALS['wc_subscriptions_lite_registry'] ) ) {
+			return;
+		}
 		$registry = $GLOBALS['wc_subscriptions_lite_registry'];
 		if ( empty( $registry ) ) {
 			return;
@@ -75,6 +68,12 @@ if ( ! function_exists( 'wc_subscriptions_lite_register' ) ) {
 
 		$GLOBALS['wc_subscriptions_lite_active_version'] = $winner_version;
 
+		// Bind the namespace to the resolved winner with a dedicated autoloader
+		// rather than each copy's own Composer autoloader. Every vendored copy
+		// maps `Automattic\WooCommerce\SubscriptionsLite\` to its own `src/`, so
+		// whichever Composer autoloader registered first would win - not the
+		// highest version. One autoloader pointed at the winner keeps the
+		// namespace resolving to a single copy.
 		spl_autoload_register(
 			static function ( $class_name ) use ( $winner_dir ) {
 				$prefix = 'Automattic\\WooCommerce\\SubscriptionsLite\\';

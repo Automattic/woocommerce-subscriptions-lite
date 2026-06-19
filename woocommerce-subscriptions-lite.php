@@ -90,7 +90,7 @@ add_action(
 				'admin_notices',
 				static function (): void {
 					echo '<div class="notice notice-error"><p>';
-					echo esc_html__( 'WooCommerce Subscriptions Lite requires WooCommerce to be active. Standing down.', 'woocommerce-subscriptions-lite' );
+					echo esc_html__( 'WooCommerce Subscriptions Lite requires WooCommerce to be active.', 'woocommerce-subscriptions-lite' );
 					echo '</p></div>';
 				}
 			);
@@ -99,23 +99,21 @@ add_action(
 
 		// Guard: the engine must have resolved a version via its shim.
 		//
-		// Probed by function name (not class reference) to avoid coupling to the
-		// engine's API while that package is still taking shape. This is a SOFT
-		// guard for the scaffold stage: when the engine ships no shim yet, the
-		// probe function is absent and Lite proceeds (there is no feature logic
-		// to break). Once the engine ships its shim, the probe exists; if it then
-		// resolves no version, Lite stands down instead of fataling.
+		// Probe by function name, not class, to avoid coupling to the engine
+		// API while it is still taking shape. This is a soft guard: if the
+		// engine ships no shim yet, the probe is absent and Lite proceeds
+		// (nothing depends on the engine yet). Once the shim exists, an
+		// unresolved version makes Lite stand down instead of fatal.
 		//
-		// TODO: when the engine shim lands and Lite consumes the engine surface,
-		// make engine resolution mandatory and compare the resolved engine
-		// version against Lite's floor, standing down on an unmet floor.
+		// TODO: require the engine and check its version against Lite's floor
+		// once Lite consumes the engine surface.
 		$engine_probe = 'wc_subscriptions_engine_active_version';
 		if ( function_exists( $engine_probe ) && null === \call_user_func( $engine_probe ) ) {
 			add_action(
 				'admin_notices',
 				static function (): void {
 					echo '<div class="notice notice-error"><p>';
-					echo esc_html__( 'WooCommerce Subscriptions Lite could not resolve the subscriptions engine. Standing down.', 'woocommerce-subscriptions-lite' );
+					echo esc_html__( 'WooCommerce Subscriptions Lite could not resolve the subscriptions engine.', 'woocommerce-subscriptions-lite' );
 					echo '</p></div>';
 				}
 			);

@@ -20,7 +20,10 @@
   "dependencies": {},
   "devDependencies": {
     "@woocommerce/dependency-extraction-webpack-plugin": "^4.0.0",
-    "@wordpress/env": "^10.10.0",
-    "@wordpress/scripts": "^31.4.0"
+    "@wordpress/env": "^11.0.0",
+    "@wordpress/scripts": "^32.0.0"
+  },
+  "engines": {
+    "node": "^24.15.0"
   }
 }
