@@ -24,10 +24,31 @@
 
 	<!--
 		The package is PSR-4 (file name = PascalCase class name), so the
-		WordPress class-file naming conventions do not apply to src/.
+		WordPress class-file naming conventions do not apply to src/. Test
+		support files (doubles, stubs) are not part of the package surface, so
+		the same naming rules are relaxed there too - matching the engine
+		package's phpcs config.
 	-->
 	<rule ref="WordPress.Files.FileName">
 		<exclude-pattern>src/*</exclude-pattern>
+		<exclude-pattern>tests/*</exclude-pattern>
+	</rule>
+
+	<!-- Test method names are self-documenting; do not require per-method docblocks. -->
+	<rule ref="Squiz.Commenting.FunctionComment.Missing">
+		<exclude-pattern>tests/*</exclude-pattern>
+	</rule>
+	<rule ref="Generic.Commenting.DocComment.MissingShort">
+		<exclude-pattern>tests/*</exclude-pattern>
+	</rule>
+
+	<!--
+		Test doubles deliberately mirror real WordPress/WooCommerce method
+		signatures (e.g. WC_Order_Item_Product::get_meta()'s $single flag),
+		including parameters the double itself does not consume.
+	-->
+	<rule ref="Generic.CodeAnalysis.UnusedFunctionParameter">
+		<exclude-pattern>tests/*</exclude-pattern>
 	</rule>
 
 	<!-- Minimum supported WordPress version. -->
