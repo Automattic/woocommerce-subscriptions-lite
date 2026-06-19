@@ -51,24 +51,25 @@ final class Bootstrap {
 
 		// Product detail page: render the subscription plan picker and feed the
 		// chosen plan into the add-to-cart flow.
-		// TODO: PDP module - register once the engine catalog surface lands.
+		// TODO: PDP module - register once the PDP widening slice lands.
 
 		// Cart: carry the chosen plan through cart item data and totals.
-		// TODO: Cart module - register once the engine catalog surface lands.
+		// TODO: Cart module - register once the PDP widening slice lands.
 
-		// Checkout: turn a completed order into a subscription contract.
-		// TODO: Checkout module - register once the engine contract surface lands.
+		// Checkout: turn a completed order into a subscription contract via the
+		// engine factory, then schedule its first renewal.
+		Checkout\ContractCreationHandler::register();
 
-		// Renewal: handle renewal scheduling and failed-payment retries.
-		// TODO: Renewal module - register once the engine scheduling surface lands.
-
-		// Customer portal (My Account): list, view, cancel, and reactivate.
-		// TODO: Portal module - register once the engine contract surface lands.
+		// Customer portal (My Account): list the customer's subscriptions and
+		// cancel an owned one through the engine. Detail / reactivate land in a
+		// later widening slice.
+		Portal\SubscriptionsEndpoint::register();
+		Portal\CancelHandler::register();
 
 		// Admin: plans editor, subscriptions list table, and settings tab.
-		// TODO: Admin module - register once the engine catalog/contract surfaces land.
+		// TODO: Admin module - register once the admin widening slices land.
 
 		// Email: contract and renewal notifications.
-		// TODO: Email module - register once the engine event surface lands.
+		// TODO: Email module - register once the email widening slice lands.
 	}
 }
