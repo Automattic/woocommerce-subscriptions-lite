@@ -6,8 +6,8 @@
  * cancel form; this handler authenticates the request (logged-in session +
  * nonce), resolves the contract, enforces ownership, checks the status is
  * cancelable, and asks the engine to cancel. There is no Store API: this is a
- * plain authenticated form post, so WordPress's own auth + nonce machinery is
- * the security boundary.
+ * plain front-end form post handled on `template_redirect`, with the logged-in
+ * check, nonce, and ownership guard enforced in {@see self::handle()}.
  *
  * **Asymmetric not-found.** A contract that does not exist and a contract owned
  * by another customer both resolve to {@see CancelResult::NOT_FOUND}, so the
@@ -43,10 +43,8 @@ defined( 'ABSPATH' ) || exit;
 final class CancelHandler {
 
 	/**
-	 * The `admin-post.php` action slug the cancel form posts to. The handler is
-	 * bound on `admin_post_{ACTION}` (authenticated form posts only - there is no
-	 * `admin_post_nopriv_` binding, so an anonymous post is dropped by WordPress
-	 * before it reaches us).
+	 * Hidden form-field value identifying a cancel submission. The handler runs on
+	 * `template_redirect` and acts only when `$_POST['action']` matches this slug.
 	 */
 	const ACTION = 'wc_subscriptions_lite_cancel';
 
@@ -127,39 +125,52 @@ final class CancelHandler {
 	}
 
 	/**
-	 * Bind the authenticated form-post handler. Called once from the bootstrap.
+	 * Bind the cancel-form handler. Called once from the bootstrap.
 	 *
-	 * Only the `admin_post_` (authenticated) variant is registered - never
-	 * `admin_post_nopriv_` - so WordPress drops anonymous posts before they reach
-	 * the handler.
+	 * Handled on `template_redirect` (a front-end context) rather than through
+	 * `admin-post.php`, so the post-cancel notice goes through WooCommerce's
+	 * front-end notice system the way its own My Account forms do - `wc_add_notice()`
+	 * is not loaded in the admin-post request. The handler is inert unless our
+	 * cancel POST is present, and {@see self::handle()} still enforces the
+	 * logged-in + nonce + ownership guards, so an anonymous or forged post is
+	 * refused there.
 	 */
 	public static function register(): void {
 		$instance = new self();
-		add_action( 'admin_post_' . self::ACTION, [ $instance, 'handle_request' ] );
+		add_action( 'template_redirect', [ $instance, 'handle_request' ] );
 	}
 
 	/**
-	 * Request entry point: read + verify the nonce, run the decision, queue a
-	 * notice, and redirect back to the My Account subscriptions page.
+	 * Request entry point: ignore everything except our cancel POST, then read +
+	 * verify the nonce, run the decision, queue a notice, and redirect back to the
+	 * My Account subscriptions page.
 	 *
-	 * Kept thin - all branching lives in {@see self::handle()}; this method only
-	 * adapts the WordPress request (superglobals, nonce, notice, redirect) to it.
+	 * Bound on `template_redirect`, so it fires on every front-end view and bails
+	 * immediately unless the request is our cancel submission. All branching lives
+	 * in {@see self::handle()}; this method only adapts the WordPress request
+	 * (superglobals, nonce, notice, redirect) to it.
 	 */
 	public function handle_request(): void {
-		// The nonce is read here and verified inside handle() (via the injected
-		// verifier, which wraps wp_verify_nonce against NONCE_ACTION). The reads
-		// below only extract the nonce + contract id for that verification, so
-		// the nonce-verification sniff does not apply to this extraction step.
-		// phpcs:disable WordPress.Security.NonceVerification.Recommended
-		$nonce = isset( $_REQUEST[ self::NONCE_FIELD ] )
-			? sanitize_text_field( wp_unslash( (string) $_REQUEST[ self::NONCE_FIELD ] ) )
+		// phpcs:disable WordPress.Security.NonceVerification
+		// Route only our own cancel POST - template_redirect fires on every
+		// front-end view. The nonce is read here and verified inside handle() via
+		// the injected verifier, so the sniff does not apply to this routing and
+		// extraction step.
+		$method = isset( $_SERVER['REQUEST_METHOD'] ) ? strtoupper( sanitize_text_field( wp_unslash( $_SERVER['REQUEST_METHOD'] ) ) ) : '';
+		$action = isset( $_POST['action'] ) ? sanitize_text_field( wp_unslash( $_POST['action'] ) ) : '';
+		if ( 'POST' !== $method || self::ACTION !== $action ) {
+			return;
+		}
+
+		$nonce = isset( $_POST[ self::NONCE_FIELD ] )
+			? sanitize_text_field( wp_unslash( (string) $_POST[ self::NONCE_FIELD ] ) )
 			: '';
 
 		$params = [
-			'contract_id' => isset( $_REQUEST['contract_id'] ) ? sanitize_text_field( wp_unslash( (string) $_REQUEST['contract_id'] ) ) : '',
+			'contract_id' => isset( $_POST['contract_id'] ) ? sanitize_text_field( wp_unslash( (string) $_POST['contract_id'] ) ) : '',
 			'nonce'       => $nonce,
 		];
-		// phpcs:enable WordPress.Security.NonceVerification.Recommended
+		// phpcs:enable WordPress.Security.NonceVerification
 
 		$result = $this->handle( $params );
 

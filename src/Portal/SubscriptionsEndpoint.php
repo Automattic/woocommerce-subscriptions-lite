@@ -107,7 +107,7 @@ final class SubscriptionsEndpoint {
 			'myaccount/subscriptions.php',
 			[
 				'rows'          => $rows,
-				'cancel_url'    => admin_url( 'admin-post.php' ),
+				'cancel_url'    => wc_get_endpoint_url( self::ENDPOINT, '', wc_get_page_permalink( 'myaccount' ) ),
 				'cancel_action' => CancelHandler::ACTION,
 				'nonce_field'   => CancelHandler::NONCE_FIELD,
 				'nonce_action'  => CancelHandler::NONCE_ACTION,

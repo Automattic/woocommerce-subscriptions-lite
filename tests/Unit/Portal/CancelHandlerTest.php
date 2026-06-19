@@ -196,15 +196,15 @@ final class CancelHandlerTest extends TestCase {
 		$this->assertSame( CancelResult::NOT_FOUND, $result->code(), 'No contract id resolves to nothing - not found.' );
 	}
 
-	public function test_register_binds_the_authenticated_post_action(): void {
+	public function test_register_binds_the_front_end_handler(): void {
 		$GLOBALS['wc_subscriptions_lite_test_hooks'] = [];
 
 		CancelHandler::register();
 
 		$hooks = array_filter(
 			$GLOBALS['wc_subscriptions_lite_test_hooks'],
-			static fn ( array $h ): bool => 'admin_post_' . CancelHandler::ACTION === $h['hook']
+			static fn ( array $h ): bool => 'template_redirect' === $h['hook']
 		);
-		$this->assertNotEmpty( $hooks, 'register() binds the authenticated admin-post action.' );
+		$this->assertNotEmpty( $hooks, 'register() binds the front-end cancel handler on template_redirect.' );
 	}
 }

@@ -61,7 +61,7 @@ final class BootstrapTest extends TestCase {
 	public function test_init_registers_the_portal_cancel_hook(): void {
 		Bootstrap::init();
 
-		$this->assertContains( 'admin_post_' . CancelHandler::ACTION, $this->registered_hook_names() );
+		$this->assertContains( 'template_redirect', $this->registered_hook_names() );
 	}
 
 	public function test_init_registers_the_subscriptions_menu_item_filter(): void {

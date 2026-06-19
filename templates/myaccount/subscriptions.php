@@ -8,8 +8,8 @@
  * so this template is pure presentation - no contract lookups or formatting here.
  *
  * @var array<int, array<string, mixed>> $rows          Pre-shaped contract rows.
- * @var string                           $cancel_url    admin-post.php URL the cancel form posts to.
- * @var string                           $cancel_action The admin-post action slug.
+ * @var string                           $cancel_url    My Account URL the cancel form posts to.
+ * @var string                           $cancel_action Hidden action-field value identifying the cancel submission.
  * @var string                           $nonce_field   The cancel nonce field name.
  * @var string                           $nonce_action  The cancel nonce action.
  *
