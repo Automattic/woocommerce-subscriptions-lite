@@ -71,6 +71,18 @@ if ( ! function_exists( 'add_filter' ) ) {
 	}
 }
 
+if ( ! function_exists( 'did_action' ) ) {
+	/**
+	 * Report that no action has fired yet (so engine boot defers schema install).
+	 *
+	 * @param string $hook Hook name.
+	 * @return int
+	 */
+	function did_action( string $hook ): int {
+		return 0;
+	}
+}
+
 if ( ! function_exists( '__' ) ) {
 	/**
 	 * Pass-through translation stub.

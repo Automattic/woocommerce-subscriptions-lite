@@ -77,5 +77,8 @@
 		<!-- Test bootstraps define WP-standard constants (ABSPATH) and local
 		     helper variables that are not part of the plugin's global surface. -->
 		<exclude-pattern>tests/*</exclude-pattern>
+		<!-- Template variables are passed in by wc_get_template() and extracted
+		     into local scope; they are not part of the plugin's global surface. -->
+		<exclude-pattern>templates/*</exclude-pattern>
 	</rule>
 </ruleset>
