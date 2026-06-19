@@ -57,7 +57,7 @@ endif;
 					<?php echo esc_html( (string) $row['status_label'] ); ?>
 				</td>
 				<td class="woocommerce-orders-table__cell" data-title="<?php esc_attr_e( 'Next payment', 'woocommerce-subscriptions-lite' ); ?>">
-					<?php echo '' !== $row['next_payment'] ? esc_html( (string) $row['next_payment'] ) : esc_html( '—' ); ?>
+					<?php echo '' !== $row['next_payment'] ? esc_html( (string) $row['next_payment'] ) : '&mdash;'; ?>
 				</td>
 				<td class="woocommerce-orders-table__cell" data-title="<?php esc_attr_e( 'Total', 'woocommerce-subscriptions-lite' ); ?>">
 					<?php echo esc_html( (string) $row['total'] ); ?>
