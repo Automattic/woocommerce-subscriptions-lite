@@ -226,9 +226,17 @@ final class CancelHandler {
 	/**
 	 * Queue the WooCommerce notice that matches `$result`.
 	 *
+	 * `wc_add_notice()` is registered by WooCommerce's front-end includes only.
+	 * This runs on `template_redirect`, where it is loaded, but guard anyway so a
+	 * non-front-end invocation degrades to no notice instead of a fatal.
+	 *
 	 * @param CancelResult $result The cancel outcome.
 	 */
 	private function add_notice_for( CancelResult $result ): void {
+		if ( ! function_exists( 'wc_add_notice' ) ) {
+			return;
+		}
+
 		switch ( $result->code() ) {
 			case CancelResult::CANCELLED:
 				wc_add_notice( __( 'Your subscription has been cancelled.', 'woocommerce-subscriptions-lite' ), 'success' );
