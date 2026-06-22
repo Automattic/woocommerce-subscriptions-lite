@@ -39,7 +39,7 @@
         "platform": {
             "php": "7.4"
         },
-        "autoloader-suffix": "WooSubscriptionsLite",
+        "autoloader-suffix": "WooCommerceSubscriptionsLite",
         "allow-plugins": {
             "dealerdirect/phpcodesniffer-composer-installer": true,
             "automattic/jetpack-autoloader": true
