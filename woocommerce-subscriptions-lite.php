@@ -23,11 +23,6 @@ namespace Automattic\WooCommerce\SubscriptionsLite;
 
 defined( 'ABSPATH' ) || exit;
 
-define( 'WC_SUBSCRIPTIONS_LITE_VERSION', '0.0.1-dev' );
-define( 'WC_SUBSCRIPTIONS_LITE_FILE', __FILE__ );
-define( 'WC_SUBSCRIPTIONS_LITE_DIR', plugin_dir_path( __FILE__ ) );
-define( 'WC_SUBSCRIPTIONS_LITE_URL', plugin_dir_url( __FILE__ ) );
-
 /*
  * Load order:
  *
@@ -39,7 +34,7 @@ define( 'WC_SUBSCRIPTIONS_LITE_URL', plugin_dir_url( __FILE__ ) );
  *      boot the feature modules.
  */
 
-if ( ! file_exists( WC_SUBSCRIPTIONS_LITE_DIR . 'vendor/autoload_packages.php' ) ) {
+if ( ! file_exists( plugin_dir_path( __FILE__ ) . 'vendor/autoload_packages.php' ) ) {
 	add_action(
 		'admin_notices',
 		static function (): void {
@@ -50,7 +45,7 @@ if ( ! file_exists( WC_SUBSCRIPTIONS_LITE_DIR . 'vendor/autoload_packages.php' )
 	);
 	return;
 }
-require_once WC_SUBSCRIPTIONS_LITE_DIR . 'vendor/autoload_packages.php';
+require_once plugin_dir_path( __FILE__ ) . 'vendor/autoload_packages.php';
 
 /**
  * Run the runtime guards and boot the feature modules.
@@ -96,7 +91,7 @@ add_action(
 			return;
 		}
 
-		Bootstrap::init();
+		Package::init();
 	},
 	5
 );

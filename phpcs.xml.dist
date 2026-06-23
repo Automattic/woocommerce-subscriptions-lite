@@ -70,7 +70,7 @@
 	<rule ref="WordPress.NamingConventions.PrefixAllGlobals">
 		<properties>
 			<property name="prefixes" type="array">
-				<element value="wc_subscriptions_lite"/>
+				<element value="woocommerce_subscriptions_lite"/>
 				<element value="Automattic\WooCommerce\SubscriptionsLite"/>
 			</property>
 		</properties>

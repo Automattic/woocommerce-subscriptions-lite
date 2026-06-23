@@ -20,10 +20,10 @@ if ( ! function_exists( 'wc_get_logger' ) ) {
 	/**
 	 * Return the logger double.
 	 *
-	 * @return WC_Subscriptions_Lite_Test_Logger
+	 * @return WooCommerce_Subscriptions_Lite_Test_Logger
 	 */
-	function wc_get_logger(): WC_Subscriptions_Lite_Test_Logger {
-		return new WC_Subscriptions_Lite_Test_Logger();
+	function wc_get_logger(): WooCommerce_Subscriptions_Lite_Test_Logger {
+		return new WooCommerce_Subscriptions_Lite_Test_Logger();
 	}
 }
 
@@ -38,7 +38,7 @@ if ( ! function_exists( 'add_action' ) ) {
 	 * @return bool
 	 */
 	function add_action( string $hook, $callback, int $priority = 10, int $accepted_args = 1 ): bool {
-		$GLOBALS['wc_subscriptions_lite_test_hooks'][] = [
+		$GLOBALS['woocommerce_subscriptions_lite_test_hooks'][] = [
 			'type'          => 'action',
 			'hook'          => $hook,
 			'callback'      => $callback,
@@ -60,7 +60,7 @@ if ( ! function_exists( 'add_filter' ) ) {
 	 * @return bool
 	 */
 	function add_filter( string $hook, $callback, int $priority = 10, int $accepted_args = 1 ): bool {
-		$GLOBALS['wc_subscriptions_lite_test_hooks'][] = [
+		$GLOBALS['woocommerce_subscriptions_lite_test_hooks'][] = [
 			'type'          => 'filter',
 			'hook'          => $hook,
 			'callback'      => $callback,

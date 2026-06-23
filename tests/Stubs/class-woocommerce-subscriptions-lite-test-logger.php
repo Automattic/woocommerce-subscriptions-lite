@@ -11,11 +11,11 @@
 
 declare( strict_types=1 );
 
-if ( ! class_exists( 'WC_Subscriptions_Lite_Test_Logger' ) ) {
+if ( ! class_exists( 'WooCommerce_Subscriptions_Lite_Test_Logger' ) ) {
 	/**
-	 * Records log calls into `$GLOBALS['wc_subscriptions_lite_test_logs']`.
+	 * Records log calls into `$GLOBALS['woocommerce_subscriptions_lite_test_logs']`.
 	 */
-	class WC_Subscriptions_Lite_Test_Logger {
+	class WooCommerce_Subscriptions_Lite_Test_Logger {
 
 		/**
 		 * Record an error log line.
@@ -55,7 +55,7 @@ if ( ! class_exists( 'WC_Subscriptions_Lite_Test_Logger' ) ) {
 		 * @param array<string, mixed> $context Context.
 		 */
 		private function record( string $level, string $message, array $context ): void {
-			$GLOBALS['wc_subscriptions_lite_test_logs'][] = [
+			$GLOBALS['woocommerce_subscriptions_lite_test_logs'][] = [
 				'level'   => $level,
 				'message' => $message,
 				'context' => $context,

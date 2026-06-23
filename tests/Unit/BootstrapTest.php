@@ -26,7 +26,7 @@ final class BootstrapTest extends TestCase {
 
 	protected function setUp(): void {
 		parent::setUp();
-		$GLOBALS['wc_subscriptions_lite_test_hooks'] = [];
+		$GLOBALS['woocommerce_subscriptions_lite_test_hooks'] = [];
 		$this->reset_initialized_flag();
 	}
 
@@ -48,7 +48,7 @@ final class BootstrapTest extends TestCase {
 	private function registered_hook_names(): array {
 		return array_map(
 			static fn ( array $h ): string => (string) $h['hook'],
-			$GLOBALS['wc_subscriptions_lite_test_hooks']
+			$GLOBALS['woocommerce_subscriptions_lite_test_hooks']
 		);
 	}
 
@@ -72,10 +72,10 @@ final class BootstrapTest extends TestCase {
 
 	public function test_init_is_idempotent(): void {
 		Bootstrap::init();
-		$first = count( $GLOBALS['wc_subscriptions_lite_test_hooks'] );
+		$first = count( $GLOBALS['woocommerce_subscriptions_lite_test_hooks'] );
 
 		Bootstrap::init();
-		$second = count( $GLOBALS['wc_subscriptions_lite_test_hooks'] );
+		$second = count( $GLOBALS['woocommerce_subscriptions_lite_test_hooks'] );
 
 		$this->assertSame( $first, $second, 'A second init() does not re-register hooks.' );
 	}

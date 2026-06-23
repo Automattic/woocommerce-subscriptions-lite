@@ -23,6 +23,7 @@ declare( strict_types=1 );
 namespace Automattic\WooCommerce\SubscriptionsLite\Portal;
 
 use WC_Order;
+use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Contract;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Checkout\OrderLinkage;
@@ -113,7 +114,7 @@ final class SubscriptionsEndpoint {
 				'nonce_action'  => CancelHandler::NONCE_ACTION,
 			],
 			'',
-			WC_SUBSCRIPTIONS_LITE_DIR . 'templates/'
+			Package::get_path() . '/templates/'
 		);
 	}
 

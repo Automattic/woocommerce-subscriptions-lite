@@ -25,7 +25,7 @@ final class RenewalWiringTest extends TestCase {
 
 	protected function setUp(): void {
 		parent::setUp();
-		$GLOBALS['wc_subscriptions_lite_test_logs'] = [];
+		$GLOBALS['woocommerce_subscriptions_lite_test_logs'] = [];
 	}
 
 	/**
@@ -78,7 +78,7 @@ final class RenewalWiringTest extends TestCase {
 		$result = $wiring->schedule_first_renewal( $this->make_contract( 'no-recurring-gateway' ) );
 
 		$this->assertFalse( $result, 'A gated-off schedule reports false.' );
-		$this->assertNotEmpty( $GLOBALS['wc_subscriptions_lite_test_logs'], 'A skipped schedule is logged for the merchant signal.' );
+		$this->assertNotEmpty( $GLOBALS['woocommerce_subscriptions_lite_test_logs'], 'A skipped schedule is logged for the merchant signal.' );
 	}
 
 	public function test_does_not_log_on_a_successful_schedule(): void {
@@ -88,6 +88,6 @@ final class RenewalWiringTest extends TestCase {
 
 		$wiring->schedule_first_renewal( $this->make_contract() );
 
-		$this->assertSame( [], $GLOBALS['wc_subscriptions_lite_test_logs'], 'A successful schedule does not log a warning.' );
+		$this->assertSame( [], $GLOBALS['woocommerce_subscriptions_lite_test_logs'], 'A successful schedule does not log a warning.' );
 	}
 }
