@@ -30,7 +30,7 @@ final class CancelHandlerTest extends TestCase {
 
 	protected function setUp(): void {
 		parent::setUp();
-		$GLOBALS['wc_subscriptions_lite_test_logs'] = [];
+		$GLOBALS['woocommerce_subscriptions_lite_test_logs'] = [];
 	}
 
 	/**
@@ -197,12 +197,12 @@ final class CancelHandlerTest extends TestCase {
 	}
 
 	public function test_register_binds_the_front_end_handler(): void {
-		$GLOBALS['wc_subscriptions_lite_test_hooks'] = [];
+		$GLOBALS['woocommerce_subscriptions_lite_test_hooks'] = [];
 
 		CancelHandler::register();
 
 		$hooks = array_filter(
-			$GLOBALS['wc_subscriptions_lite_test_hooks'],
+			$GLOBALS['woocommerce_subscriptions_lite_test_hooks'],
 			static fn ( array $h ): bool => 'template_redirect' === $h['hook']
 		);
 		$this->assertNotEmpty( $hooks, 'register() binds the front-end cancel handler on template_redirect.' );

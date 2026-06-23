@@ -31,8 +31,8 @@ final class ContractCreationHandlerTest extends TestCase {
 
 	protected function setUp(): void {
 		parent::setUp();
-		$GLOBALS['wc_subscriptions_lite_test_logs']  = [];
-		$GLOBALS['wc_subscriptions_lite_test_hooks'] = [];
+		$GLOBALS['woocommerce_subscriptions_lite_test_logs']  = [];
+		$GLOBALS['woocommerce_subscriptions_lite_test_hooks'] = [];
 	}
 
 	/**
@@ -145,7 +145,7 @@ final class ContractCreationHandlerTest extends TestCase {
 		$handler->create_contracts_for_order( 55, [], $order );
 
 		$this->assertFalse( $factory_called, 'A line item whose plan cannot be resolved is skipped, not passed to the factory.' );
-		$this->assertNotEmpty( $GLOBALS['wc_subscriptions_lite_test_logs'], 'The unresolvable plan is logged.' );
+		$this->assertNotEmpty( $GLOBALS['woocommerce_subscriptions_lite_test_logs'], 'The unresolvable plan is logged.' );
 	}
 
 	public function test_factory_throw_is_logged_and_does_not_block_siblings(): void {
@@ -175,7 +175,7 @@ final class ContractCreationHandlerTest extends TestCase {
 		$handler->create_contracts_for_order( 55, [], $order );
 
 		$this->assertSame( 2, $contracts_created, 'A throwing line item does not abort the loop; the sibling still gets a contract.' );
-		$this->assertNotEmpty( $GLOBALS['wc_subscriptions_lite_test_logs'], 'The factory failure is logged.' );
+		$this->assertNotEmpty( $GLOBALS['woocommerce_subscriptions_lite_test_logs'], 'The factory failure is logged.' );
 	}
 
 	public function test_schedules_first_renewal_for_each_created_contract(): void {
@@ -202,7 +202,7 @@ final class ContractCreationHandlerTest extends TestCase {
 		ContractCreationHandler::register();
 
 		$hooks = array_filter(
-			$GLOBALS['wc_subscriptions_lite_test_hooks'],
+			$GLOBALS['woocommerce_subscriptions_lite_test_hooks'],
 			static fn ( array $h ): bool => 'woocommerce_checkout_order_processed' === $h['hook']
 		);
 		$this->assertNotEmpty( $hooks, 'register() binds the classic checkout-processed hook.' );

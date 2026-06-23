@@ -46,17 +46,17 @@ final class CancelHandler {
 	 * Hidden form-field value identifying a cancel submission. The handler runs on
 	 * `template_redirect` and acts only when `$_POST['action']` matches this slug.
 	 */
-	const ACTION = 'wc_subscriptions_lite_cancel';
+	const ACTION = 'woocommerce_subscriptions_lite_cancel';
 
 	/**
 	 * The nonce action the form's nonce field is created against.
 	 */
-	const NONCE_ACTION = 'wc_subscriptions_lite_cancel';
+	const NONCE_ACTION = 'woocommerce_subscriptions_lite_cancel';
 
 	/**
 	 * The nonce request field name.
 	 */
-	const NONCE_FIELD = 'wc_subscriptions_lite_cancel_nonce';
+	const NONCE_FIELD = 'woocommerce_subscriptions_lite_cancel_nonce';
 
 	/**
 	 * Statuses a customer may cancel from. Mirrors the round-1 portal: `active`
