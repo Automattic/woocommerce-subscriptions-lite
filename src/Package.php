@@ -23,6 +23,10 @@ final class Package {
 
 	/**
 	 * Package version. Kept in sync with the plugin header.
+	 *
+	 * Read via get_version(); intended consumers are the version-register shim
+	 * (highest-version-wins registration) and asset cache-busting. No caller yet
+	 * at the skeleton stage.
 	 */
 	const VERSION = '0.0.1-dev';
 
