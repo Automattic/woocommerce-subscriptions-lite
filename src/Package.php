@@ -57,10 +57,11 @@ final class Package {
 	 * Resolves from the package's own filesystem path so assets load correctly
 	 * whether the package ships as the standalone Lite plugin or bundled inside
 	 * the premium plugin under highest-version-wins. Uses
-	 * `plugins_url()` against this file's directory rather than a plugin-root
-	 * constant so the URL tracks wherever the package physically lives.
+	 * `plugins_url()` against the package root directory (the parent of this
+	 * file's `src/` directory) rather than a plugin-root constant so the URL
+	 * tracks wherever the package physically lives.
 	 */
 	public static function get_url(): string {
-		return untrailingslashit( plugins_url( '', __DIR__ . '/.' ) );
+		return untrailingslashit( plugins_url( '', dirname( __DIR__ ) . '/.' ) );
 	}
 }
