@@ -1,0 +1,102 @@
+/**
+ * WooCommerce Subscriptions Lite - admin styles.
+ *
+ * Scoped under `.wc-subs-lite-admin` so the rules do not bleed into other
+ * WooCommerce admin screens. Layout sticks to WP-admin conventions
+ * (form-table, wp-list-table) so the page reads as a native surface.
+ */
+
+/*
+ * Contract status badges for the list table and the detail header.
+ *
+ * Structure mirrors WP-admin's own `mark.order-status` pattern (used by the
+ * core orders list) so the badges feel native. Resetting `mark`'s default
+ * yellow highlight is mandatory - without these rules the browser renders a
+ * flat yellow rectangle.
+ */
+.wc-subs-lite-admin mark.wc-subs-lite-status-badge {
+	display: inline-flex;
+	/* Anchor the em-based sizing below to the badge's own scale, not the
+	 * parent's, so the badge does not balloon inside the detail page H1. */
+	font-size: 13px;
+	line-height: 2.5em;
+	color: #2c3338;
+	background: #f0f0f1;
+	border-radius: 4px;
+	border-bottom: 1px solid rgba( 0, 0, 0, 0.05 );
+	margin: -0.25em 0;
+	vertical-align: middle;
+	white-space: nowrap;
+	max-width: 100%;
+}
+
+.wc-subs-lite-admin mark.wc-subs-lite-status-badge > span {
+	margin: 0 1em;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.wc-subs-lite-admin mark.wc-subs-lite-status-badge--active {
+	background: #c6e1c6;
+	color: #5b841b;
+}
+
+.wc-subs-lite-admin mark.wc-subs-lite-status-badge--on-hold {
+	background: #f8dda7;
+	color: #94660c;
+}
+
+.wc-subs-lite-admin mark.wc-subs-lite-status-badge--pending-cancellation {
+	background: #fbe9d4;
+	color: #b45917;
+}
+
+.wc-subs-lite-admin mark.wc-subs-lite-status-badge--cancelled,
+.wc-subs-lite-admin mark.wc-subs-lite-status-badge--expired {
+	background: #e5e5e5;
+	color: #777;
+}
+
+/* Inline row actions in the Actions column. */
+.wc-subs-lite-admin .wc-subs-lite-row-actions a {
+	text-decoration: none;
+}
+
+.wc-subs-lite-admin .wc-subs-lite-cancel-link {
+	color: #b32d2e;
+}
+
+.wc-subs-lite-admin .wc-subs-lite-cancel-link:hover,
+.wc-subs-lite-admin .wc-subs-lite-cancel-link:focus {
+	color: #d63638;
+}
+
+/* Column widths for the list table - keep ID and Status compact. */
+.wc-subs-lite-subscriptions-list .wp-list-table .column-id {
+	width: 80px;
+}
+
+.wc-subs-lite-subscriptions-list .wp-list-table .column-status {
+	width: 160px;
+}
+
+.wc-subs-lite-subscriptions-list .wp-list-table .column-next_payment {
+	width: 130px;
+}
+
+/* Detail page: action buttons sit above the details table. */
+.wc-subs-lite-detail-actions {
+	display: flex;
+	gap: 8px;
+	margin: 16px 0;
+}
+
+/* Detail page: cap the label column so values are not pushed far right. */
+.wc-subs-lite-subscription-detail .wc-subs-lite-detail-table th {
+	width: 200px;
+}
+
+/* Billing-history table spacing below the details block. */
+.wc-subs-lite-history-table {
+	margin-top: 8px;
+}
