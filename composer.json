@@ -48,7 +48,11 @@
     "scripts": {
         "lint": "phpcs -s -p",
         "lint:fix": "phpcbf -p",
-        "test": "phpunit",
-        "test:unit": "phpunit --testsuite=Unit"
+        "test": [
+            "@test:unit",
+            "@test:integration"
+        ],
+        "test:unit": "phpunit --testsuite=Unit",
+        "test:integration": "phpunit --configuration phpunit-integration.xml.dist --testsuite=Integration"
     }
 }
