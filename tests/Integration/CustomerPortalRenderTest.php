@@ -80,6 +80,11 @@ final class CustomerPortalRenderTest extends TestCase {
 		// The cancel modal is present with its live-region error.
 		$this->assertStringContainsString( 'wc-subscriptions-lite-cancel-modal', $html );
 		$this->assertStringContainsString( 'role="alert"', $html );
+		// The in-page actions carry their own live-region error, bound to a
+		// distinct state field so it never cross-renders with the modal error.
+		$this->assertStringContainsString( 'subscription-detail-actions__error', $html );
+		$this->assertStringContainsString( 'data-wp-text="state.actionError"', $html );
+		$this->assertStringContainsString( 'data-wp-text="state.error"', $html );
 		// Related orders render.
 		$this->assertStringContainsString( 'subscription-related-orders', $html );
 
@@ -89,6 +94,9 @@ final class CustomerPortalRenderTest extends TestCase {
 		$this->assertTrue( $state['atPeriodEnd'], 'Active subscription cancels at period end.' );
 		$this->assertSame( ContractStatus::ACTIVE, $state['status'] );
 		$this->assertArrayHasKey( 'i18n', $state );
+		// Both error-region state fields are seeded so the live regions can bind.
+		$this->assertSame( '', $state['error'] );
+		$this->assertSame( '', $state['actionError'] );
 	}
 
 	public function test_on_hold_admin_path_detail_shows_reactivate(): void {

@@ -104,6 +104,22 @@
 	margin: 0;
 }
 
+/* Inline error for the in-page lifecycle actions (Pause / Reactivate). */
+.subscription-detail-actions__error {
+	flex-basis: 100%;
+	margin: 0;
+	padding: 0.6em 0.85em;
+	background-color: #fee2e2;
+	color: #991b1b;
+	border: 1px solid #fca5a5;
+	border-radius: 4px;
+	font-size: 0.95em;
+}
+
+.subscription-detail-actions__error[hidden] {
+	display: none;
+}
+
 /* Related orders table. */
 .subscription-related-orders th,
 .subscription-related-orders td {

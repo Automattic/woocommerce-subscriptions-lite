@@ -155,14 +155,16 @@ final class Endpoints {
 		/**
 		 * Filters the assembled list view-model before render.
 		 *
-		 * Additive-only: an overlay may decorate the existing rows but must not
-		 * change the shape the template + iAPI store rely on.
+		 * The value is a zero-indexed array of row view-models, one per contract
+		 * (the shape {@see ViewModel::build_list()} returns). Additive-only: an
+		 * overlay may decorate the existing rows but must not change the shape the
+		 * template relies on.
 		 *
 		 * @since 0.0.1
 		 *
 		 * @param array<int, array<string, mixed>> $rows The list rows.
 		 */
-		$rows = apply_filters( 'woocommerce_subscriptions_lite_customer_portal_view_model', $rows );
+		$rows = apply_filters( 'woocommerce_subscriptions_lite_customer_portal_list_view_model', $rows );
 
 		// Register the store namespace on the list page so the shared store is
 		// present for the interactivity root and for any overlay that adds list
@@ -214,14 +216,16 @@ final class Endpoints {
 		/**
 		 * Filters the assembled detail view-model before render.
 		 *
-		 * Additive-only: an overlay may decorate the existing fields but must
-		 * not change the shape the template + iAPI store rely on.
+		 * The value is a single associative detail view-model for one contract
+		 * (the shape {@see ViewModel::build_detail()} returns). Additive-only: an
+		 * overlay may decorate the existing fields but must not change the shape
+		 * the template + iAPI store rely on.
 		 *
 		 * @since 0.0.1
 		 *
 		 * @param array<string, mixed> $detail The detail view-model.
 		 */
-		$detail = apply_filters( 'woocommerce_subscriptions_lite_customer_portal_view_model', $detail );
+		$detail = apply_filters( 'woocommerce_subscriptions_lite_customer_portal_detail_view_model', $detail );
 
 		wp_interactivity_state(
 			self::STORE_NAMESPACE,
@@ -231,7 +235,11 @@ final class Endpoints {
 				'atPeriodEnd' => (bool) $detail['at_period_end'],
 				'modalOpen'   => false,
 				'submitting'  => false,
+				// `error` backs the cancel modal's live region; `actionError`
+				// backs the in-page Pause / Reactivate live region. Separate
+				// fields so the two error regions never cross-render.
 				'error'       => '',
+				'actionError' => '',
 				'restBase'    => Assets::rest_base(),
 				'nonce'       => wp_create_nonce( 'wp_rest' ),
 				'cancelCopy'  => $detail['cancel_modal_copy'],

@@ -136,6 +136,23 @@ $has_actions = $detail['cancel_visible'] || $detail['hold_visible'] || $detail['
 			 */
 			do_action( 'woocommerce_subscriptions_lite_customer_portal_detail_actions', $detail );
 			?>
+
+			<?php
+			// Inline error region for the in-page lifecycle actions (Pause /
+			// Reactivate). A failed submit re-enables its button and writes the
+			// message here. Bound to its own state field (`state.actionError`) so
+			// it never cross-renders with the cancel modal's error region. The
+			// seeded copy already carries the "try again" affordance, and the
+			// re-enabled button is the retry. role="alert" announces the message
+			// to assistive tech the moment it appears.
+			?>
+			<div
+				class="subscription-detail-actions__error"
+				role="alert"
+				aria-live="polite"
+				data-wp-bind--hidden="!state.actionError"
+				data-wp-text="state.actionError"
+			></div>
 		</div>
 
 		<?php

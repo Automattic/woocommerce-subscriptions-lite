@@ -209,8 +209,13 @@ function runLifecycle( action, body, context ) {
 	if ( state.submitting ) {
 		return Promise.resolve();
 	}
+	// The cancel action surfaces failures inside its modal (`state.error`); the
+	// in-page Pause / Reactivate buttons surface them in the detail-actions
+	// region (`state.actionError`). Keeping the two fields separate stops the
+	// two `role="alert"` regions from cross-rendering the same message.
+	const errorField = action === 'cancel' ? 'error' : 'actionError';
 	state.submitting = true;
-	state.error = '';
+	state[ errorField ] = '';
 
 	return performAction( state, action, body, context ).then(
 		() => {
@@ -218,7 +223,7 @@ function runLifecycle( action, body, context ) {
 		},
 		( err ) => {
 			state.submitting = false;
-			state.error = formatError( action, err && err.message );
+			state[ errorField ] = formatError( action, err && err.message );
 		}
 	);
 }
