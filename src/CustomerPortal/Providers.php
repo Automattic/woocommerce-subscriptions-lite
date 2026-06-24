@@ -3,9 +3,10 @@
  * Providers - resolves the active customer-portal data provider.
  *
  * Lite owns the choice of implementation; the filter exists for tests and for
- * overlays that need to substitute their own reads. The default is the fixture
- * provider while the portal is built UI-first; once the engine-backed reads are
- * wired, the default flips to {@see EngineDataProvider}.
+ * overlays that need to substitute their own reads. The default is the
+ * engine-backed provider so the portal renders real engine data;
+ * {@see FixtureDataProvider} remains available for tests and demos via the
+ * filter below.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\CustomerPortal
  */
@@ -24,15 +25,16 @@ final class Providers {
 	/**
 	 * Resolve the active {@see DataProvider}.
 	 *
-	 * Defaults to {@see FixtureDataProvider}. The
+	 * Defaults to {@see EngineDataProvider} (real engine reads). The
 	 * `woocommerce_subscriptions_lite_customer_portal_data_provider` filter can
-	 * substitute another implementation; a non-DataProvider return is ignored
-	 * and the default is used so a misbehaving filter cannot break the portal.
+	 * substitute another implementation - for example {@see FixtureDataProvider}
+	 * for a demo or test; a non-DataProvider return is ignored and the default is
+	 * used so a misbehaving filter cannot break the portal.
 	 *
 	 * @return DataProvider
 	 */
 	public static function resolve(): DataProvider {
-		$default = new FixtureDataProvider();
+		$default = new EngineDataProvider();
 
 		/**
 		 * Filters the customer-portal data provider.
