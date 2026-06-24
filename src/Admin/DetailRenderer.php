@@ -15,6 +15,7 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Admin;
 
+use Throwable;
 use WP_User;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Subscriptions;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Contract;
@@ -35,7 +36,21 @@ final class DetailRenderer {
 	 * @param int $contract_id Contract id from the request (already absint'd).
 	 */
 	public static function render( int $contract_id ): void {
-		$contract = $contract_id > 0 ? Subscriptions::get( $contract_id ) : null;
+		try {
+			$contract = $contract_id > 0 ? Subscriptions::get( $contract_id ) : null;
+		} catch ( Throwable $e ) {
+			// An engine failure degrades to the not-found view plus a log line,
+			// rather than a white screen.
+			wc_get_logger()->error(
+				'Admin subscription detail could not be loaded for #' . $contract_id . ': ' . $e->getMessage(),
+				[
+					'source'      => 'woocommerce-subscriptions-lite',
+					'contract_id' => $contract_id,
+					'exception'   => $e,
+				]
+			);
+			$contract = null;
+		}
 
 		if ( null === $contract ) {
 			self::render_not_found( $contract_id );
@@ -91,6 +106,9 @@ final class DetailRenderer {
 	 * Status-gated action buttons (Renew now, Cancel), sharing the list row's
 	 * handlers and confirm contract.
 	 *
+	 * Rendered as POST forms (see {@see PageController::action_form()}) so the
+	 * nonce is not exposed in a URL; the buttons are styled as admin `.button`s.
+	 *
 	 * @param Contract $contract The contract.
 	 */
 	private static function render_actions( Contract $contract ): void {
@@ -104,20 +122,29 @@ final class DetailRenderer {
 			return;
 		}
 
-		?>
-		<p class="wc-subs-lite-detail-actions">
-			<?php if ( $renewable ) : ?>
-				<a class="button" href="<?php echo esc_url( PageController::action_url( PageController::ACTION_RENEW_NOW, $id ) ); ?>">
-					<?php esc_html_e( 'Renew now', 'woocommerce-subscriptions-lite' ); ?>
-				</a>
-			<?php endif; ?>
-			<?php if ( $cancellable ) : ?>
-				<a class="button wc-subs-lite-cancel-link" href="<?php echo esc_url( PageController::action_url( PageController::ACTION_CANCEL, $id ) ); ?>" data-confirm="<?php esc_attr_e( 'Cancel this subscription immediately? This cannot be undone.', 'woocommerce-subscriptions-lite' ); ?>">
-					<?php esc_html_e( 'Cancel', 'woocommerce-subscriptions-lite' ); ?>
-				</a>
-			<?php endif; ?>
-		</p>
-		<?php
+		// action_form() returns markup whose dynamic parts are escaped at source.
+		$forms = '';
+
+		if ( $renewable ) {
+			$forms .= PageController::action_form(
+				PageController::ACTION_RENEW_NOW,
+				$id,
+				__( 'Renew now', 'woocommerce-subscriptions-lite' ),
+				'button'
+			);
+		}
+
+		if ( $cancellable ) {
+			$forms .= PageController::action_form(
+				PageController::ACTION_CANCEL,
+				$id,
+				__( 'Cancel', 'woocommerce-subscriptions-lite' ),
+				'button wc-subs-lite-cancel-link',
+				__( 'Cancel this subscription immediately? This cannot be undone.', 'woocommerce-subscriptions-lite' )
+			);
+		}
+
+		echo '<div class="wc-subs-lite-detail-actions">' . $forms . '</div>'; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- form markup escaped at source.
 	}
 
 	/**
@@ -216,10 +243,28 @@ final class DetailRenderer {
 	 * @param int $contract_id Contract id.
 	 */
 	private static function render_history( int $contract_id ): void {
-		$cycles = Subscriptions::get_history( $contract_id, PageController::PER_PAGE );
+		$load_error = false;
+		try {
+			$cycles = Subscriptions::get_history( $contract_id, PageController::PER_PAGE );
+		} catch ( Throwable $e ) {
+			$load_error = true;
+			wc_get_logger()->error(
+				'Admin subscription history could not be loaded for #' . $contract_id . ': ' . $e->getMessage(),
+				[
+					'source'      => 'woocommerce-subscriptions-lite',
+					'contract_id' => $contract_id,
+					'exception'   => $e,
+				]
+			);
+			$cycles = [];
+		}
 
 		?>
 		<h2><?php esc_html_e( 'Billing history', 'woocommerce-subscriptions-lite' ); ?></h2>
+		<?php if ( $load_error ) : ?>
+			<p><?php esc_html_e( 'Billing history could not be loaded. Check the WooCommerce logs for details.', 'woocommerce-subscriptions-lite' ); ?></p>
+			<?php return; ?>
+		<?php endif; ?>
 		<?php if ( empty( $cycles ) ) : ?>
 			<p><?php esc_html_e( 'No billing cycles yet.', 'woocommerce-subscriptions-lite' ); ?></p>
 			<?php return; ?>

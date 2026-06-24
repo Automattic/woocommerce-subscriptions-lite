@@ -20,6 +20,8 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Admin;
 
+use Automattic\WooCommerce\SubscriptionsLite\Package;
+
 defined( 'ABSPATH' ) || exit;
 
 /**
@@ -94,9 +96,9 @@ final class PageController {
 	public static function enqueue_assets(): void {
 		wp_enqueue_style(
 			'wc-subscriptions-lite-admin',
-			WC_SUBSCRIPTIONS_LITE_URL . 'src/css/admin.css',
+			Package::get_url() . '/src/css/admin.css',
 			[],
-			WC_SUBSCRIPTIONS_LITE_VERSION
+			Package::get_version()
 		);
 	}
 
@@ -111,24 +113,39 @@ final class PageController {
 	}
 
 	/**
-	 * Build a nonced `admin-post.php` URL for a state-mutating action.
+	 * Render a self-contained `admin-post.php` POST form for a state-mutating
+	 * action, returning its HTML.
 	 *
-	 * Centralizes the URL shape so a handler's nonce check stays aligned with
-	 * the URL the list table and detail page render.
+	 * State changes go through POST (not nonced GET links) so the nonce is not
+	 * exposed in the URL and the action is not triggerable by a prefetch or a
+	 * cross-site `<img>`. The form carries the action name, the target contract,
+	 * and a nonce field whose action matches the handler's
+	 * `check_admin_referer( $action . '_' . $contract_id )` check. The submit is
+	 * a `button-link` so it can read as an inline link in the list or as a
+	 * `.button` on the detail page via `$button_class`. A non-empty `$confirm`
+	 * is attached as `data-confirm` on the form for the inline confirm script.
 	 *
-	 * @param string $action      One of the `ACTION_*` constants.
-	 * @param int    $contract_id Target contract id.
+	 * @param string $action       One of the `ACTION_*` constants.
+	 * @param int    $contract_id  Target contract id.
+	 * @param string $label        Submit button label (already translated).
+	 * @param string $button_class CSS classes for the submit button.
+	 * @param string $confirm      Optional confirm prompt; empty for no confirm.
+	 * @return string Form markup safe to echo.
 	 */
-	public static function action_url( string $action, int $contract_id ): string {
-		return wp_nonce_url(
-			add_query_arg(
-				[
-					'action'      => $action,
-					'contract_id' => $contract_id,
-				],
-				admin_url( 'admin-post.php' )
-			),
-			$action . '_' . $contract_id
+	public static function action_form( string $action, int $contract_id, string $label, string $button_class = 'button-link', string $confirm = '' ): string {
+		$confirm_attr = '' !== $confirm
+			? sprintf( ' data-confirm="%s"', esc_attr( $confirm ) )
+			: '';
+
+		return sprintf(
+			'<form class="wc-subs-lite-action-form" method="post" action="%1$s"%2$s>%3$s<input type="hidden" name="action" value="%4$s" /><input type="hidden" name="contract_id" value="%5$d" /><button type="submit" class="%6$s">%7$s</button></form>',
+			esc_url( admin_url( 'admin-post.php' ) ),
+			$confirm_attr,
+			wp_nonce_field( $action . '_' . $contract_id, '_wpnonce', true, false ),
+			esc_attr( $action ),
+			$contract_id,
+			esc_attr( $button_class ),
+			esc_html( $label )
 		);
 	}
 
@@ -176,10 +193,18 @@ final class PageController {
 
 			<?php self::render_flash_notice(); ?>
 
-			<form method="get">
-				<input type="hidden" name="page" value="<?php echo esc_attr( self::PAGE_SLUG ); ?>" />
-				<?php $table->display(); ?>
-			</form>
+			<?php if ( $table->has_load_error() ) : ?>
+				<div class="notice notice-error">
+					<p><?php esc_html_e( 'Subscriptions could not be loaded. Check the WooCommerce logs for details.', 'woocommerce-subscriptions-lite' ); ?></p>
+				</div>
+			<?php endif; ?>
+
+			<?php
+			// No enclosing <form>: the table has no search box or bulk actions, and
+			// each row action is its own POST form - a wrapping form would nest them
+			// (invalid HTML). Pagination uses plain query-arg links, so it needs none.
+			$table->display();
+			?>
 		</div>
 		<?php
 	}
@@ -243,20 +268,21 @@ final class PageController {
 	}
 
 	/**
-	 * Inline confirm for destructive Cancel links.
+	 * Inline confirm for destructive action forms.
 	 *
-	 * Cancel is immediate, so the click gets a `window.confirm()` gate carrying
-	 * the link's own copy (via `data-confirm`). Kept inline and dependency-free:
-	 * a single short script for one page, no enqueue chain. Links without the
-	 * attribute (Renew now, View) navigate normally.
+	 * Cancel is immediate, so its POST form gets a `window.confirm()` gate
+	 * carrying the form's own copy (via `data-confirm`) on submit. Kept inline
+	 * and dependency-free: a single short script for one page, no enqueue chain.
+	 * Forms without the attribute (Renew now) and the plain View link submit or
+	 * navigate normally.
 	 */
 	private static function render_confirm_script(): void {
 		?>
 		<script>
 		( function () {
-			document.querySelectorAll( '[data-confirm]' ).forEach( function ( link ) {
-				link.addEventListener( 'click', function ( event ) {
-					if ( ! window.confirm( link.getAttribute( 'data-confirm' ) ) ) {
+			document.querySelectorAll( 'form[data-confirm]' ).forEach( function ( form ) {
+				form.addEventListener( 'submit', function ( event ) {
+					if ( ! window.confirm( form.getAttribute( 'data-confirm' ) ) ) {
 						event.preventDefault();
 					}
 				} );

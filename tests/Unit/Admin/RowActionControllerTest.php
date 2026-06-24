@@ -3,10 +3,11 @@
  * Unit tests for the admin row-action handlers.
  *
  * The handlers back the Renew now / Cancel actions on the admin subscriptions
- * screens: each verifies the capability and nonce, then drives the engine
- * through its public facade, returning a {@see RowActionResult}. These tests
- * inject fake renew / cancel / capability / nonce seams so every guard branch
- * runs without a booted WordPress and without the static facade.
+ * screens: the decision method verifies the capability, then drives the engine
+ * through its public facade, returning a {@see RowActionResult}. The nonce is a
+ * request-boundary concern (check_admin_referer), so it is out of scope here.
+ * These tests inject fake renew / cancel / capability / logger seams so every
+ * decision branch runs without a booted WordPress and without the static facade.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Tests
  */
@@ -28,20 +29,31 @@ use Automattic\WooCommerce\SubscriptionsLite\Admin\RowActionResult;
 final class RowActionControllerTest extends TestCase {
 
 	/**
-	 * A controller whose seams all pass, with spies on the engine seams.
+	 * Captured log messages from the injected logger seam, per controller.
 	 *
-	 * @param array<string, mixed> $overrides Seam overrides: can, nonce_ok,
-	 *                                        renew_return, renew_calls,
-	 *                                        cancel_return, cancel_calls.
+	 * @var array<int, string>
+	 */
+	private $logged = [];
+
+	protected function setUp(): void {
+		parent::setUp();
+		$this->logged = [];
+	}
+
+	/**
+	 * A controller whose seams all pass, with spies on the engine + logger seams.
+	 *
+	 * @param array<string, mixed> $overrides Seam overrides: can, renew_return,
+	 *                                        renew_calls, cancel_return,
+	 *                                        cancel_calls.
 	 */
 	private function make_controller( array $overrides = [] ): RowActionController {
 		$can           = $overrides['can'] ?? true;
-		$nonce_ok      = $overrides['nonce_ok'] ?? true;
 		$renew_return  = $overrides['renew_return'] ?? null;
 		$cancel_return = $overrides['cancel_return'] ?? true;
 
 		return new RowActionController(
-			static function ( int $id ) use ( $renew_return, &$overrides ): ?WC_Order {
+			function ( int $id ) use ( $renew_return, &$overrides ): ?WC_Order {
 				if ( isset( $overrides['renew_calls'] ) ) {
 					$overrides['renew_calls'][] = $id;
 				}
@@ -50,7 +62,7 @@ final class RowActionControllerTest extends TestCase {
 				}
 				return $renew_return;
 			},
-			static function ( int $id ) use ( $cancel_return, &$overrides ): bool {
+			function ( int $id ) use ( $cancel_return, &$overrides ): bool {
 				if ( isset( $overrides['cancel_calls'] ) ) {
 					$overrides['cancel_calls'][] = $id;
 				}
@@ -60,7 +72,9 @@ final class RowActionControllerTest extends TestCase {
 				return (bool) $cancel_return;
 			},
 			static fn (): bool => (bool) $can,
-			static fn ( string $nonce, string $action ): bool => (bool) $nonce_ok
+			function ( string $message, array $context ): void {
+				$this->logged[] = $message;
+			}
 		);
 	}
 
@@ -73,12 +87,7 @@ final class RowActionControllerTest extends TestCase {
 			]
 		);
 
-		$result = $controller->handle_renew_now(
-			[
-				'contract_id' => 100,
-				'nonce'       => 'ok',
-			]
-		);
+		$result = $controller->handle_renew_now( [ 'contract_id' => 100 ] );
 
 		$this->assertTrue( $result->is_success() );
 		$this->assertSame( [ 100 ], $renew_calls, 'The facade renewal runs for the authorised contract.' );
@@ -88,12 +97,7 @@ final class RowActionControllerTest extends TestCase {
 	public function test_renew_now_reports_a_skipped_renewal_as_info(): void {
 		// A null facade return means the engine skipped the renewal.
 		$result = $this->make_controller( [ 'renew_return' => null ] )
-			->handle_renew_now(
-				[
-					'contract_id' => 100,
-					'nonce'       => 'ok',
-				]
-			);
+			->handle_renew_now( [ 'contract_id' => 100 ] );
 
 		$this->assertSame( RowActionResult::INFO, $result->type(), 'A skipped renewal is informational, not an error.' );
 		$this->assertFalse( $result->is_success() );
@@ -108,48 +112,21 @@ final class RowActionControllerTest extends TestCase {
 			]
 		);
 
-		$result = $controller->handle_renew_now(
-			[
-				'contract_id' => 100,
-				'nonce'       => 'ok',
-			]
-		);
+		$result = $controller->handle_renew_now( [ 'contract_id' => 100 ] );
 
 		$this->assertTrue( $result->is_forbidden() );
 		$this->assertSame( [], $renew_calls, 'An unauthorised request never reaches the facade.' );
 	}
 
-	public function test_renew_now_is_forbidden_with_a_bad_nonce(): void {
-		$renew_calls = [];
-		$controller  = $this->make_controller(
-			[
-				'nonce_ok'    => false,
-				'renew_calls' => &$renew_calls,
-			]
-		);
-
-		$result = $controller->handle_renew_now(
-			[
-				'contract_id' => 100,
-				'nonce'       => 'bad',
-			]
-		);
-
-		$this->assertTrue( $result->is_forbidden() );
-		$this->assertSame( [], $renew_calls, 'A bad nonce never reaches the facade.' );
-	}
-
-	public function test_renew_now_catches_an_engine_throwable_as_an_error(): void {
+	public function test_renew_now_logs_the_exception_and_surfaces_a_generic_message(): void {
 		$result = $this->make_controller( [ 'renew_return' => new RuntimeException( 'gateway down' ) ] )
-			->handle_renew_now(
-				[
-					'contract_id' => 100,
-					'nonce'       => 'ok',
-				]
-			);
+			->handle_renew_now( [ 'contract_id' => 100 ] );
 
 		$this->assertSame( RowActionResult::ERROR, $result->type() );
-		$this->assertStringContainsString( 'gateway down', $result->message() );
+		$this->assertStringNotContainsString( 'gateway down', $result->message(), 'The internal error detail is not leaked to the merchant.' );
+		$this->assertStringContainsString( 'logs', $result->message(), 'The merchant is pointed at the logs.' );
+		$this->assertCount( 1, $this->logged, 'The failure is logged once.' );
+		$this->assertStringContainsString( 'gateway down', $this->logged[0], 'The full exception detail is logged.' );
 	}
 
 	public function test_cancel_runs_the_facade_for_an_authorised_request(): void {
@@ -161,12 +138,7 @@ final class RowActionControllerTest extends TestCase {
 			]
 		);
 
-		$result = $controller->handle_cancel(
-			[
-				'contract_id' => 100,
-				'nonce'       => 'ok',
-			]
-		);
+		$result = $controller->handle_cancel( [ 'contract_id' => 100 ] );
 
 		$this->assertTrue( $result->is_success() );
 		$this->assertSame( [ 100 ], $cancel_calls, 'The facade cancel runs for the authorised contract.' );
@@ -175,15 +147,11 @@ final class RowActionControllerTest extends TestCase {
 	public function test_cancel_reports_a_missing_contract_as_an_error(): void {
 		// A false facade return means no such contract.
 		$result = $this->make_controller( [ 'cancel_return' => false ] )
-			->handle_cancel(
-				[
-					'contract_id' => 999,
-					'nonce'       => 'ok',
-				]
-			);
+			->handle_cancel( [ 'contract_id' => 999 ] );
 
 		$this->assertSame( RowActionResult::ERROR, $result->type() );
 		$this->assertFalse( $result->is_success() );
+		$this->assertCount( 0, $this->logged, 'A plain not-found is not logged as a failure.' );
 	}
 
 	public function test_cancel_is_forbidden_without_the_capability(): void {
@@ -195,42 +163,28 @@ final class RowActionControllerTest extends TestCase {
 			]
 		);
 
-		$result = $controller->handle_cancel(
-			[
-				'contract_id' => 100,
-				'nonce'       => 'ok',
-			]
-		);
+		$result = $controller->handle_cancel( [ 'contract_id' => 100 ] );
 
 		$this->assertTrue( $result->is_forbidden() );
 		$this->assertSame( [], $cancel_calls, 'An unauthorised request never reaches the facade.' );
 	}
 
-	public function test_cancel_is_forbidden_with_a_bad_nonce(): void {
-		$cancel_calls = [];
-		$controller   = $this->make_controller(
-			[
-				'nonce_ok'     => false,
-				'cancel_calls' => &$cancel_calls,
-			]
-		);
+	public function test_cancel_logs_the_exception_and_surfaces_a_generic_message(): void {
+		$result = $this->make_controller( [ 'cancel_return' => new RuntimeException( 'storage offline' ) ] )
+			->handle_cancel( [ 'contract_id' => 100 ] );
 
-		$result = $controller->handle_cancel(
-			[
-				'contract_id' => 100,
-				'nonce'       => 'bad',
-			]
-		);
-
-		$this->assertTrue( $result->is_forbidden() );
-		$this->assertSame( [], $cancel_calls, 'A bad nonce never reaches the facade.' );
+		$this->assertSame( RowActionResult::ERROR, $result->type() );
+		$this->assertStringNotContainsString( 'storage offline', $result->message(), 'The internal error detail is not leaked to the merchant.' );
+		$this->assertStringContainsString( 'logs', $result->message(), 'The merchant is pointed at the logs.' );
+		$this->assertCount( 1, $this->logged, 'The failure is logged once.' );
+		$this->assertStringContainsString( 'storage offline', $this->logged[0], 'The full exception detail is logged.' );
 	}
 
 	public function test_cancel_rejects_a_missing_contract_id_before_the_facade(): void {
 		$cancel_calls = [];
 		$controller   = $this->make_controller( [ 'cancel_calls' => &$cancel_calls ] );
 
-		$result = $controller->handle_cancel( [ 'nonce' => 'ok' ] );
+		$result = $controller->handle_cancel( [] );
 
 		$this->assertSame( RowActionResult::ERROR, $result->type(), 'No contract id resolves to not found.' );
 		$this->assertSame( [], $cancel_calls, 'A missing contract id never reaches the facade.' );

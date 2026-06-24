@@ -15,6 +15,7 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Admin;
 
+use Throwable;
 use WP_List_Table;
 use WP_User;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Subscriptions;
@@ -30,6 +31,13 @@ if ( ! class_exists( '\WP_List_Table' ) ) {
  * Admin subscriptions list table.
  */
 final class SubscriptionsListTable extends WP_List_Table {
+
+	/**
+	 * Whether the facade read failed while preparing items.
+	 *
+	 * @var bool
+	 */
+	private $load_error = false;
 
 	/**
 	 * Construct the table.
@@ -81,8 +89,22 @@ final class SubscriptionsListTable extends WP_List_Table {
 		$page     = max( 1, (int) $this->get_pagenum() );
 		$offset   = ( $page - 1 ) * $per_page;
 
-		// Peek one extra row to know whether a further page exists.
-		$rows        = Subscriptions::list( $per_page + 1, $offset );
+		// Peek one extra row to know whether a further page exists. An engine
+		// failure degrades to an empty list plus a notice rather than a fatal.
+		try {
+			$rows = Subscriptions::list( $per_page + 1, $offset );
+		} catch ( Throwable $e ) {
+			$this->load_error = true;
+			wc_get_logger()->error(
+				'Admin subscriptions list could not be loaded: ' . $e->getMessage(),
+				[
+					'source'    => 'woocommerce-subscriptions-lite',
+					'exception' => $e,
+				]
+			);
+			$rows = [];
+		}
+
 		$has_next    = count( $rows ) > $per_page;
 		$this->items = array_slice( $rows, 0, $per_page );
 
@@ -100,9 +122,22 @@ final class SubscriptionsListTable extends WP_List_Table {
 	}
 
 	/**
-	 * Neutral empty state.
+	 * Whether the facade read failed during {@see self::prepare_items()}. The
+	 * page chrome reads this to render an error notice above the table.
+	 */
+	public function has_load_error(): bool {
+		return $this->load_error;
+	}
+
+	/**
+	 * Empty state - neutral when the list is genuinely empty, an error hint when
+	 * the engine read failed.
 	 */
 	public function no_items(): void {
+		if ( $this->load_error ) {
+			esc_html_e( 'Subscriptions could not be loaded. Check the WooCommerce logs for details.', 'woocommerce-subscriptions-lite' );
+			return;
+		}
 		esc_html_e( 'No subscriptions found.', 'woocommerce-subscriptions-lite' );
 	}
 
@@ -178,14 +213,17 @@ final class SubscriptionsListTable extends WP_List_Table {
 	/**
 	 * Actions cell: View, then Renew now / Cancel where the status allows.
 	 *
+	 * View is a plain GET link; the state-mutating actions are POST forms (see
+	 * {@see PageController::action_form()}) so no nonce rides in the URL.
+	 *
 	 * @param Contract $item Current row.
 	 */
 	public function column_actions( $item ): string {
 		$id     = (int) $item->get_id();
 		$status = $item->get_status();
-		$links  = [];
+		$parts  = [];
 
-		$links[] = sprintf(
+		$parts[] = sprintf(
 			'<a href="%s">%s</a>',
 			esc_url(
 				PageController::page_url(
@@ -199,23 +237,24 @@ final class SubscriptionsListTable extends WP_List_Table {
 		);
 
 		if ( StatusLabels::is_renewable( $status ) ) {
-			$links[] = sprintf(
-				'<a href="%s">%s</a>',
-				esc_url( PageController::action_url( PageController::ACTION_RENEW_NOW, $id ) ),
-				esc_html__( 'Renew now', 'woocommerce-subscriptions-lite' )
+			$parts[] = PageController::action_form(
+				PageController::ACTION_RENEW_NOW,
+				$id,
+				__( 'Renew now', 'woocommerce-subscriptions-lite' )
 			);
 		}
 
 		if ( StatusLabels::is_cancellable( $status ) ) {
-			$links[] = sprintf(
-				'<a href="%s" class="wc-subs-lite-cancel-link" data-confirm="%s">%s</a>',
-				esc_url( PageController::action_url( PageController::ACTION_CANCEL, $id ) ),
-				esc_attr__( 'Cancel this subscription immediately? This cannot be undone.', 'woocommerce-subscriptions-lite' ),
-				esc_html__( 'Cancel', 'woocommerce-subscriptions-lite' )
+			$parts[] = PageController::action_form(
+				PageController::ACTION_CANCEL,
+				$id,
+				__( 'Cancel', 'woocommerce-subscriptions-lite' ),
+				'button-link wc-subs-lite-cancel-link',
+				__( 'Cancel this subscription immediately? This cannot be undone.', 'woocommerce-subscriptions-lite' )
 			);
 		}
 
-		return '<span class="wc-subs-lite-row-actions">' . implode( ' | ', $links ) . '</span>';
+		return '<span class="wc-subs-lite-row-actions">' . implode( ' ', $parts ) . '</span>';
 	}
 
 	/**

@@ -57,9 +57,37 @@
 	color: #777;
 }
 
-/* Inline row actions in the Actions column. */
+/*
+ * Inline row actions in the Actions column. View is a GET link; Renew now and
+ * Cancel are POST forms whose submit is a `button-link` so the whole cluster
+ * reads as one inline "View | Renew now | Cancel" row.
+ */
+.wc-subs-lite-admin .wc-subs-lite-row-actions {
+	display: inline;
+}
+
 .wc-subs-lite-admin .wc-subs-lite-row-actions a {
 	text-decoration: none;
+}
+
+/* Render each action form inline and separate it from the prior item. */
+.wc-subs-lite-admin .wc-subs-lite-row-actions .wc-subs-lite-action-form {
+	display: inline;
+}
+
+.wc-subs-lite-admin .wc-subs-lite-row-actions .wc-subs-lite-action-form::before {
+	content: "| ";
+	color: #c3c4c7;
+}
+
+/* `button-link` submits read as plain links inside the row-actions cluster. */
+.wc-subs-lite-admin .wc-subs-lite-row-actions .button-link {
+	padding: 0;
+	border: 0;
+	background: none;
+	cursor: pointer;
+	text-decoration: none;
+	vertical-align: baseline;
 }
 
 .wc-subs-lite-admin .wc-subs-lite-cancel-link {
