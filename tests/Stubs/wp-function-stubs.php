@@ -35,7 +35,7 @@ if ( ! function_exists( 'wc_get_is_paid_statuses' ) ) {
 	 * @return array<int, string>
 	 */
 	function wc_get_is_paid_statuses(): array {
-		return array( 'processing', 'completed' );
+		return [ 'processing', 'completed' ];
 	}
 }
 
@@ -332,5 +332,104 @@ if ( ! function_exists( 'esc_attr' ) ) {
 	 */
 	function esc_attr( string $text ): string {
 		return $text;
+	}
+}
+
+if ( ! function_exists( '_n' ) ) {
+	/**
+	 * Plural-aware translation stub: returns singular for count 1, else plural.
+	 *
+	 * @param string $single Singular text.
+	 * @param string $plural Plural text.
+	 * @param int    $number The count.
+	 * @param string $domain Text domain.
+	 * @return string
+	 */
+	function _n( string $single, string $plural, int $number, string $domain = 'default' ): string {
+		return 1 === $number ? $single : $plural;
+	}
+}
+
+if ( ! function_exists( 'apply_filters' ) ) {
+	/**
+	 * Pass-through filter stub: returns the value unchanged.
+	 *
+	 * @param string $hook  Filter name.
+	 * @param mixed  $value The value being filtered.
+	 * @return mixed
+	 */
+	function apply_filters( string $hook, $value = null ) {
+		return $value;
+	}
+}
+
+if ( ! defined( 'DAY_IN_SECONDS' ) ) {
+	define( 'DAY_IN_SECONDS', 86400 );
+}
+
+if ( ! function_exists( 'get_option' ) ) {
+	/**
+	 * Option stub: returns a fixed date format, the default otherwise.
+	 *
+	 * @param string $name    Option name.
+	 * @param mixed  $default Default value.
+	 * @return mixed
+	 */
+	function get_option( string $name, $default = false ) {
+		if ( 'date_format' === $name ) {
+			return 'Y-m-d';
+		}
+		return $default;
+	}
+}
+
+if ( ! function_exists( 'date_i18n' ) ) {
+	/**
+	 * Date-format stub backed by gmdate so tests are timezone-stable.
+	 *
+	 * @param string   $format    PHP date format.
+	 * @param int|null $timestamp Unix timestamp.
+	 * @return string
+	 */
+	function date_i18n( string $format, ?int $timestamp = null ): string {
+		return gmdate( $format, null === $timestamp ? time() : $timestamp );
+	}
+}
+
+if ( ! function_exists( 'wp_strip_all_tags' ) ) {
+	/**
+	 * Strip tags stub.
+	 *
+	 * @param string $text Input.
+	 * @return string
+	 */
+	function wp_strip_all_tags( string $text ): string {
+		return trim( (string) wp_strip_all_tags_inner( $text ) );
+	}
+
+	/**
+	 * Inner strip helper kept separate so the guard above stays a one-liner.
+	 *
+	 * @param string $text Input.
+	 * @return string
+	 */
+	function wp_strip_all_tags_inner( string $text ): string {
+		return preg_replace( '/<[^>]*>/', '', $text );
+	}
+}
+
+if ( ! function_exists( 'wc_price' ) ) {
+	/**
+	 * Minimal price-format stub: `{CUR}{amount}` with two decimals.
+	 *
+	 * @param float                $amount Amount.
+	 * @param array<string, mixed> $args   Format args (reads `currency`).
+	 * @return string
+	 */
+	function wc_price( float $amount, array $args = [] ): string {
+		$currency = isset( $args['currency'] ) && is_string( $args['currency'] ) && '' !== $args['currency']
+			? $args['currency']
+			: 'USD';
+		return $currency . number_format( $amount, 2 );
 	}
 }
