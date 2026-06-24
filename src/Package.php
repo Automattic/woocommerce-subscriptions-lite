@@ -54,14 +54,13 @@ final class Package {
 	/**
 	 * Return the public URL to the package root (no trailing slash).
 	 *
-	 * Derived from this file's location so it resolves correctly wherever the
-	 * package is installed (plugin directory, or bundled inside a host). Used
-	 * for enqueuing the package's own assets with a cache-busting version.
-	 *
-	 * `plugins_url( '', __DIR__ )` returns the URL of `dirname( __DIR__ )`, the
-	 * package root (this file lives in `src/`).
+	 * Resolves from the package's own filesystem path so assets load correctly
+	 * whether the package ships as the standalone Lite plugin or bundled inside
+	 * the premium plugin under highest-version-wins. Uses
+	 * `plugins_url()` against this file's directory rather than a plugin-root
+	 * constant so the URL tracks wherever the package physically lives.
 	 */
 	public static function get_url(): string {
-		return untrailingslashit( plugins_url( '', __DIR__ ) );
+		return untrailingslashit( plugins_url( '', __DIR__ . '/.' ) );
 	}
 }

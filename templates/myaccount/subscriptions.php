@@ -1,27 +1,28 @@
 <?php
 /**
- * My Account -> Subscriptions list template (Slice 0).
+ * My Account -> Subscriptions list template (customer portal).
  *
- * Lists the logged-in customer's contracts and, for cancelable ones, renders the
- * authenticated cancel form. Rows are pre-shaped by
- * {@see \Automattic\WooCommerce\SubscriptionsLite\Portal\SubscriptionsEndpoint::build_rows()}
- * so this template is pure presentation - no contract lookups or formatting here.
+ * Server-rendered markup carrying Interactivity API directives. Rows are
+ * pre-shaped by {@see \Automattic\WooCommerce\SubscriptionsLite\CustomerPortal\ViewModel}
+ * so this template is pure presentation - no contract lookups or formatting.
  *
- * @var array<int, array<string, mixed>> $rows          Pre-shaped contract rows.
- * @var string                           $cancel_url    My Account URL the cancel form posts to.
- * @var string                           $cancel_action Hidden action-field value identifying the cancel submission.
- * @var string                           $nonce_field   The cancel nonce field name.
- * @var string                           $nonce_action  The cancel nonce action.
+ * @var array<int, array<string, mixed>> $rows           Pre-shaped contract rows.
+ * @var string                           $store          The iAPI store namespace.
+ * @var callable                         $detail_url_for Builds the detail URL for a contract id.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite
  */
 
 defined( 'ABSPATH' ) || exit;
 
+$wp_button_class = function_exists( 'wc_wp_theme_get_element_class_name' ) && wc_wp_theme_get_element_class_name( 'button' )
+	? ' ' . wc_wp_theme_get_element_class_name( 'button' )
+	: '';
+
 if ( empty( $rows ) ) :
 	?>
 	<div class="woocommerce-message woocommerce-message--info woocommerce-Message woocommerce-Message--info woocommerce-info">
-		<a class="woocommerce-Button button" href="<?php echo esc_url( wc_get_page_permalink( 'shop' ) ); ?>">
+		<a class="woocommerce-Button button<?php echo esc_attr( $wp_button_class ); ?>" href="<?php echo esc_url( wc_get_page_permalink( 'shop' ) ); ?>">
 			<?php esc_html_e( 'Browse products', 'woocommerce-subscriptions-lite' ); ?>
 		</a>
 		<?php esc_html_e( 'You have no subscriptions yet.', 'woocommerce-subscriptions-lite' ); ?>
@@ -29,52 +30,119 @@ if ( empty( $rows ) ) :
 	<?php
 	return;
 endif;
+
+/**
+ * Filters the customer-portal list column headers.
+ *
+ * Additive-only: an overlay may add column headers; the four default columns
+ * keep their order and meaning.
+ *
+ * @since 0.0.1
+ *
+ * @param array<string, string> $columns Column key => header label.
+ */
+$columns = apply_filters(
+	'woocommerce_subscriptions_lite_customer_portal_list_columns',
+	[
+		'subscription' => __( 'Subscription', 'woocommerce-subscriptions-lite' ),
+		'status'       => __( 'Status', 'woocommerce-subscriptions-lite' ),
+		'next-payment' => __( 'Next payment', 'woocommerce-subscriptions-lite' ),
+		'total'        => __( 'Total', 'woocommerce-subscriptions-lite' ),
+		'actions'      => '',
+	]
+);
 ?>
 
-<table class="woocommerce-orders-table woocommerce-MyAccount-orders shop_table shop_table_responsive my_account_orders woocommerce-subscriptions-lite-subscriptions">
-	<thead>
-		<tr>
-			<th class="woocommerce-orders-table__header"><span class="nobr"><?php esc_html_e( 'Subscription', 'woocommerce-subscriptions-lite' ); ?></span></th>
-			<th class="woocommerce-orders-table__header"><span class="nobr"><?php esc_html_e( 'Status', 'woocommerce-subscriptions-lite' ); ?></span></th>
-			<th class="woocommerce-orders-table__header"><span class="nobr"><?php esc_html_e( 'Next payment', 'woocommerce-subscriptions-lite' ); ?></span></th>
-			<th class="woocommerce-orders-table__header"><span class="nobr"><?php esc_html_e( 'Total', 'woocommerce-subscriptions-lite' ); ?></span></th>
-			<th class="woocommerce-orders-table__header"><span class="nobr">&nbsp;</span></th>
-		</tr>
-	</thead>
-	<tbody>
-		<?php foreach ( $rows as $row ) : ?>
-			<tr class="woocommerce-orders-table__row">
-				<td class="woocommerce-orders-table__cell" data-title="<?php esc_attr_e( 'Subscription', 'woocommerce-subscriptions-lite' ); ?>">
-					<?php
-					printf(
-						/* translators: %d: subscription id */
-						esc_html__( '#%d', 'woocommerce-subscriptions-lite' ),
-						(int) $row['id']
-					);
-					?>
-				</td>
-				<td class="woocommerce-orders-table__cell" data-title="<?php esc_attr_e( 'Status', 'woocommerce-subscriptions-lite' ); ?>">
-					<?php echo esc_html( (string) $row['status_label'] ); ?>
-				</td>
-				<td class="woocommerce-orders-table__cell" data-title="<?php esc_attr_e( 'Next payment', 'woocommerce-subscriptions-lite' ); ?>">
-					<?php echo '' !== $row['next_payment'] ? esc_html( (string) $row['next_payment'] ) : '&mdash;'; ?>
-				</td>
-				<td class="woocommerce-orders-table__cell" data-title="<?php esc_attr_e( 'Total', 'woocommerce-subscriptions-lite' ); ?>">
-					<?php echo esc_html( (string) $row['total'] ); ?>
-				</td>
-				<td class="woocommerce-orders-table__cell" data-title="&nbsp;">
-					<?php if ( ! empty( $row['cancelable'] ) ) : ?>
-						<form method="post" action="<?php echo esc_url( (string) $cancel_url ); ?>">
-							<input type="hidden" name="action" value="<?php echo esc_attr( (string) $cancel_action ); ?>" />
-							<input type="hidden" name="contract_id" value="<?php echo esc_attr( (string) $row['id'] ); ?>" />
-							<?php wp_nonce_field( (string) $nonce_action, (string) $nonce_field ); ?>
-							<button type="submit" class="woocommerce-button button">
-								<?php esc_html_e( 'Cancel', 'woocommerce-subscriptions-lite' ); ?>
-							</button>
-						</form>
-					<?php endif; ?>
-				</td>
+<div
+	data-wp-interactive="<?php echo esc_attr( $store ); ?>"
+	class="woocommerce-subscriptions-lite-portal woocommerce-subscriptions-lite-portal--list"
+>
+	<table class="shop_table shop_table_responsive my_account_subscriptions account-subscriptions-table">
+		<thead>
+			<tr>
+				<?php foreach ( $columns as $column_key => $column_label ) : ?>
+					<th class="subscription-<?php echo esc_attr( $column_key ); ?>">
+						<span class="nobr"><?php echo '' !== (string) $column_label ? esc_html( (string) $column_label ) : '&nbsp;'; ?></span>
+					</th>
+				<?php endforeach; ?>
 			</tr>
-		<?php endforeach; ?>
-	</tbody>
-</table>
+		</thead>
+		<tbody>
+			<?php
+			foreach ( $rows as $row ) :
+				$detail_url = is_callable( $detail_url_for ) ? (string) call_user_func( $detail_url_for, (int) $row['id'] ) : '#';
+				?>
+				<tr class="subscription">
+					<td class="subscription-subscription" data-title="<?php echo esc_attr( (string) $columns['subscription'] ); ?>">
+						<a href="<?php echo esc_url( $detail_url ); ?>">
+							<?php
+							printf(
+								/* translators: %d: subscription id */
+								esc_html__( '#%d', 'woocommerce-subscriptions-lite' ),
+								(int) $row['id']
+							);
+							?>
+						</a>
+					</td>
+					<td class="subscription-status" data-title="<?php echo esc_attr( (string) $columns['status'] ); ?>">
+						<span class="subscription-status-badge subscription-status-badge--<?php echo esc_attr( (string) $row['status'] ); ?>">
+							<?php echo esc_html( (string) $row['status_label'] ); ?>
+						</span>
+					</td>
+					<td class="subscription-next-payment" data-title="<?php echo esc_attr( (string) $columns['next-payment'] ); ?>">
+						<?php if ( '' !== (string) $row['next_payment'] ) : ?>
+							<?php echo esc_html( (string) $row['next_payment'] ); ?>
+							<?php if ( '' !== (string) $row['payment_method_title'] ) : ?>
+								<br /><small>
+									<?php
+									printf(
+										/* translators: %s: payment method display name (e.g. "Visa ending in 4242"). */
+										esc_html__( 'Via %s', 'woocommerce-subscriptions-lite' ),
+										esc_html( (string) $row['payment_method_title'] )
+									);
+									?>
+								</small>
+							<?php endif; ?>
+						<?php else : ?>
+							&mdash;
+						<?php endif; ?>
+					</td>
+					<td class="subscription-total" data-title="<?php echo esc_attr( (string) $columns['total'] ); ?>">
+						<?php echo '' !== (string) $row['total'] ? esc_html( (string) $row['total'] ) : '&mdash;'; ?>
+					</td>
+					<td class="subscription-actions">
+						<a href="<?php echo esc_url( $detail_url ); ?>" class="woocommerce-button button view<?php echo esc_attr( $wp_button_class ); ?>">
+							<?php esc_html_e( 'View', 'woocommerce-subscriptions-lite' ); ?>
+						</a>
+						<?php
+						/**
+						 * Fires after the default per-row actions in the list.
+						 *
+						 * Additive-only: an overlay may append extra per-row
+						 * actions; it must not alter the default View action.
+						 *
+						 * @since 0.0.1
+						 *
+						 * @param array<string, mixed> $row The row view-model.
+						 */
+						do_action( 'woocommerce_subscriptions_lite_customer_portal_list_row_actions', $row );
+						?>
+					</td>
+					<?php
+					/**
+					 * Fires at the end of a list row.
+					 *
+					 * Additive-only: an overlay may append extra cell markup;
+					 * it must not alter the default cells.
+					 *
+					 * @since 0.0.1
+					 *
+					 * @param array<string, mixed> $row The row view-model.
+					 */
+					do_action( 'woocommerce_subscriptions_lite_customer_portal_list_row', $row );
+					?>
+				</tr>
+			<?php endforeach; ?>
+		</tbody>
+	</table>
+</div>

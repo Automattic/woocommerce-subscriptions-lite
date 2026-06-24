@@ -17,7 +17,6 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Unit;
 use PHPUnit\Framework\TestCase;
 use ReflectionClass;
 use Automattic\WooCommerce\SubscriptionsLite\Bootstrap;
-use Automattic\WooCommerce\SubscriptionsLite\Portal\CancelHandler;
 
 /**
  * @covers \Automattic\WooCommerce\SubscriptionsLite\Bootstrap
@@ -59,10 +58,16 @@ final class BootstrapTest extends TestCase {
 		$this->assertContains( 'woocommerce_checkout_order_processed', $this->registered_hook_names() );
 	}
 
-	public function test_init_registers_the_portal_cancel_hook(): void {
+	public function test_init_registers_the_portal_asset_enqueue(): void {
 		Bootstrap::init();
 
-		$this->assertContains( 'template_redirect', $this->registered_hook_names() );
+		$this->assertContains( 'wp_enqueue_scripts', $this->registered_hook_names() );
+	}
+
+	public function test_init_registers_the_portal_endpoint_init_hook(): void {
+		Bootstrap::init();
+
+		$this->assertContains( 'init', $this->registered_hook_names() );
 	}
 
 	public function test_init_registers_the_subscriptions_menu_item_filter(): void {
@@ -94,6 +99,15 @@ final class BootstrapTest extends TestCase {
 		$this->assertNotContains( 'admin_menu', $this->registered_hook_names() );
 
 		unset( $GLOBALS['woocommerce_subscriptions_lite_test_is_admin'] );
+	}
+
+	public function test_init_registers_the_post_action_notice_hooks(): void {
+		Bootstrap::init();
+
+		$this->assertContains(
+			'woocommerce_subscriptions_lite_customer_portal_cancelled',
+			$this->registered_hook_names()
+		);
 	}
 
 	public function test_init_is_idempotent(): void {
