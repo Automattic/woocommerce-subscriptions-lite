@@ -63,7 +63,13 @@ if ( ! function_exists( 'add_action' ) ) {
 
 if ( ! function_exists( 'add_filter' ) ) {
 	/**
-	 * Record a filter registration.
+	 * Record a filter registration AND register the callback for dispatch.
+	 *
+	 * Recording into `woocommerce_subscriptions_lite_test_hooks` keeps the
+	 * hook-binding assertions in the unit suite working; the separate dispatch
+	 * registry lets {@see apply_filters()} actually run the callback, so a test
+	 * can substitute a filtered value (e.g. the portal data provider) the same
+	 * way production does.
 	 *
 	 * @param string   $hook          Hook name.
 	 * @param callable $callback      Callback.
@@ -79,6 +85,10 @@ if ( ! function_exists( 'add_filter' ) ) {
 			'priority'      => $priority,
 			'accepted_args' => $accepted_args,
 		];
+
+		// Register for dispatch by apply_filters() below.
+		$GLOBALS['woocommerce_subscriptions_lite_test_filters'][ $hook ][ $priority ][] = $callback;
+
 		return true;
 	}
 }
@@ -352,13 +362,29 @@ if ( ! function_exists( '_n' ) ) {
 
 if ( ! function_exists( 'apply_filters' ) ) {
 	/**
-	 * Pass-through filter stub: returns the value unchanged.
+	 * Filter stub: runs any callbacks {@see add_filter()} registered for the hook
+	 * (priority-ordered), else returns the value unchanged.
+	 *
+	 * Only the first argument is passed to callbacks, which is all the Lite
+	 * filters that tests exercise need (e.g. the portal data-provider filter).
 	 *
 	 * @param string $hook  Filter name.
 	 * @param mixed  $value The value being filtered.
+	 * @param mixed  ...$args Extra filter args (unused by the registered callbacks).
 	 * @return mixed
 	 */
-	function apply_filters( string $hook, $value = null ) {
+	function apply_filters( string $hook, $value = null, ...$args ) {
+		unset( $args );
+		if ( ! isset( $GLOBALS['woocommerce_subscriptions_lite_test_filters'][ $hook ] ) ) {
+			return $value;
+		}
+		$by_priority = $GLOBALS['woocommerce_subscriptions_lite_test_filters'][ $hook ];
+		ksort( $by_priority );
+		foreach ( $by_priority as $callbacks ) {
+			foreach ( $callbacks as $callback ) {
+				$value = $callback( $value );
+			}
+		}
 		return $value;
 	}
 }

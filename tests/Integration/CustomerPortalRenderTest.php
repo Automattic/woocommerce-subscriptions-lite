@@ -19,6 +19,7 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration;
 use PHPUnit\Framework\TestCase;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
 use Automattic\WooCommerce\SubscriptionsLite\CustomerPortal\Endpoints;
+use Automattic\WooCommerce\SubscriptionsLite\CustomerPortal\FixtureDataProvider;
 
 /**
  * @coversNothing
@@ -29,6 +30,23 @@ final class CustomerPortalRenderTest extends TestCase {
 		parent::setUp();
 		$GLOBALS['wc_subs_lite_current_user_id'] = 1;
 		$GLOBALS['wc_subs_lite_iapi_state']      = [];
+
+		// The production default provider is the engine-backed one, which reads
+		// from the database. This suite exercises the render wiring without a
+		// booted database, so it installs the fixture provider through the same
+		// public filter an overlay or demo would use.
+		$GLOBALS['woocommerce_subscriptions_lite_test_filters'] = [];
+		add_filter(
+			'woocommerce_subscriptions_lite_customer_portal_data_provider',
+			static function () {
+				return new FixtureDataProvider();
+			}
+		);
+	}
+
+	protected function tearDown(): void {
+		$GLOBALS['woocommerce_subscriptions_lite_test_filters'] = [];
+		parent::tearDown();
 	}
 
 	/**
