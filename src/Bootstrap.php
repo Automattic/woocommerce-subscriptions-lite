@@ -66,8 +66,13 @@ final class Bootstrap {
 		Portal\SubscriptionsEndpoint::register();
 		Portal\CancelHandler::register();
 
-		// Admin: plans editor, subscriptions list table, and settings tab.
-		// TODO: Admin module - register once the admin widening slices land.
+		// Admin (back office only): the WooCommerce > Subscriptions list + detail
+		// page and its Renew now / Cancel handlers, driven through the engine's
+		// public Api\Subscriptions facade. Front-end requests never need this.
+		if ( is_admin() ) {
+			Admin\PageController::register();
+			Admin\RowActionController::register();
+		}
 
 		// Email: contract and renewal notifications.
 		// TODO: Email module - register once the email widening slice lands.
