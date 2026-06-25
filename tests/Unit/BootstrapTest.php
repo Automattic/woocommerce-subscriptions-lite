@@ -71,11 +71,29 @@ final class BootstrapTest extends TestCase {
 		$this->assertContains( 'woocommerce_account_menu_items', $this->registered_hook_names() );
 	}
 
-	public function test_init_registers_the_admin_hooks(): void {
+	public function test_init_registers_the_admin_hooks_in_an_admin_context(): void {
 		Bootstrap::init();
 
 		$this->assertContains( 'admin_menu', $this->registered_hook_names() );
 		$this->assertContains( 'admin_enqueue_scripts', $this->registered_hook_names() );
+	}
+
+	public function test_init_registers_the_admin_action_handlers(): void {
+		Bootstrap::init();
+
+		$names = $this->registered_hook_names();
+		$this->assertContains( 'admin_post_wc_subscriptions_lite_renew_now', $names );
+		$this->assertContains( 'admin_post_wc_subscriptions_lite_cancel_admin', $names );
+	}
+
+	public function test_init_skips_the_admin_module_outside_an_admin_context(): void {
+		$GLOBALS['woocommerce_subscriptions_lite_test_is_admin'] = false;
+
+		Bootstrap::init();
+
+		$this->assertNotContains( 'admin_menu', $this->registered_hook_names() );
+
+		unset( $GLOBALS['woocommerce_subscriptions_lite_test_is_admin'] );
 	}
 
 	public function test_init_is_idempotent(): void {

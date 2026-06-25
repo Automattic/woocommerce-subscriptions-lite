@@ -83,6 +83,20 @@ if ( ! function_exists( 'did_action' ) ) {
 	}
 }
 
+if ( ! function_exists( 'is_admin' ) ) {
+	/**
+	 * Report an admin context so the bootstrap exercises its admin wiring.
+	 *
+	 * Overridable per test via the `woocommerce_subscriptions_lite_test_is_admin`
+	 * global for cases that need the non-admin branch.
+	 *
+	 * @return bool
+	 */
+	function is_admin(): bool {
+		return $GLOBALS['woocommerce_subscriptions_lite_test_is_admin'] ?? true;
+	}
+}
+
 if ( ! function_exists( '__' ) ) {
 	/**
 	 * Pass-through translation stub.
@@ -224,5 +238,29 @@ if ( ! function_exists( 'wp_die' ) ) {
 	function wp_die( string $message ): void {
 		// phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Test stub throws instead of rendering.
 		throw new RuntimeException( $message );
+	}
+}
+
+if ( ! function_exists( 'esc_html' ) ) {
+	/**
+	 * Pass-through escaping stub.
+	 *
+	 * @param string $text Text.
+	 * @return string
+	 */
+	function esc_html( string $text ): string {
+		return $text;
+	}
+}
+
+if ( ! function_exists( 'esc_attr' ) ) {
+	/**
+	 * Pass-through attribute-escaping stub.
+	 *
+	 * @param string $text Text.
+	 * @return string
+	 */
+	function esc_attr( string $text ): string {
+		return $text;
 	}
 }

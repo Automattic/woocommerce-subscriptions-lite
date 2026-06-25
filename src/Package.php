@@ -52,9 +52,16 @@ final class Package {
 	}
 
 	/**
-	 * Return the package root URL with a trailing slash.
+	 * Return the public URL to the package root (no trailing slash).
+	 *
+	 * Derived from this file's location so it resolves correctly wherever the
+	 * package is installed (plugin directory, or bundled inside a host). Used
+	 * for enqueuing the package's own assets with a cache-busting version.
+	 *
+	 * `plugins_url( '', __DIR__ )` returns the URL of `dirname( __DIR__ )`, the
+	 * package root (this file lives in `src/`).
 	 */
 	public static function get_url(): string {
-		return plugin_dir_url( self::get_path() . '/woocommerce-subscriptions-lite.php' );
+		return untrailingslashit( plugins_url( '', __DIR__ ) );
 	}
 }
