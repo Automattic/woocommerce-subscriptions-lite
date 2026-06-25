@@ -66,7 +66,3 @@ The storefront must look like the merchant's **theme**, not wp-admin:
 
 - Strings: `@wordpress/i18n` (`__`, `_x`, ...) in JS; `esc_html__()` etc. in PHP. Don't concatenate translated fragments.
 - `@wordpress/components` are accessible by default; server-rendered and storefront markup must meet the same bar (labels, roles, focus states, keyboard operability).
-
-## Known cleanup
-
-`src/css/admin.css` is a raw stylesheet with hardcoded hex values that re-derive WooCommerce's order-status badge palette. Refactor it to SCSS under the admin entry, replace the literals with `@wordpress/base-styles` tokens, and reuse WooCommerce's status-badge styles instead of redefining them.
