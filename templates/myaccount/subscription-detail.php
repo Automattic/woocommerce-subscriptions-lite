@@ -37,7 +37,7 @@ $has_actions = $detail['cancel_visible'] || $detail['hold_visible'] || $detail['
 	<dl class="subscription-detail-block">
 		<dt><?php esc_html_e( 'Status', 'woocommerce-subscriptions-lite' ); ?></dt>
 		<dd>
-			<span class="subscription-status-badge subscription-status-badge--<?php echo esc_attr( (string) $detail['status'] ); ?>">
+			<span class="wc-subs-lite-status-badge wc-subs-lite-status-badge--<?php echo esc_attr( (string) $detail['status'] ); ?>">
 				<?php echo esc_html( (string) $detail['status_label'] ); ?>
 			</span>
 		</dd>
@@ -194,7 +194,7 @@ $has_actions = $detail['cancel_visible'] || $detail['hold_visible'] || $detail['
 							<?php echo '' !== (string) $related_order['date'] ? esc_html( (string) $related_order['date'] ) : '&mdash;'; ?>
 						</td>
 						<td class="related-order-status" data-title="<?php esc_attr_e( 'Status', 'woocommerce-subscriptions-lite' ); ?>">
-							<span class="related-order-status-badge related-order-status-badge--<?php echo esc_attr( (string) $related_order['status'] ); ?>">
+							<span class="wc-subs-lite-status-badge wc-subs-lite-status-badge--<?php echo esc_attr( (string) $related_order['status'] ); ?>">
 								<?php echo esc_html( (string) $related_order['status_label'] ); ?>
 							</span>
 						</td>

@@ -71,7 +71,7 @@ final class CustomerPortalRenderTest extends TestCase {
 		// A status badge for every known status appears in the list.
 		foreach ( ContractStatus::all() as $status ) {
 			$this->assertStringContainsString(
-				'subscription-status-badge--' . $status,
+				'wc-subs-lite-status-badge--' . $status,
 				$html,
 				"The list shows a badge for the {$status} status."
 			);
@@ -90,7 +90,7 @@ final class CustomerPortalRenderTest extends TestCase {
 		);
 
 		$this->assertStringContainsString( 'subscription-detail-block', $html );
-		$this->assertStringContainsString( 'subscription-status-badge--active', $html );
+		$this->assertStringContainsString( 'wc-subs-lite-status-badge--active', $html );
 		// Active shows cancel + pause, not reactivate.
 		$this->assertStringContainsString( 'data-wp-on--click="actions.openCancelModal"', $html );
 		$this->assertStringContainsString( 'data-wp-on--click="actions.submitHold"', $html );
@@ -152,7 +152,7 @@ final class CustomerPortalRenderTest extends TestCase {
 			}
 		);
 
-		$this->assertStringContainsString( 'subscription-status-badge--pending-cancellation', $html );
+		$this->assertStringContainsString( 'wc-subs-lite-status-badge--pending-cancellation', $html );
 		$this->assertStringNotContainsString( 'actions.openCancelModal', $html );
 		$this->assertStringNotContainsString( 'actions.submitHold', $html );
 		$this->assertStringNotContainsString( 'actions.submitReactivate', $html );

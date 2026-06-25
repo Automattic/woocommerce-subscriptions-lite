@@ -70,12 +70,19 @@ final class Assets {
 		);
 		wp_enqueue_script_module( self::SCRIPT_MODULE_ID );
 
+		// The portal stylesheet is compiled by @wordpress/scripts from the SCSS
+		// the store entry imports, emitted as `style-customer-portal.css` (the
+		// `style-` prefix is wp-scripts' convention for an entry's stylesheet);
+		// the matching `style-customer-portal-rtl.css` is picked up via the
+		// `rtl` style data below. It is versioned off the same asset-meta hash as
+		// the module so a content change busts the cache.
 		wp_enqueue_style(
 			self::STYLE_HANDLE,
-			Package::get_url() . '/src/css/frontend/customer-portal.css',
+			$build_url . '/style-customer-portal.css',
 			[],
-			$version
+			$asset['version']
 		);
+		wp_style_add_data( self::STYLE_HANDLE, 'rtl', 'replace' );
 	}
 
 	/**

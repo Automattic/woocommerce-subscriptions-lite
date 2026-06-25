@@ -85,7 +85,7 @@ $columns = apply_filters(
 						</a>
 					</td>
 					<td class="subscription-status" data-title="<?php echo esc_attr( (string) $columns['status'] ); ?>">
-						<span class="subscription-status-badge subscription-status-badge--<?php echo esc_attr( (string) $row['status'] ); ?>">
+						<span class="wc-subs-lite-status-badge wc-subs-lite-status-badge--<?php echo esc_attr( (string) $row['status'] ); ?>">
 							<?php echo esc_html( (string) $row['status_label'] ); ?>
 						</span>
 					</td>
