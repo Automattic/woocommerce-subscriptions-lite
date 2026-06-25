@@ -26,7 +26,8 @@ final class BootstrapTest extends TestCase {
 
 	protected function setUp(): void {
 		parent::setUp();
-		$GLOBALS['woocommerce_subscriptions_lite_test_hooks'] = [];
+		$GLOBALS['woocommerce_subscriptions_lite_test_hooks']    = [];
+		$GLOBALS['woocommerce_subscriptions_lite_test_submenus'] = [];
 		$this->reset_initialized_flag();
 	}
 
@@ -68,6 +69,13 @@ final class BootstrapTest extends TestCase {
 		Bootstrap::init();
 
 		$this->assertContains( 'woocommerce_account_menu_items', $this->registered_hook_names() );
+	}
+
+	public function test_init_registers_the_admin_hooks(): void {
+		Bootstrap::init();
+
+		$this->assertContains( 'admin_menu', $this->registered_hook_names() );
+		$this->assertContains( 'admin_enqueue_scripts', $this->registered_hook_names() );
 	}
 
 	public function test_init_is_idempotent(): void {

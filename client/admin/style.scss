@@ -1,0 +1,56 @@
+@use "@wordpress/base-styles/breakpoints";
+@use "@wordpress/base-styles/colors";
+@use "@wordpress/base-styles/variables";
+
+.wc-subscriptions-lite-plans {
+	max-width: breakpoints.$break-wide;
+
+	.dataviews-view-table {
+		width: 100%;
+		border-collapse: collapse;
+
+		thead th:not(.dataviews-view-table__actions-column) {
+			text-align: left;
+		}
+
+		thead th.dataviews-view-table__actions-column {
+			text-align: right;
+			padding-right: variables.$grid-unit-30;
+		}
+
+		.dataviews-view-table__cell-content-wrapper {
+			text-align: left;
+			padding-left: variables.$grid-unit-15;
+		}
+
+		tbody .dataviews-view-table__row {
+			border-top: variables.$border-width solid colors.$gray-400;
+		}
+	}
+}
+
+.wc-subscriptions-lite-plans__header {
+	margin-bottom: variables.$grid-unit-15;
+}
+
+.wc-subscriptions-lite-plans__notice {
+	margin: 0 0 variables.$grid-unit-20;
+}
+
+.wc-subscriptions-lite-plans__loading {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	min-height: 220px;
+}
+
+.wc-subscriptions-lite-plans__modal .components-modal__content {
+	min-width: min(breakpoints.$break-medium, calc(100vw - variables.$grid-unit-60));
+}
+
+.wc-subscriptions-lite-plans__modal-footer {
+	display: flex;
+	gap: variables.$grid-unit-15;
+	justify-content: flex-end;
+	margin-top: variables.$grid-unit-30;
+}

@@ -67,7 +67,7 @@ final class Bootstrap {
 		Portal\CancelHandler::register();
 
 		// Admin: plans editor, subscriptions list table, and settings tab.
-		// TODO: Admin module - register once the admin widening slices land.
+		Admin\PlansPage::register();
 
 		// Email: contract and renewal notifications.
 		// TODO: Email module - register once the email widening slice lands.

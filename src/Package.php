@@ -50,4 +50,11 @@ final class Package {
 	public static function get_path(): string {
 		return dirname( __DIR__ );
 	}
+
+	/**
+	 * Return the package root URL with a trailing slash.
+	 */
+	public static function get_url(): string {
+		return plugin_dir_url( self::get_path() . '/woocommerce-subscriptions-lite.php' );
+	}
 }

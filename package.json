@@ -17,10 +17,16 @@
     "lint:php": "composer lint",
     "lint:php:fix": "composer lint:fix"
   },
-  "dependencies": {},
   "devDependencies": {
     "@woocommerce/dependency-extraction-webpack-plugin": "^4.0.0",
+    "@wordpress/api-fetch": "^7.49.0",
+    "@wordpress/base-styles": "^10.1.0",
+    "@wordpress/components": "^36.0.0",
+    "@wordpress/dataviews": "^17.0.0",
+    "@wordpress/element": "^8.1.0",
     "@wordpress/env": "^11.0.0",
+    "@wordpress/i18n": "^6.22.0",
+    "@wordpress/icons": "^15.0.0",
     "@wordpress/scripts": "^32.0.0"
   },
   "engines": {

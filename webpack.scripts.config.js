@@ -5,7 +5,7 @@ const path = require( 'path' );
 module.exports = {
 	...defaultConfig,
 	entry: {
-		admin: path.resolve( process.cwd(), 'src', 'js', 'admin', 'index.js' ),
+		admin: path.resolve( process.cwd(), 'client', 'admin', 'index.js' ),
 	},
 	output: {
 		...defaultConfig.output,
