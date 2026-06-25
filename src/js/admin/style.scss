@@ -107,13 +107,6 @@ $status-pending-cancellation-fg: #b45917;
 	width: 130px;
 }
 
-/* Detail page: action buttons sit above the details table. */
-.wc-subs-lite-detail-actions {
-	display: flex;
-	gap: $grid-unit-10;
-	margin: $grid-unit-20 0;
-}
-
 /* Detail page: cap the label column so values are not pushed far right. */
 .wc-subs-lite-subscription-detail .wc-subs-lite-detail-table th {
 	width: 200px;

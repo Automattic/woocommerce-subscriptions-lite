@@ -1,12 +1,14 @@
 <?php
 /**
- * DetailRenderer - the admin subscription detail page.
+ * DetailRenderer - the admin subscription detail screen.
  *
- * Server-rendered read view for `?page=...&action=view&id=N`. Reads the contract
- * and its billing-cycle history through the engine's public
- * {@see \Automattic\WooCommerce\SubscriptionsEngine\Api\Subscriptions} facade and
- * renders a details block plus a cycle-history table, with the same Renew now /
- * Cancel actions the list row offers (status-gated, sharing one set of handlers).
+ * A WordPress meta-box screen for `?page=...&action=view&id=N`, modelled on
+ * WooCommerce's order edit screen: each section (data, billing history, actions,
+ * customer) is a postbox registered on this page's screen id and rendered with
+ * `do_meta_boxes()`, so the screen inherits wp-admin's collapsible two-column
+ * layout and exposes an `add_meta_boxes_<screen>` extension point. Read + actions
+ * only - not an editable save form. All data comes through the engine's public
+ * {@see \Automattic\WooCommerce\SubscriptionsEngine\Api\Subscriptions} facade.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Admin
  */
@@ -16,47 +18,120 @@ declare( strict_types=1 );
 namespace Automattic\WooCommerce\SubscriptionsLite\Admin;
 
 use Throwable;
-use WP_User;
+use Automattic\WooCommerce\SubscriptionsLite\Admin\MetaBoxes\Actions;
+use Automattic\WooCommerce\SubscriptionsLite\Admin\MetaBoxes\BillingHistory;
+use Automattic\WooCommerce\SubscriptionsLite\Admin\MetaBoxes\Customer;
+use Automattic\WooCommerce\SubscriptionsLite\Admin\MetaBoxes\SubscriptionData;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Subscriptions;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Contract;
-use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Cycle;
 
 defined( 'ABSPATH' ) || exit;
 
 /**
- * Static renderer for the subscription detail page.
+ * Meta-box screen controller for the subscription detail page.
  */
 final class DetailRenderer {
 
 	/**
-	 * Render the detail page for a contract id.
+	 * Per-request cache of fetched contracts, so the load-time setup and the
+	 * render pass share a single facade read.
+	 *
+	 * @var array<int, Contract|null>
+	 */
+	private static $cache = [];
+
+	/**
+	 * Set up the screen at page-load time: register the section meta boxes on
+	 * this screen, add the columns screen option, and enqueue the postbox script.
+	 *
+	 * Called from {@see PageController} on `load-<hook>` for the detail view only,
+	 * before the screen is rendered, as meta boxes and screen options require.
+	 *
+	 * @param int $contract_id Contract id from the request (already absint'd).
+	 */
+	public static function setup( int $contract_id ): void {
+		$screen = get_current_screen();
+		if ( null === $screen ) {
+			return;
+		}
+		$screen_id = $screen->id;
+
+		add_screen_option(
+			'layout_columns',
+			[
+				'max'     => 2,
+				'default' => 2,
+			]
+		);
+
+		add_meta_box(
+			'wc-subs-lite-data',
+			__( 'Subscription data', 'woocommerce-subscriptions-lite' ),
+			[ SubscriptionData::class, 'output' ],
+			$screen_id,
+			'normal',
+			'high'
+		);
+		add_meta_box(
+			'wc-subs-lite-history',
+			__( 'Billing history', 'woocommerce-subscriptions-lite' ),
+			[ BillingHistory::class, 'output' ],
+			$screen_id,
+			'normal',
+			'default'
+		);
+		add_meta_box(
+			'wc-subs-lite-customer',
+			__( 'Customer', 'woocommerce-subscriptions-lite' ),
+			[ Customer::class, 'output' ],
+			$screen_id,
+			'side',
+			'default'
+		);
+
+		$contract = self::fetch( $contract_id );
+		if ( null !== $contract && Actions::has_actions( $contract ) ) {
+			add_meta_box(
+				'wc-subs-lite-actions',
+				__( 'Actions', 'woocommerce-subscriptions-lite' ),
+				[ Actions::class, 'output' ],
+				$screen_id,
+				'side',
+				'high'
+			);
+		}
+
+		wp_enqueue_script( 'postbox' );
+		wp_add_inline_script( 'postbox', 'jQuery(function(){postboxes.add_postbox_toggles(pagenow);});' );
+
+		/**
+		 * Fires after Lite registers its detail-screen meta boxes, so extensions
+		 * can add their own boxes to this screen. Mirrors WordPress core's
+		 * per-screen `add_meta_boxes_<screen>` hook.
+		 *
+		 * @param Contract|null $contract The contract being viewed, or null when it could not be loaded.
+		 */
+		// phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- mirrors WordPress core's per-screen add_meta_boxes_<screen> hook so extensions register boxes the standard way.
+		do_action( 'add_meta_boxes_' . $screen_id, $contract );
+	}
+
+	/**
+	 * Render the detail screen for a contract id.
 	 *
 	 * Capability is enforced upstream by {@see PageController::render_page()}.
 	 *
 	 * @param int $contract_id Contract id from the request (already absint'd).
 	 */
 	public static function render( int $contract_id ): void {
-		try {
-			$contract = $contract_id > 0 ? Subscriptions::get( $contract_id ) : null;
-		} catch ( Throwable $e ) {
-			// An engine failure degrades to the not-found view plus a log line,
-			// rather than a white screen.
-			wc_get_logger()->error(
-				'Admin subscription detail could not be loaded for #' . $contract_id . ': ' . $e->getMessage(),
-				[
-					'source'      => 'woocommerce-subscriptions-lite',
-					'contract_id' => $contract_id,
-					'exception'   => $e,
-				]
-			);
-			$contract = null;
-		}
-
+		$contract = self::fetch( $contract_id );
 		if ( null === $contract ) {
 			self::render_not_found( $contract_id );
 			return;
 		}
 
+		$screen    = get_current_screen();
+		$screen_id = null !== $screen ? $screen->id : '';
+		$columns   = ( null !== $screen && 1 === $screen->get_columns() ) ? 1 : 2;
 		?>
 		<div class="wrap wc-subs-lite-admin wc-subs-lite-subscription-detail">
 			<h1 class="wp-heading-inline">
@@ -73,9 +148,24 @@ final class DetailRenderer {
 
 			<?php PageController::render_flash_notice(); ?>
 
-			<?php self::render_actions( $contract ); ?>
-			<?php self::render_details( $contract ); ?>
-			<?php self::render_history( (int) $contract->get_id() ); ?>
+			<?php
+			wp_nonce_field( 'meta-box-order', 'meta-box-order-nonce', false );
+			wp_nonce_field( 'closedpostboxes', 'closedpostboxesnonce', false );
+			?>
+
+			<div id="poststuff">
+				<div id="post-body" class="metabox-holder columns-<?php echo (int) $columns; ?>">
+					<div id="postbox-container-1" class="postbox-container">
+						<?php do_meta_boxes( $screen_id, 'side', $contract ); ?>
+					</div>
+					<div id="postbox-container-2" class="postbox-container">
+						<?php
+						do_meta_boxes( $screen_id, 'normal', $contract );
+						do_meta_boxes( $screen_id, 'advanced', $contract );
+						?>
+					</div>
+				</div>
+			</div>
 		</div>
 		<?php
 	}
@@ -103,237 +193,34 @@ final class DetailRenderer {
 	}
 
 	/**
-	 * Status-gated action buttons (Renew now, Cancel), sharing the list row's
-	 * handlers and confirm contract.
-	 *
-	 * Rendered as POST forms (see {@see PageController::action_form()}) so the
-	 * nonce is not exposed in a URL; the buttons are styled as admin `.button`s.
-	 *
-	 * @param Contract $contract The contract.
-	 */
-	private static function render_actions( Contract $contract ): void {
-		$id     = (int) $contract->get_id();
-		$status = $contract->get_status();
-
-		$renewable   = StatusLabels::is_renewable( $status );
-		$cancellable = StatusLabels::is_cancellable( $status );
-
-		if ( ! $renewable && ! $cancellable ) {
-			return;
-		}
-
-		// action_form() returns markup whose dynamic parts are escaped at source.
-		$forms = '';
-
-		if ( $renewable ) {
-			$forms .= PageController::action_form(
-				PageController::ACTION_RENEW_NOW,
-				$id,
-				__( 'Renew now', 'woocommerce-subscriptions-lite' ),
-				'button'
-			);
-		}
-
-		if ( $cancellable ) {
-			$forms .= PageController::action_form(
-				PageController::ACTION_CANCEL,
-				$id,
-				__( 'Cancel', 'woocommerce-subscriptions-lite' ),
-				'button wc-subs-lite-cancel-link',
-				__( 'Cancel this subscription immediately? This cannot be undone.', 'woocommerce-subscriptions-lite' )
-			);
-		}
-
-		echo '<div class="wc-subs-lite-detail-actions">' . $forms . '</div>'; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- form markup escaped at source.
-	}
-
-	/**
-	 * Contract details as a form-table of label/value pairs.
-	 *
-	 * @param Contract $contract The contract.
-	 */
-	private static function render_details( Contract $contract ): void {
-		?>
-		<h2><?php esc_html_e( 'Details', 'woocommerce-subscriptions-lite' ); ?></h2>
-		<table class="form-table wc-subs-lite-detail-table">
-			<tbody>
-				<?php
-				foreach ( self::detail_rows( $contract ) as $row ) {
-					printf(
-						'<tr><th scope="row">%s</th><td>%s</td></tr>',
-						esc_html( $row['label'] ),
-						wp_kses_post( $row['value'] )
-					);
-				}
-				?>
-			</tbody>
-		</table>
-		<?php
-	}
-
-	/**
-	 * Compose the detail label/value rows.
-	 *
-	 * @param Contract $contract The contract.
-	 * @return array<int, array{label: string, value: string}>
-	 */
-	private static function detail_rows( Contract $contract ): array {
-		$origin_order_id = $contract->get_origin_order_id();
-		$origin_value    = null !== $origin_order_id
-			? sprintf( '<a href="%s">#%d</a>', esc_url( self::order_edit_url( $origin_order_id ) ), $origin_order_id )
-			: Formatting::PLACEHOLDER;
-
-		return [
-			[
-				'label' => __( 'Status', 'woocommerce-subscriptions-lite' ),
-				'value' => esc_html( StatusLabels::contract_label( $contract->get_status() ) ),
-			],
-			[
-				'label' => __( 'Customer', 'woocommerce-subscriptions-lite' ),
-				'value' => self::customer_value( $contract->get_customer_id() ),
-			],
-			[
-				'label' => __( 'Recurring total', 'woocommerce-subscriptions-lite' ),
-				'value' => Formatting::price( $contract->get_billing_total(), $contract->get_currency() ),
-			],
-			[
-				'label' => __( 'Start date', 'woocommerce-subscriptions-lite' ),
-				'value' => esc_html( Formatting::date( $contract->get_start_gmt() ) ),
-			],
-			[
-				'label' => __( 'Next payment', 'woocommerce-subscriptions-lite' ),
-				'value' => esc_html( Formatting::date( $contract->get_next_payment_gmt() ) ),
-			],
-			[
-				'label' => __( 'Last payment', 'woocommerce-subscriptions-lite' ),
-				'value' => esc_html( Formatting::date( $contract->get_last_payment_gmt() ) ),
-			],
-			[
-				'label' => __( 'End date', 'woocommerce-subscriptions-lite' ),
-				'value' => esc_html( Formatting::date( $contract->get_end_gmt() ) ),
-			],
-			[
-				'label' => __( 'Original order', 'woocommerce-subscriptions-lite' ),
-				'value' => $origin_value,
-			],
-		];
-	}
-
-	/**
-	 * Customer cell value - linked display name or a neutral placeholder.
-	 *
-	 * @param int $customer_id Customer id.
-	 */
-	private static function customer_value( int $customer_id ): string {
-		$user = $customer_id > 0 ? get_userdata( $customer_id ) : false;
-		if ( ! $user instanceof WP_User ) {
-			return esc_html__( '(no customer)', 'woocommerce-subscriptions-lite' );
-		}
-
-		return sprintf(
-			'<a href="%s">%s</a>',
-			esc_url( (string) get_edit_user_link( $customer_id ) ),
-			esc_html( $user->display_name )
-		);
-	}
-
-	/**
-	 * Billing-cycle history table, newest first.
+	 * Fetch a contract through the facade once per request, degrading a read
+	 * failure to null (logged) rather than a fatal.
 	 *
 	 * @param int $contract_id Contract id.
 	 */
-	private static function render_history( int $contract_id ): void {
-		$load_error = false;
+	private static function fetch( int $contract_id ): ?Contract {
+		if ( $contract_id <= 0 ) {
+			return null;
+		}
+		if ( array_key_exists( $contract_id, self::$cache ) ) {
+			return self::$cache[ $contract_id ];
+		}
+
 		try {
-			$cycles = Subscriptions::get_history( $contract_id, PageController::PER_PAGE );
+			$contract = Subscriptions::get( $contract_id );
 		} catch ( Throwable $e ) {
-			$load_error = true;
 			wc_get_logger()->error(
-				'Admin subscription history could not be loaded for #' . $contract_id . ': ' . $e->getMessage(),
+				'Admin subscription detail could not be loaded for #' . $contract_id . ': ' . $e->getMessage(),
 				[
 					'source'      => 'woocommerce-subscriptions-lite',
 					'contract_id' => $contract_id,
 					'exception'   => $e,
 				]
 			);
-			$cycles = [];
+			$contract = null;
 		}
 
-		?>
-		<h2><?php esc_html_e( 'Billing history', 'woocommerce-subscriptions-lite' ); ?></h2>
-		<?php if ( $load_error ) : ?>
-			<p><?php esc_html_e( 'Billing history could not be loaded. Check the WooCommerce logs for details.', 'woocommerce-subscriptions-lite' ); ?></p>
-			<?php return; ?>
-		<?php endif; ?>
-		<?php if ( empty( $cycles ) ) : ?>
-			<p><?php esc_html_e( 'No billing cycles yet.', 'woocommerce-subscriptions-lite' ); ?></p>
-			<?php return; ?>
-		<?php endif; ?>
-		<table class="wp-list-table widefat fixed striped wc-subs-lite-history-table">
-			<thead>
-				<tr>
-					<th scope="col"><?php esc_html_e( 'Sequence', 'woocommerce-subscriptions-lite' ); ?></th>
-					<th scope="col"><?php esc_html_e( 'Count', 'woocommerce-subscriptions-lite' ); ?></th>
-					<th scope="col"><?php esc_html_e( 'Status', 'woocommerce-subscriptions-lite' ); ?></th>
-					<th scope="col"><?php esc_html_e( 'Period', 'woocommerce-subscriptions-lite' ); ?></th>
-					<th scope="col"><?php esc_html_e( 'Expected total', 'woocommerce-subscriptions-lite' ); ?></th>
-					<th scope="col"><?php esc_html_e( 'Order', 'woocommerce-subscriptions-lite' ); ?></th>
-				</tr>
-			</thead>
-			<tbody>
-				<?php foreach ( $cycles as $cycle ) : ?>
-					<?php self::render_history_row( $cycle ); ?>
-				<?php endforeach; ?>
-			</tbody>
-		</table>
-		<?php
-	}
-
-	/**
-	 * Render one cycle-history row.
-	 *
-	 * @param Cycle $cycle One billing cycle.
-	 */
-	private static function render_history_row( Cycle $cycle ): void {
-		$count    = $cycle->get_count();
-		$order_id = $cycle->get_order_id();
-		$period   = sprintf(
-			/* translators: 1: period start date, 2: period end date. */
-			__( '%1$s to %2$s', 'woocommerce-subscriptions-lite' ),
-			Formatting::date( $cycle->get_starts_at_gmt() ),
-			Formatting::date( $cycle->get_ends_at_gmt() )
-		);
-
-		$order_value = null !== $order_id
-			? sprintf( '<a href="%s">#%d</a>', esc_url( self::order_edit_url( $order_id ) ), $order_id )
-			: Formatting::PLACEHOLDER;
-
-		?>
-		<tr>
-			<td><?php echo esc_html( (string) $cycle->get_sequence_no() ); ?></td>
-			<td><?php echo esc_html( null === $count ? Formatting::PLACEHOLDER : (string) $count ); ?></td>
-			<td><?php echo esc_html( StatusLabels::cycle_label( $cycle->get_status()->get_value() ) ); ?></td>
-			<td><?php echo esc_html( $period ); ?></td>
-			<td><?php echo Formatting::price( $cycle->get_expected_total(), $cycle->get_currency() ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- price markup escaped at source. ?></td>
-			<td><?php echo wp_kses_post( $order_value ); ?></td>
-		</tr>
-		<?php
-	}
-
-	/**
-	 * Admin edit URL for an order. Targets the HPOS `wc-orders` screen, which
-	 * the post-edit URL also resolves to on HPOS installs.
-	 *
-	 * @param int $order_id Order id.
-	 */
-	private static function order_edit_url( int $order_id ): string {
-		return add_query_arg(
-			[
-				'page'   => 'wc-orders',
-				'action' => 'edit',
-				'id'     => $order_id,
-			],
-			admin_url( 'admin.php' )
-		);
+		self::$cache[ $contract_id ] = $contract;
+		return $contract;
 	}
 }

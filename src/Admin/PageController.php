@@ -87,7 +87,29 @@ final class PageController {
 
 		if ( false !== $hook ) {
 			add_action( 'admin_print_styles-' . $hook, [ self::class, 'enqueue_assets' ] );
+			add_action( 'load-' . $hook, [ self::class, 'on_load' ] );
 		}
+	}
+
+	/**
+	 * Page-load setup. For the detail view, hands off to {@see DetailRenderer}
+	 * to register meta boxes, the columns screen option, and the postbox script
+	 * before the screen renders. The list view needs no load-time setup.
+	 */
+	public static function on_load(): void {
+		if ( ! current_user_can( self::CAPABILITY ) ) {
+			return;
+		}
+
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only view routing.
+		$view_action = isset( $_GET['action'] ) ? sanitize_key( wp_unslash( (string) $_GET['action'] ) ) : '';
+		if ( 'view' !== $view_action ) {
+			return;
+		}
+
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only view routing.
+		$id = isset( $_GET['id'] ) ? absint( wp_unslash( $_GET['id'] ) ) : 0;
+		DetailRenderer::setup( $id );
 	}
 
 	/**
