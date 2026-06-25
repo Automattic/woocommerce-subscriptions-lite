@@ -41,16 +41,64 @@ if ( ! class_exists( 'WC_Order' ) ) {
 		private $meta;
 
 		/**
+		 * Presentation props the customer portal reads (order_number, status,
+		 * date_created, formatted_order_total, view_order_url). Each falls back to a
+		 * sensible default derived from the id when unset.
+		 *
+		 * @var array<string, mixed>
+		 */
+		private $props;
+
+		/**
 		 * Construct a double.
 		 *
 		 * @param int                  $id    Order id.
 		 * @param array<int, mixed>    $items Line items.
 		 * @param array<string, mixed> $meta  Order meta.
+		 * @param array<string, mixed> $props Presentation prop overrides.
 		 */
-		public function __construct( int $id = 0, array $items = [], array $meta = [] ) {
+		public function __construct( int $id = 0, array $items = [], array $meta = [], array $props = [] ) {
 			$this->id    = $id;
 			$this->items = $items;
 			$this->meta  = $meta;
+			$this->props = $props;
+		}
+
+		/**
+		 * Customer-facing order number.
+		 */
+		public function get_order_number(): string {
+			return (string) ( $this->props['order_number'] ?? $this->id );
+		}
+
+		/**
+		 * Order status slug.
+		 */
+		public function get_status(): string {
+			return (string) ( $this->props['status'] ?? 'completed' );
+		}
+
+		/**
+		 * Order creation date, as a DateTimeInterface (mirrors WC_DateTime) or null.
+		 *
+		 * @return \DateTimeInterface|null
+		 */
+		public function get_date_created() {
+			return $this->props['date_created'] ?? null;
+		}
+
+		/**
+		 * Formatted order total markup.
+		 */
+		public function get_formatted_order_total(): string {
+			return (string) ( $this->props['formatted_order_total'] ?? '' );
+		}
+
+		/**
+		 * Customer-facing view-order URL.
+		 */
+		public function get_view_order_url(): string {
+			return (string) ( $this->props['view_order_url'] ?? '' );
 		}
 
 		/**

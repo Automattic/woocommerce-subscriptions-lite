@@ -459,3 +459,17 @@ if ( ! function_exists( 'wc_price' ) ) {
 		return $currency . number_format( $amount, 2 );
 	}
 }
+
+if ( ! function_exists( 'wc_get_order_status_name' ) ) {
+	/**
+	 * Minimal order-status-label stub: humanizes the slug (real WooCommerce maps
+	 * registered statuses to their display names; the portal only needs a label).
+	 *
+	 * @param string $status Order status slug (with or without the `wc-` prefix).
+	 * @return string
+	 */
+	function wc_get_order_status_name( string $status ): string {
+		$slug = 0 === strpos( $status, 'wc-' ) ? substr( $status, 3 ) : $status;
+		return ucfirst( str_replace( '-', ' ', $slug ) );
+	}
+}
