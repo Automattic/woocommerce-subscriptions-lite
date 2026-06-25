@@ -15,7 +15,7 @@ Public repo: reference only public sources (developer.woocommerce.com, wordpress
 
 The repo builds with [`@wordpress/scripts`](https://www.npmjs.com/package/@wordpress/scripts) (wp-scripts):
 
-- `npm run start` watches/rebuilds during development; `npm run build` produces the production build.
+- `npm run build` produces the production build; `npm run start` watches/rebuilds during development.
 - **Admin scripts:** `webpack.scripts.config.js`, entry `src/js/admin/index.js` -> `build/scripts/`. Import the entry's SCSS from its `index.js` (`import './style.scss';`) so wp-scripts compiles it, prefixes it, emits the RTL file, and writes the `*.asset.php` dependency manifest.
 - **Blocks / storefront:** `npm run build:blocks` (`wp-scripts build --experimental-modules`) builds standard blocks and Interactivity API modules. Storefront interactivity lives here (see below).
 - `@woocommerce/dependency-extraction-webpack-plugin` maps `@wordpress/*` / `@woocommerce/*` imports to WordPress's already-bundled scripts, so `import { Button } from '@wordpress/components'` adds a dependency rather than re-bundling React. Never vendor your own copy of these.
