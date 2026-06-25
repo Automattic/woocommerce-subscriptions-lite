@@ -40,3 +40,7 @@ The repository root serves as both the composer package (Packagist reads the roo
 - PHP floor: 7.4 (matches the engine package); no syntax newer than 7.4.
 - WordPress coding standards for plugin-facing code; tooling configuration pending.
 - Default branch `trunk`; work in feature branches, PRs into `trunk`.
+
+## Styling and UI
+
+All UI work follows [`docs/styling.md`](docs/styling.md). In short: author SCSS, never raw `.css`; use `@wordpress/base-styles` design tokens (no hardcoded colours/spacing); reuse WordPress-admin and WooCommerce styles instead of re-deriving them; and match the surface - wp-admin screens render native to wp-admin (`WP_List_Table` / `form-table`, or `@wordpress/components` for rich editors), while storefront screens are theme-native (server-rendered + the Interactivity API, **not** `@wordpress/components`). The build (`@wordpress/scripts`) compiles SCSS and handles prefixing + RTL; `npm run lint:css` and `npm run lint:js` must pass.
