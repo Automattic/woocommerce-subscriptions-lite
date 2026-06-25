@@ -23,7 +23,7 @@ final class PlansPage {
 
 	const MENU_SLUG = 'wc-subscriptions-lite-plans';
 
-	private const SCRIPT_HANDLE = 'wc-subscriptions-lite-admin';
+	private const SCRIPT_HANDLE = 'wc-subscriptions-lite-admin-react';
 
 	/**
 	 * Hook suffix returned by add_submenu_page().
@@ -66,7 +66,7 @@ final class PlansPage {
 			return;
 		}
 
-		$asset_path = Package::get_path() . '/build/scripts/admin.asset.php';
+		$asset_path = Package::get_path() . '/build/scripts/admin-react.asset.php';
 		$asset      = is_readable( $asset_path ) ? require $asset_path : [
 			'dependencies' => [],
 			'version'      => Package::get_version(),
@@ -74,7 +74,7 @@ final class PlansPage {
 
 		wp_enqueue_script(
 			self::SCRIPT_HANDLE,
-			Package::get_url() . 'build/scripts/admin.js',
+			Package::get_url() . '/build/scripts/admin-react.js',
 			$asset['dependencies'] ?? [],
 			$asset['version'] ?? Package::get_version(),
 			true
@@ -96,14 +96,15 @@ final class PlansPage {
 		wp_enqueue_style( 'wp-components' );
 		wp_enqueue_style( 'wp-dataviews' );
 
-		$style_path = Package::get_path() . '/build/scripts/style-admin.css';
+		$style_path = Package::get_path() . '/build/scripts/style-admin-react.css';
 		if ( is_readable( $style_path ) ) {
 			wp_enqueue_style(
 				self::SCRIPT_HANDLE,
-				Package::get_url() . 'build/scripts/style-admin.css',
-				[ 'wp-components' ],
+				Package::get_url() . '/build/scripts/style-admin-react.css',
+				[ 'wp-components', 'woocommerce_admin_styles' ],
 				$asset['version'] ?? Package::get_version()
 			);
+			wp_style_add_data( self::SCRIPT_HANDLE, 'rtl', 'replace' );
 		}
 	}
 
