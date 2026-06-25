@@ -55,6 +55,9 @@ final class StatusLabelsTest extends TestCase {
 	public function test_contract_badge_html_carries_the_status_modifier_and_label(): void {
 		$html = StatusLabels::contract_badge_html( ContractStatus::ACTIVE );
 
+		// Reuses WooCommerce's order-status badge chrome and layers the Lite
+		// status modifier on top.
+		$this->assertStringContainsString( 'order-status', $html );
 		$this->assertStringContainsString( 'wc-subs-lite-status-badge--active', $html );
 		$this->assertStringContainsString( 'Active', $html );
 	}

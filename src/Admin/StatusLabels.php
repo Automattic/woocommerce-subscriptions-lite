@@ -99,14 +99,18 @@ final class StatusLabels {
 	}
 
 	/**
-	 * Status badge markup for a contract status, mirroring WP-admin's `mark`
-	 * order-status badges so the screen reads as native.
+	 * Status badge markup for a contract status.
+	 *
+	 * Reuses WooCommerce's `mark.order-status` badge chrome (the flex/border/
+	 * radius/grey base and the `mark` highlight reset, loaded as a dependency of
+	 * the admin stylesheet) so the badge reads as native; the Lite stylesheet
+	 * only layers the subscription-status colours on top.
 	 *
 	 * @param string $status Contract status slug.
 	 */
 	public static function contract_badge_html( string $status ): string {
 		return sprintf(
-			'<mark class="wc-subs-lite-status-badge wc-subs-lite-status-badge--%1$s"><span>%2$s</span></mark>',
+			'<mark class="order-status wc-subs-lite-status-badge wc-subs-lite-status-badge--%1$s"><span>%2$s</span></mark>',
 			esc_attr( $status ),
 			esc_html( self::contract_label( $status ) )
 		);

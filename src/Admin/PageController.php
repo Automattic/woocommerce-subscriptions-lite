@@ -92,14 +92,30 @@ final class PageController {
 
 	/**
 	 * Enqueue the admin stylesheet. Fires only on this page's screen.
+	 *
+	 * Loads the compiled stylesheet from `build/` (authored as SCSS, built by
+	 * wp-scripts) and versions it from the generated asset manifest. The
+	 * `woocommerce_admin_styles` dependency pulls in WooCommerce's order-status
+	 * badge chrome - WooCommerce registers that handle on every admin page but
+	 * only enqueues it on its own screens, so naming it here loads it on this
+	 * screen too, with our overrides layered on top.
 	 */
 	public static function enqueue_assets(): void {
+		$asset_path = Package::get_path() . '/build/scripts/admin.asset.php';
+		$asset      = is_readable( $asset_path ) ? (array) include $asset_path : [];
+		$version    = isset( $asset['version'] ) ? (string) $asset['version'] : Package::get_version();
+
+		// @wordpress/scripts extracts the SCSS imported from the admin entry to
+		// `style-admin.css` (the `style-` prefix is its convention for an entry's
+		// stylesheet); the matching `style-admin-rtl.css` is picked up via the
+		// `rtl` style data below.
 		wp_enqueue_style(
 			'wc-subscriptions-lite-admin',
-			Package::get_url() . '/src/css/admin.css',
-			[],
-			Package::get_version()
+			Package::get_url() . '/build/scripts/style-admin.css',
+			[ 'woocommerce_admin_styles' ],
+			$version
 		);
+		wp_style_add_data( 'wc-subscriptions-lite-admin', 'rtl', 'replace' );
 	}
 
 	/**
