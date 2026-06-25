@@ -2,18 +2,18 @@
 /**
  * Unit tests for the engine-backed data provider.
  *
- * The engine read classes ({@see \Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\ContractRepository}
- * and {@see \Automattic\WooCommerce\SubscriptionsEngine\Integration\Read\ContractReadModel})
- * are final and reach into the database, so they cannot be mocked or run without
- * WordPress. The provider therefore reads through two narrow Lite ports
- * ({@see ContractReader}, {@see ContractPresenter}); these tests pass doubles for
- * those ports - the presenter double emits the documented engine read-model shape -
- * and assert:
+ * The engine's public {@see \Automattic\WooCommerce\SubscriptionsEngine\Api\Subscriptions}
+ * facade is static and reaches into the database, so it cannot be called without WordPress.
+ * The provider reads through one narrow Lite seam ({@see SubscriptionsReader}); these tests
+ * inject a double for it that returns engine value objects (a hydrated {@see Contract} and
+ * `WC_Order` doubles) and assert that the provider's own mapping:
  *
- *  - the provider returns a structure key-identical to {@see FixtureDataProvider}
- *    for an equivalent contract (so {@see ViewModel} renders identically), and
- *  - the asymmetric not-found rule (unknown id and foreign-owned both null), and
- *  - the call-order ownership gate that keeps related orders from leaking.
+ *  - returns a structure key-identical to {@see FixtureDataProvider} for an equivalent
+ *    contract (so {@see ViewModel} renders identically),
+ *  - sources the billing cadence off the contract's plan snapshot, degrading to an empty
+ *    period / zero interval when the snapshot is absent, and
+ *  - delegates the asymmetric not-found rule to the facade read (unknown id and
+ *    foreign-owned both resolve to null).
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Tests
  */
@@ -22,11 +22,14 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Unit\CustomerPortal;
 
+use DateTimeImmutable;
+use DateTimeZone;
+use WC_Order;
 use PHPUnit\Framework\TestCase;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Contract;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
-use Automattic\WooCommerce\SubscriptionsLite\CustomerPortal\Engine\ContractPresenter;
-use Automattic\WooCommerce\SubscriptionsLite\CustomerPortal\Engine\ContractReader;
+use Automattic\WooCommerce\SubscriptionsEngine\Core\ValueObject\PlanSnapshot;
+use Automattic\WooCommerce\SubscriptionsLite\CustomerPortal\Engine\SubscriptionsReader;
 use Automattic\WooCommerce\SubscriptionsLite\CustomerPortal\EngineDataProvider;
 use Automattic\WooCommerce\SubscriptionsLite\CustomerPortal\FixtureDataProvider;
 
@@ -36,13 +39,17 @@ use Automattic\WooCommerce\SubscriptionsLite\CustomerPortal\FixtureDataProvider;
 final class EngineDataProviderTest extends TestCase {
 
 	/**
-	 * Build a hydrated contract for the doubles to reduce.
+	 * Build a hydrated contract for the provider to map.
 	 *
-	 * @param int    $id     Contract id.
-	 * @param string $status Contract status.
+	 * Carries a plan snapshot with a monthly billing policy unless `$with_snapshot` is
+	 * false, so the cadence-from-snapshot path can be exercised both ways.
+	 *
+	 * @param int    $id            Contract id.
+	 * @param string $status        Contract status.
+	 * @param bool   $with_snapshot Whether to attach a plan snapshot.
 	 * @return Contract
 	 */
-	private function contract( int $id = 101, string $status = ContractStatus::ACTIVE ): Contract {
+	private function contract( int $id = 101, string $status = ContractStatus::ACTIVE, bool $with_snapshot = true ): Contract {
 		$contract = Contract::create(
 			[
 				'customer_id'          => 1,
@@ -67,101 +74,91 @@ final class EngineDataProviderTest extends TestCase {
 			]
 		);
 		$contract->set_id( $id );
+
+		if ( $with_snapshot ) {
+			$contract->set_plan_snapshot(
+				PlanSnapshot::from_array(
+					[
+						'selling_plan_id' => 7,
+						'billing_policy'  => [
+							'period'   => 'month',
+							'interval' => 1,
+						],
+					]
+				)
+			);
+		}
+
 		return $contract;
 	}
 
 	/**
-	 * A presenter double emitting the documented engine read-model shape.
+	 * A related-order double carrying the accessors the provider reduces.
 	 *
-	 * @return ContractPresenter
+	 * @return WC_Order
 	 */
-	private function presenter(): ContractPresenter {
-		return new class() implements ContractPresenter {
-
-			public function contract_to_row( Contract $contract ): array {
-				return [
-					'id'               => (int) $contract->get_id(),
-					'status'           => $contract->get_status(),
-					'billing_total'    => $contract->get_billing_total(),
-					'currency'         => $contract->get_currency(),
-					'billing_period'   => 'month',
-					'billing_interval' => 1,
-					'next_payment_gmt' => $contract->get_next_payment_gmt(),
-					'payment_method'   => [
-						'title'   => (string) $contract->get_payment_instrument()->get_title(),
-						'expires' => '',
-					],
-				];
-			}
-
-			public function contract_to_detail( Contract $contract ): array {
-				return array_merge(
-					$this->contract_to_row( $contract ),
-					[
-						'start_gmt'        => $contract->get_start_gmt(),
-						'end_gmt'          => $contract->get_end_gmt(),
-						'last_payment_gmt' => $contract->get_last_payment_gmt(),
-						'last_updated_gmt' => '2026-06-15 00:00:00',
-						'items'            => $contract->get_items(),
-					]
-				);
-			}
-
-			public function related_orders( int $contract_id ): array {
-				return [
-					[
-						'number'       => '1001',
-						'date_gmt'     => '2026-01-01 00:00:00',
-						'status'       => 'completed',
-						'status_label' => 'Completed',
-						'total'        => 'USD19.99',
-						'view_url'     => 'https://example.test/order/1001',
-					],
-				];
-			}
-		};
+	private function order(): WC_Order {
+		return new WC_Order(
+			1001,
+			[],
+			[],
+			[
+				'order_number'          => '1001',
+				'status'                => 'completed',
+				'date_created'          => new DateTimeImmutable( '2026-01-01 00:00:00', new DateTimeZone( 'UTC' ) ),
+				'formatted_order_total' => 'USD19.99',
+				'view_order_url'        => 'https://example.test/order/1001',
+			]
+		);
 	}
 
 	/**
-	 * A reader double over a fixed contract owned by customer 1.
+	 * A seam double over a fixed contract owned by customer 1, mirroring the facade's
+	 * ownership-checked read, plus a fixed related-order list.
 	 *
-	 * @param Contract $contract The contract to serve.
-	 * @return ContractReader
+	 * @param Contract          $contract The contract to serve.
+	 * @param array<int, mixed> $orders   Related orders to serve.
+	 * @return SubscriptionsReader
 	 */
-	private function reader( Contract $contract ): ContractReader {
-		return new class( $contract ) implements ContractReader {
+	private function reader( Contract $contract, array $orders = [] ): SubscriptionsReader {
+		return new class( $contract, $orders ) implements SubscriptionsReader {
 
 			/** @var Contract */
 			private $contract;
 
-			public function __construct( Contract $contract ) {
+			/** @var array<int, mixed> */
+			private $orders;
+
+			public function __construct( Contract $contract, array $orders ) {
 				$this->contract = $contract;
+				$this->orders   = $orders;
 			}
 
-			public function find_by_customer_id( int $customer_id ): array {
+			public function list_for_customer( int $customer_id ): array {
 				return 1 === $customer_id ? [ $this->contract ] : [];
 			}
 
-			public function is_owned_by( int $contract_id, int $customer_id ): bool {
-				return (int) $this->contract->get_id() === $contract_id && 1 === $customer_id;
+			public function get_for_customer( int $contract_id, int $customer_id ): ?Contract {
+				// Mirror the facade: served only when owned by the requesting customer.
+				return ( (int) $this->contract->get_id() === $contract_id && 1 === $customer_id ) ? $this->contract : null;
 			}
 
-			public function find( int $contract_id ): ?Contract {
-				return (int) $this->contract->get_id() === $contract_id ? $this->contract : null;
+			public function get_related_orders( int $contract_id ): array {
+				return $this->orders;
 			}
 		};
 	}
 
 	public function test_list_row_shape_matches_the_fixture_row_shape(): void {
-		$provider = new EngineDataProvider( $this->reader( $this->contract() ), $this->presenter() );
+		$provider = new EngineDataProvider( $this->reader( $this->contract() ) );
 
 		$engine_rows  = $provider->get_contracts_for_customer( 1 );
 		$fixture_rows = ( new FixtureDataProvider() )->get_contracts_for_customer( 1 );
 
 		$this->assertNotEmpty( $engine_rows );
 
-		// The view-model reads a fixed set of row fields off each contract; assert
-		// the engine row carries every one of them with the same type.
+		// The view-model reads a fixed set of row fields off each contract; assert the
+		// engine row carries every one of them with the same type.
 		foreach ( [ 'id', 'status', 'billing_total', 'currency', 'billing_period', 'billing_interval', 'next_payment_gmt', 'payment_method' ] as $key ) {
 			$this->assertArrayHasKey( $key, $engine_rows[0], "Engine row carries the {$key} field." );
 			$this->assertArrayHasKey( $key, $fixture_rows[0], "Fixture row carries the {$key} field." );
@@ -181,7 +178,7 @@ final class EngineDataProviderTest extends TestCase {
 	}
 
 	public function test_detail_shape_matches_the_fixture_detail_shape(): void {
-		$provider = new EngineDataProvider( $this->reader( $this->contract() ), $this->presenter() );
+		$provider = new EngineDataProvider( $this->reader( $this->contract() ) );
 
 		$engine_detail  = $provider->get_contract( 101, 1 );
 		$fixture_detail = ( new FixtureDataProvider() )->get_contract( 101, 1 );
@@ -202,7 +199,7 @@ final class EngineDataProviderTest extends TestCase {
 	}
 
 	public function test_related_orders_shape_matches_the_fixture_order_shape(): void {
-		$provider = new EngineDataProvider( $this->reader( $this->contract() ), $this->presenter() );
+		$provider = new EngineDataProvider( $this->reader( $this->contract(), [ $this->order() ] ) );
 
 		$engine_orders  = $provider->get_related_orders( 101 );
 		$fixture_orders = ( new FixtureDataProvider() )->get_related_orders( 101 );
@@ -217,37 +214,35 @@ final class EngineDataProviderTest extends TestCase {
 		);
 	}
 
-	public function test_get_contract_returns_null_for_a_foreign_owned_contract(): void {
-		$provider = new EngineDataProvider( $this->reader( $this->contract() ), $this->presenter() );
+	public function test_cadence_is_sourced_from_the_plan_snapshot(): void {
+		$provider = new EngineDataProvider( $this->reader( $this->contract() ) );
 
-		// Owned by customer 1, requested as customer 2: the ownership guard fails,
-		// so the request is indistinguishable from not-found.
+		$row = $provider->get_contracts_for_customer( 1 )[0];
+
+		$this->assertSame( 'month', $row['billing_period'], 'Period is read off the plan snapshot.' );
+		$this->assertSame( 1, $row['billing_interval'], 'Interval is read off the plan snapshot.' );
+	}
+
+	public function test_cadence_degrades_to_empty_when_the_snapshot_is_absent(): void {
+		$provider = new EngineDataProvider( $this->reader( $this->contract( 101, ContractStatus::ACTIVE, false ) ) );
+
+		$row = $provider->get_contracts_for_customer( 1 )[0];
+
+		$this->assertSame( '', $row['billing_period'], 'A missing snapshot degrades to an empty period.' );
+		$this->assertSame( 0, $row['billing_interval'], 'A missing snapshot degrades to a zero interval.' );
+	}
+
+	public function test_get_contract_returns_null_for_a_foreign_owned_contract(): void {
+		$provider = new EngineDataProvider( $this->reader( $this->contract() ) );
+
+		// Owned by customer 1, requested as customer 2: the facade's ownership-checked read
+		// returns null, indistinguishable from not-found.
 		$this->assertNull( $provider->get_contract( 101, 2 ) );
 	}
 
 	public function test_get_contract_returns_null_for_an_unknown_id(): void {
-		$provider = new EngineDataProvider( $this->reader( $this->contract() ), $this->presenter() );
+		$provider = new EngineDataProvider( $this->reader( $this->contract() ) );
 
 		$this->assertNull( $provider->get_contract( 999999, 1 ) );
-	}
-
-	public function test_get_contract_returns_null_when_an_owned_row_vanishes(): void {
-		// A reader that confirms ownership but then cannot find the row (a delete
-		// racing the guard) must still resolve to null, never a malformed detail.
-		$reader = new class() implements ContractReader {
-			public function find_by_customer_id( int $customer_id ): array {
-				return [];
-			}
-			public function is_owned_by( int $contract_id, int $customer_id ): bool {
-				return true;
-			}
-			public function find( int $contract_id ): ?Contract {
-				return null;
-			}
-		};
-
-		$provider = new EngineDataProvider( $reader, $this->presenter() );
-
-		$this->assertNull( $provider->get_contract( 101, 1 ) );
 	}
 }
