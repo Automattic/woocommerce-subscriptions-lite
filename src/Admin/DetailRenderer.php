@@ -89,17 +89,16 @@ final class DetailRenderer {
 			'default'
 		);
 
-		$contract = self::fetch( $contract_id );
-		if ( null !== $contract && Actions::has_actions( $contract ) ) {
-			add_meta_box(
-				'wc-subs-lite-actions',
-				__( 'Actions', 'woocommerce-subscriptions-lite' ),
-				[ Actions::class, 'output' ],
-				$screen_id,
-				'side',
-				'high'
-			);
-		}
+		// Always registered: it carries the back-to-list link as well as the status-gated
+		// Renew now / Cancel controls, so it is present even for a terminal contract.
+		add_meta_box(
+			'wc-subs-lite-actions',
+			__( 'Actions', 'woocommerce-subscriptions-lite' ),
+			[ Actions::class, 'output' ],
+			$screen_id,
+			'side',
+			'high'
+		);
 
 		wp_enqueue_script( 'postbox' );
 		wp_add_inline_script( 'postbox', 'jQuery(function(){postboxes.add_postbox_toggles(pagenow);});' );
@@ -112,7 +111,7 @@ final class DetailRenderer {
 		 * @param Contract|null $contract The contract being viewed, or null when it could not be loaded.
 		 */
 		// phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- mirrors WordPress core's per-screen add_meta_boxes_<screen> hook so extensions register boxes the standard way.
-		do_action( 'add_meta_boxes_' . $screen_id, $contract );
+		do_action( 'add_meta_boxes_' . $screen_id, self::fetch( $contract_id ) );
 	}
 
 	/**
@@ -139,11 +138,7 @@ final class DetailRenderer {
 				/* translators: %d: subscription number. */
 				printf( esc_html__( 'Subscription #%d', 'woocommerce-subscriptions-lite' ), (int) $contract->get_id() );
 				?>
-				<?php echo StatusLabels::contract_badge_html( $contract->get_status() ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- badge markup escaped at source. ?>
 			</h1>
-			<a href="<?php echo esc_url( PageController::page_url() ); ?>" class="page-title-action">
-				<?php esc_html_e( 'Back to subscriptions', 'woocommerce-subscriptions-lite' ); ?>
-			</a>
 			<hr class="wp-header-end" />
 
 			<?php PageController::render_flash_notice(); ?>

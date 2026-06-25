@@ -74,6 +74,10 @@ final class SubscriptionData {
 				'value' => Formatting::price( $contract->get_billing_total(), $contract->get_currency() ),
 			],
 			[
+				'label' => __( 'Payment method', 'woocommerce-subscriptions-lite' ),
+				'value' => esc_html( self::payment_method_label( $contract ) ),
+			],
+			[
 				'label' => __( 'Start date', 'woocommerce-subscriptions-lite' ),
 				'value' => esc_html( Formatting::date( $contract->get_start_gmt() ) ),
 			],
@@ -94,5 +98,16 @@ final class SubscriptionData {
 				'value' => $origin_value,
 			],
 		];
+	}
+
+	/**
+	 * Merchant-facing payment method label: the instrument's stored title, falling back to its
+	 * gateway id, then a placeholder when neither is known.
+	 *
+	 * @param Contract $contract The contract.
+	 */
+	private static function payment_method_label( Contract $contract ): string {
+		$instrument = $contract->get_payment_instrument();
+		return $instrument->get_title() ?? $instrument->get_gateway() ?? Formatting::PLACEHOLDER;
 	}
 }

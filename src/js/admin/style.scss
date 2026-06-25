@@ -116,3 +116,23 @@ $status-pending-cancellation-fg: #b45917;
 .wc-subs-lite-history-table {
 	margin-top: $grid-unit-10;
 }
+
+/* Detail page Actions box: links stacked one per line, like the list row. */
+.wc-subs-lite-detail-actions {
+	margin: 0;
+	padding: 0;
+	list-style: none;
+
+	li {
+		margin-bottom: $grid-unit-10;
+
+		&:last-child {
+			margin-bottom: 0;
+		}
+	}
+
+	a,
+	.button-link {
+		text-decoration: none;
+	}
+}

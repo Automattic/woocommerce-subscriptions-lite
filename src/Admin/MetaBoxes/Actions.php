@@ -1,11 +1,11 @@
 <?php
 /**
- * Actions meta box - Renew now / Cancel.
+ * Actions meta box - Renew now / Cancel / Back.
  *
- * The side-column actions box, mirroring WooCommerce's "Order actions" box. Each
- * action is a self-contained POST form (see {@see PageController::action_form()})
- * so no nonce rides in a URL; the controls are status-gated to match what the
- * facade will accept.
+ * The side-column actions box. The status-gated state changes (Renew now, Cancel) are
+ * self-contained POST forms (see {@see PageController::action_form()}) so no nonce rides
+ * in a URL, and the back-to-list navigation lives here rather than the page title. Every
+ * control renders as a link, stacked one per line.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Admin\MetaBoxes
  */
@@ -26,17 +26,6 @@ defined( 'ABSPATH' ) || exit;
 final class Actions {
 
 	/**
-	 * Whether the contract has any action available, so the screen can skip
-	 * registering an empty box.
-	 *
-	 * @param Contract $contract The contract.
-	 */
-	public static function has_actions( Contract $contract ): bool {
-		$status = $contract->get_status();
-		return StatusLabels::is_renewable( $status ) || StatusLabels::is_cancellable( $status );
-	}
-
-	/**
 	 * Render the box body.
 	 *
 	 * @param Contract $contract The contract being viewed.
@@ -44,28 +33,40 @@ final class Actions {
 	public static function output( Contract $contract ): void {
 		$id     = (int) $contract->get_id();
 		$status = $contract->get_status();
-		$items  = '';
+		// Back-to-list navigation lives in this box, not in the page title.
+		$items = [
+			sprintf(
+				'<a href="%s">%s</a>',
+				esc_url( PageController::page_url() ),
+				esc_html__( 'Back to subscriptions', 'woocommerce-subscriptions-lite' )
+			),
+		];
 
 		if ( StatusLabels::is_renewable( $status ) ) {
-			$items .= '<li class="wide">' . PageController::action_form(
+			$items[] = PageController::action_form(
 				PageController::ACTION_RENEW_NOW,
 				$id,
-				__( 'Renew now', 'woocommerce-subscriptions-lite' ),
-				'button'
-			) . '</li>';
+				__( 'Renew now', 'woocommerce-subscriptions-lite' )
+			);
 		}
 
 		if ( StatusLabels::is_cancellable( $status ) ) {
-			$items .= '<li class="wide">' . PageController::action_form(
+			$items[] = PageController::action_form(
 				PageController::ACTION_CANCEL,
 				$id,
 				__( 'Cancel', 'woocommerce-subscriptions-lite' ),
-				'button wc-subs-lite-cancel-link',
+				'button-link wc-subs-lite-cancel-link',
 				__( 'Cancel this subscription immediately? This cannot be undone.', 'woocommerce-subscriptions-lite' )
-			) . '</li>';
+			);
 		}
 
-		// action_form() escapes its dynamic parts at source.
-		echo '<ul class="order_actions submitbox">' . $items . '</ul>'; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- action_form markup escaped at source.
+		$list = '';
+
+		foreach ( $items as $item ) {
+			$list .= '<li>' . $item . '</li>';
+		}
+
+		// action_form() and the back link escape their dynamic parts at source.
+		echo '<ul class="wc-subs-lite-detail-actions">' . $list . '</ul>'; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- action_form + escaped link markup.
 	}
 }
