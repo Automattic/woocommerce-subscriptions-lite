@@ -26,7 +26,8 @@ final class BootstrapTest extends TestCase {
 
 	protected function setUp(): void {
 		parent::setUp();
-		$GLOBALS['woocommerce_subscriptions_lite_test_hooks'] = [];
+		$GLOBALS['woocommerce_subscriptions_lite_test_hooks']    = [];
+		$GLOBALS['woocommerce_subscriptions_lite_test_submenus'] = [];
 		$this->reset_initialized_flag();
 	}
 
@@ -70,10 +71,11 @@ final class BootstrapTest extends TestCase {
 		$this->assertContains( 'woocommerce_account_menu_items', $this->registered_hook_names() );
 	}
 
-	public function test_init_registers_the_admin_menu_in_an_admin_context(): void {
+	public function test_init_registers_the_admin_hooks_in_an_admin_context(): void {
 		Bootstrap::init();
 
 		$this->assertContains( 'admin_menu', $this->registered_hook_names() );
+		$this->assertContains( 'admin_enqueue_scripts', $this->registered_hook_names() );
 	}
 
 	public function test_init_registers_the_admin_action_handlers(): void {

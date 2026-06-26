@@ -28,5 +28,6 @@ if ( is_readable( $wc_subs_lite_autoload ) ) {
 // before the function stubs because `wc_get_logger()` returns it.
 require_once __DIR__ . '/Stubs/class-woocommerce-subscriptions-lite-test-logger.php';
 require_once __DIR__ . '/Stubs/wp-function-stubs.php';
+require_once __DIR__ . '/Stubs/class-wp-rest-controller.php';
 require_once __DIR__ . '/Stubs/class-wc-order.php';
 require_once __DIR__ . '/Stubs/class-wc-order-item-product.php';

@@ -123,6 +123,182 @@ if ( ! function_exists( 'esc_html__' ) ) {
 	}
 }
 
+if ( ! function_exists( 'plugin_dir_url' ) ) {
+	/**
+	 * Return a stable fake plugin URL.
+	 *
+	 * @param string $file File path.
+	 * @return string
+	 */
+	function plugin_dir_url( string $file ): string {
+		return 'https://example.test/wp-content/plugins/woocommerce-subscriptions-lite/';
+	}
+}
+
+if ( ! function_exists( 'plugins_url' ) ) {
+	/**
+	 * Return a stable fake plugin URL.
+	 *
+	 * @param string $path   Optional path.
+	 * @param string $plugin Plugin file or directory.
+	 * @return string
+	 */
+	function plugins_url( string $path = '', string $plugin = '' ): string {
+		$base = 'https://example.test/wp-content/plugins/woocommerce-subscriptions-lite';
+		$path = ltrim( $path, '/' );
+
+		return '' === $path ? $base : $base . '/' . $path;
+	}
+}
+
+if ( ! function_exists( 'untrailingslashit' ) ) {
+	/**
+	 * Remove trailing slashes.
+	 *
+	 * @param string $value Value.
+	 * @return string
+	 */
+	function untrailingslashit( string $value ): string {
+		return rtrim( $value, '/\\' );
+	}
+}
+
+if ( ! function_exists( 'add_submenu_page' ) ) {
+	/**
+	 * Record a submenu page registration.
+	 *
+	 * @param string   $parent_slug Parent slug.
+	 * @param string   $page_title  Page title.
+	 * @param string   $menu_title  Menu title.
+	 * @param string   $capability  Capability.
+	 * @param string   $menu_slug   Menu slug.
+	 * @param callable $callback    Render callback.
+	 * @return string Hook suffix.
+	 */
+	function add_submenu_page( string $parent_slug, string $page_title, string $menu_title, string $capability, string $menu_slug, $callback ): string {
+		$GLOBALS['woocommerce_subscriptions_lite_test_submenus'][] = [
+			'parent_slug' => $parent_slug,
+			'page_title'  => $page_title,
+			'menu_title'  => $menu_title,
+			'capability'  => $capability,
+			'menu_slug'   => $menu_slug,
+			'callback'    => $callback,
+		];
+		return 'woocommerce_page_' . $menu_slug;
+	}
+}
+
+if ( ! function_exists( 'wp_enqueue_script' ) ) {
+	/**
+	 * Record a script enqueue.
+	 *
+	 * @param string            $handle    Handle.
+	 * @param string            $src       Source.
+	 * @param array<int,string> $deps      Dependencies.
+	 * @param string            $ver       Version.
+	 * @param bool              $in_footer Whether in footer.
+	 */
+	function wp_enqueue_script( string $handle, string $src = '', array $deps = [], string $ver = '', bool $in_footer = false ): void {
+		$GLOBALS['woocommerce_subscriptions_lite_test_enqueued_scripts'][ $handle ] = compact( 'src', 'deps', 'ver', 'in_footer' );
+	}
+}
+
+if ( ! function_exists( 'wp_set_script_translations' ) ) {
+	/**
+	 * Record script translations.
+	 *
+	 * @param string $handle Script handle.
+	 * @param string $domain Text domain.
+	 * @param string $path   Language directory path.
+	 * @return bool
+	 */
+	function wp_set_script_translations( string $handle, string $domain = 'default', string $path = '' ): bool {
+		$GLOBALS['woocommerce_subscriptions_lite_test_script_translations'][ $handle ] = compact( 'domain', 'path' );
+		return true;
+	}
+}
+
+if ( ! function_exists( 'wp_add_inline_script' ) ) {
+	/**
+	 * Record inline script.
+	 *
+	 * @param string $handle   Handle.
+	 * @param string $data     Inline data.
+	 * @param string $position Position.
+	 */
+	function wp_add_inline_script( string $handle, string $data, string $position = 'after' ): void {
+		$GLOBALS['woocommerce_subscriptions_lite_test_inline_scripts'][ $handle ][] = compact( 'data', 'position' );
+	}
+}
+
+if ( ! function_exists( 'wp_enqueue_style' ) ) {
+	/**
+	 * Record a style enqueue.
+	 *
+	 * @param string            $handle Handle.
+	 * @param string            $src    Source.
+	 * @param array<int,string> $deps   Dependencies.
+	 * @param string            $ver    Version.
+	 */
+	function wp_enqueue_style( string $handle, string $src = '', array $deps = [], string $ver = '' ): void {
+		$GLOBALS['woocommerce_subscriptions_lite_test_enqueued_styles'][ $handle ] = compact( 'src', 'deps', 'ver' );
+	}
+}
+
+if ( ! function_exists( 'wp_style_add_data' ) ) {
+	/**
+	 * Record style metadata.
+	 *
+	 * @param string $handle Style handle.
+	 * @param string $key    Metadata key.
+	 * @param mixed  $value  Metadata value.
+	 * @return bool
+	 */
+	function wp_style_add_data( string $handle, string $key, $value ): bool {
+		$GLOBALS['woocommerce_subscriptions_lite_test_style_data'][ $handle ][ $key ] = $value;
+		return true;
+	}
+}
+
+if ( ! function_exists( 'wp_json_encode' ) ) {
+	/**
+	 * JSON encode wrapper.
+	 *
+	 * @param mixed $value Value.
+	 * @return string|false
+	 */
+	function wp_json_encode( $value ) {
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.json_encode_json_encode -- This stub defines wp_json_encode().
+		return json_encode( $value );
+	}
+}
+
+if ( ! function_exists( 'current_user_can' ) ) {
+	/**
+	 * Capability check stub.
+	 *
+	 * @param string $capability Capability.
+	 * @return bool
+	 */
+	function current_user_can( string $capability ): bool {
+		return ! empty( $GLOBALS['woocommerce_subscriptions_lite_test_can_manage_woocommerce'] )
+			&& 'manage_woocommerce' === $capability;
+	}
+}
+
+if ( ! function_exists( 'wp_die' ) ) {
+	/**
+	 * Throw instead of exiting.
+	 *
+	 * @param string $message Message.
+	 * @throws RuntimeException Always.
+	 */
+	function wp_die( string $message ): void {
+		// phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Test stub throws instead of rendering.
+		throw new RuntimeException( $message );
+	}
+}
+
 if ( ! function_exists( 'esc_html' ) ) {
 	/**
 	 * Pass-through escaping stub.

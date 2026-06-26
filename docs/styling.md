@@ -16,7 +16,8 @@ Public repo: reference only public sources (developer.woocommerce.com, wordpress
 The repo builds with [`@wordpress/scripts`](https://www.npmjs.com/package/@wordpress/scripts) (wp-scripts):
 
 - `npm run build` produces the production build; `npm run start` watches/rebuilds during development.
-- **Admin scripts:** `webpack.scripts.config.js`, entry `src/js/admin/index.js` -> `build/scripts/`. Import the entry's SCSS from its `index.js` (`import './style.scss';`) so wp-scripts compiles it, prefixes it, emits the RTL file, and writes the `*.asset.php` dependency manifest.
+- **Admin PHP scripts:** `webpack.scripts.config.js`, entry `client/admin-php/index.js` -> `build/scripts/admin-php.js`. Import the entry's SCSS from its `index.js` (`import './style.scss';`) so wp-scripts compiles it, prefixes it, emits the RTL file, and writes the `admin-php.asset.php` dependency manifest.
+- **Admin React scripts:** `webpack.scripts.config.js`, entry `client/admin-react/index.js` -> `build/scripts/admin-react.js`. Import the entry's SCSS from its `index.js` (`import './style.scss';`) so wp-scripts compiles it, prefixes it, emits the RTL file, and writes the `admin-react.asset.php` dependency manifest.
 - **Blocks / storefront:** `npm run build:blocks` (`wp-scripts build --experimental-modules`) builds standard blocks and Interactivity API modules. Storefront interactivity lives here (see below).
 - `@woocommerce/dependency-extraction-webpack-plugin` maps `@wordpress/*` / `@woocommerce/*` imports to WordPress's already-bundled scripts, so `import { Button } from '@wordpress/components'` adds a dependency rather than re-bundling React. Never vendor your own copy of these.
 
@@ -58,7 +59,7 @@ The storefront must look like the merchant's **theme**, not wp-admin:
 
 ## File layout
 
-- SCSS lives beside the JS / block entry that imports it (`src/js/admin/style.scss`, `src/blocks/<block>/style.scss`), not in a standalone `src/css/` folder.
+- SCSS lives beside the JS / block entry that imports it (`client/admin-php/style.scss`, `client/admin-react/style.scss`, `src/blocks/<block>/style.scss`), not in a standalone `src/css/` folder.
 - Blocks: one folder per block with `block.json` + `index.js` + `style.scss` (front-end) / `editor.scss` (editor) as needed.
 - Compiled output goes to `build/`; enqueue it from PHP via the generated `*.asset.php`.
 

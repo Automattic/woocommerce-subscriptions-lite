@@ -123,21 +123,21 @@ final class PageController {
 	 * screen too, with our overrides layered on top.
 	 */
 	public static function enqueue_assets(): void {
-		$asset_path = Package::get_path() . '/build/scripts/admin.asset.php';
+		$asset_path = Package::get_path() . '/build/scripts/admin-php.asset.php';
 		$asset      = is_readable( $asset_path ) ? (array) include $asset_path : [];
 		$version    = isset( $asset['version'] ) ? (string) $asset['version'] : Package::get_version();
 
 		// @wordpress/scripts extracts the SCSS imported from the admin entry to
-		// `style-admin.css` (the `style-` prefix is its convention for an entry's
-		// stylesheet); the matching `style-admin-rtl.css` is picked up via the
+		// `style-admin-php.css` (the `style-` prefix is its convention for an entry's
+		// stylesheet); the matching `style-admin-php-rtl.css` is picked up via the
 		// `rtl` style data below.
 		wp_enqueue_style(
-			'wc-subscriptions-lite-admin',
-			Package::get_url() . '/build/scripts/style-admin.css',
+			'wc-subscriptions-lite-admin-php',
+			Package::get_url() . '/build/scripts/style-admin-php.css',
 			[ 'woocommerce_admin_styles' ],
 			$version
 		);
-		wp_style_add_data( 'wc-subscriptions-lite-admin', 'rtl', 'replace' );
+		wp_style_add_data( 'wc-subscriptions-lite-admin-php', 'rtl', 'replace' );
 	}
 
 	/**

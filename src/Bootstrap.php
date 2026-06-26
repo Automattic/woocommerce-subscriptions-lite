@@ -72,6 +72,9 @@ final class Bootstrap {
 		if ( is_admin() ) {
 			Admin\PageController::register();
 			Admin\RowActionController::register();
+
+			// Register the plans page.
+			Admin\PlansPage::register();
 		}
 
 		// Email: contract and renewal notifications.
