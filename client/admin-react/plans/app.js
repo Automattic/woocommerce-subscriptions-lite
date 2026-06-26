@@ -64,18 +64,26 @@ const DEFAULT_DEFINITIONS = {
 		{
 			value: 'day',
 			label: __( 'Day', 'woocommerce-subscriptions-lite' ),
+			singular: __( 'day', 'woocommerce-subscriptions-lite' ),
+			plural: __( 'days', 'woocommerce-subscriptions-lite' ),
 		},
 		{
 			value: 'week',
 			label: __( 'Week', 'woocommerce-subscriptions-lite' ),
+			singular: __( 'week', 'woocommerce-subscriptions-lite' ),
+			plural: __( 'weeks', 'woocommerce-subscriptions-lite' ),
 		},
 		{
 			value: 'month',
 			label: __( 'Month', 'woocommerce-subscriptions-lite' ),
+			singular: __( 'month', 'woocommerce-subscriptions-lite' ),
+			plural: __( 'months', 'woocommerce-subscriptions-lite' ),
 		},
 		{
 			value: 'year',
 			label: __( 'Year', 'woocommerce-subscriptions-lite' ),
+			singular: __( 'year', 'woocommerce-subscriptions-lite' ),
+			plural: __( 'years', 'woocommerce-subscriptions-lite' ),
 		},
 	],
 	pricingTypes: [
@@ -211,7 +219,7 @@ function makeListFields( definitions ) {
 			id: 'frequency',
 			type: 'text',
 			label: __( 'Frequency', 'woocommerce-subscriptions-lite' ),
-			getValue: ( { item } ) => formatFrequency( item ),
+			getValue: ( { item } ) => formatFrequency( item, definitions ),
 			enableSorting: false,
 			filterBy: {
 				operators: [ 'isAny' ],

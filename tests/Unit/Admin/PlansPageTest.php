@@ -88,6 +88,9 @@ final class PlansPageTest extends TestCase {
 		$this->assertIsArray( $config['definitions']['statuses'] );
 		$this->assertArrayHasKey( 'billing_units', $config['definitions'] );
 		$this->assertIsArray( $config['definitions']['billing_units'] );
+		$this->assertSame( 'day', $config['definitions']['billing_units'][0]['value'] );
+		$this->assertSame( 'day', $config['definitions']['billing_units'][0]['singular'] );
+		$this->assertSame( 'days', $config['definitions']['billing_units'][0]['plural'] );
 		$this->assertArrayHasKey( 'pricing_types', $config['definitions'] );
 		$this->assertIsArray( $config['definitions']['pricing_types'] );
 		$this->assertArrayHasKey( 'pricing_scopes', $config['definitions'] );

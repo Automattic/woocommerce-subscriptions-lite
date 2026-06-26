@@ -146,20 +146,28 @@ final class PlansPage {
 			],
 			'billing_units'  => [
 				[
-					'value' => 'day',
-					'label' => __( 'Day', 'woocommerce-subscriptions-lite' ),
+					'value'    => 'day',
+					'label'    => __( 'Day', 'woocommerce-subscriptions-lite' ),
+					'singular' => __( 'day', 'woocommerce-subscriptions-lite' ),
+					'plural'   => __( 'days', 'woocommerce-subscriptions-lite' ),
 				],
 				[
-					'value' => 'week',
-					'label' => __( 'Week', 'woocommerce-subscriptions-lite' ),
+					'value'    => 'week',
+					'label'    => __( 'Week', 'woocommerce-subscriptions-lite' ),
+					'singular' => __( 'week', 'woocommerce-subscriptions-lite' ),
+					'plural'   => __( 'weeks', 'woocommerce-subscriptions-lite' ),
 				],
 				[
-					'value' => 'month',
-					'label' => __( 'Month', 'woocommerce-subscriptions-lite' ),
+					'value'    => 'month',
+					'label'    => __( 'Month', 'woocommerce-subscriptions-lite' ),
+					'singular' => __( 'month', 'woocommerce-subscriptions-lite' ),
+					'plural'   => __( 'months', 'woocommerce-subscriptions-lite' ),
 				],
 				[
-					'value' => 'year',
-					'label' => __( 'Year', 'woocommerce-subscriptions-lite' ),
+					'value'    => 'year',
+					'label'    => __( 'Year', 'woocommerce-subscriptions-lite' ),
+					'singular' => __( 'year', 'woocommerce-subscriptions-lite' ),
+					'plural'   => __( 'years', 'woocommerce-subscriptions-lite' ),
 				],
 			],
 			'pricing_types'  => [

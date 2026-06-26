@@ -1,4 +1,4 @@
-import { __ } from '@wordpress/i18n';
+import { __, sprintf } from '@wordpress/i18n';
 import { config } from './config';
 
 export const DEFAULT_FORM_DATA = {
@@ -167,13 +167,32 @@ export function viewToQuery( view ) {
 	};
 }
 
-export function formatFrequency( plan ) {
+export function formatFrequency( plan, definitions = {} ) {
 	const billing = plan.billing_policy || {};
 	const interval = Number( billing.interval || 1 );
 	const unit = billing.period || 'month';
-	return interval === 1
-		? unit
-		: `${ interval } ${ unit }${ unit.endsWith( 's' ) ? '' : 's' }`;
+	const unitDefinition = getBillingUnitDefinition( definitions, unit );
+
+	if ( interval === 1 ) {
+		return unitDefinition?.singular || unitDefinition?.label || unit;
+	}
+
+	return sprintf(
+		/* translators: 1: billing interval, 2: billing period unit. */
+		__( '%1$d %2$s', 'woocommerce-subscriptions-lite' ),
+		interval,
+		unitDefinition?.plural || unitDefinition?.label || unit
+	);
+}
+
+function getBillingUnitDefinition( definitions, unit ) {
+	const billingUnits =
+		definitions?.billingUnits ||
+		definitions?.billing_units ||
+		config.definitions?.billing_units ||
+		[];
+
+	return billingUnits.find( ( billingUnit ) => billingUnit.value === unit );
 }
 
 export function formatDiscount( plan ) {
