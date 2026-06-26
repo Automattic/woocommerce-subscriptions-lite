@@ -197,11 +197,19 @@ export function formatDiscount( plan ) {
 	const value = Number( firstPolicy.value || 0 );
 	let label = '-';
 	if ( firstPolicy.type === 'percentage' ) {
-		label = `${ value }% off`;
+		label = sprintf(
+			/* translators: %s is a discount percentage value, e.g. '10' for "10% off". */
+			__( '%s%% off', 'woocommerce-subscriptions-lite' ),
+			value
+		);
 	} else if ( firstPolicy.type === 'fixed_amount' ) {
-		label = `${ value } off`;
+		label = sprintf(
+			/* translators: %s is a monetary or numeric discount, e.g. '$10' for "$10 off". */
+			__( '%s off', 'woocommerce-subscriptions-lite' ),
+			value
+		);
 	} else if ( firstPolicy.type === 'price' ) {
-		label = `${ value }`;
+		label = String( value );
 	}
 
 	if ( Number( firstPolicy.duration_cycles ) === 1 ) {
