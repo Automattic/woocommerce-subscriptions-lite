@@ -18,12 +18,16 @@ use RuntimeException;
  */
 final class PlansPageTest extends TestCase {
 
+	private const SCRIPT_HANDLE = 'wc-subscriptions-lite-admin-react';
+
 	public function setUp(): void {
 		parent::setUp();
 		$GLOBALS['woocommerce_subscriptions_lite_test_submenus']               = [];
 		$GLOBALS['woocommerce_subscriptions_lite_test_enqueued_scripts']       = [];
 		$GLOBALS['woocommerce_subscriptions_lite_test_enqueued_styles']        = [];
 		$GLOBALS['woocommerce_subscriptions_lite_test_inline_scripts']         = [];
+		$GLOBALS['woocommerce_subscriptions_lite_test_script_translations']    = [];
+		$GLOBALS['woocommerce_subscriptions_lite_test_style_data']             = [];
 		$GLOBALS['woocommerce_subscriptions_lite_test_can_manage_woocommerce'] = false;
 	}
 
@@ -48,10 +52,18 @@ final class PlansPageTest extends TestCase {
 
 		$page->enqueue_assets( 'woocommerce_page_' . PlansPage::MENU_SLUG );
 
-		$this->assertArrayHasKey( 'wc-subscriptions-lite-admin', $GLOBALS['woocommerce_subscriptions_lite_test_enqueued_scripts'] );
+		$this->assertArrayHasKey( self::SCRIPT_HANDLE, $GLOBALS['woocommerce_subscriptions_lite_test_enqueued_scripts'] );
+		$this->assertSame(
+			'woocommerce-subscriptions-lite',
+			$GLOBALS['woocommerce_subscriptions_lite_test_script_translations'][ self::SCRIPT_HANDLE ]['domain']
+		);
+		$this->assertStringEndsWith(
+			'/languages',
+			$GLOBALS['woocommerce_subscriptions_lite_test_script_translations'][ self::SCRIPT_HANDLE ]['path']
+		);
 		$this->assertArrayHasKey( 'wp-components', $GLOBALS['woocommerce_subscriptions_lite_test_enqueued_styles'] );
 		$this->assertArrayHasKey( 'wp-dataviews', $GLOBALS['woocommerce_subscriptions_lite_test_enqueued_styles'] );
-		$inline_scripts = $GLOBALS['woocommerce_subscriptions_lite_test_inline_scripts']['wc-subscriptions-lite-admin'];
+		$inline_scripts = $GLOBALS['woocommerce_subscriptions_lite_test_inline_scripts'][ self::SCRIPT_HANDLE ];
 		$inline_script  = $inline_scripts[0]['data'];
 		$config         = json_decode(
 			rtrim( str_replace( 'window.wcSubscriptionsLitePlans = ', '', $inline_script ), ';' ),

@@ -80,6 +80,12 @@ final class PlansPage {
 			true
 		);
 
+		wp_set_script_translations(
+			self::SCRIPT_HANDLE,
+			'woocommerce-subscriptions-lite',
+			Package::get_path() . '/languages'
+		);
+
 		wp_add_inline_script(
 			self::SCRIPT_HANDLE,
 			'window.wcSubscriptionsLitePlans = ' . wp_json_encode(

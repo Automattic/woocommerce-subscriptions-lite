@@ -5,8 +5,18 @@ const path = require( 'path' );
 module.exports = {
 	...defaultConfig,
 	entry: {
-		"admin-react": path.resolve( process.cwd(), 'client', 'admin-react', 'index.js' ),
-		"admin-php": path.resolve( process.cwd(), 'client', 'admin-php', 'index.js' ),
+		'admin-react': path.resolve(
+			process.cwd(),
+			'client',
+			'admin-react',
+			'index.js'
+		),
+		'admin-php': path.resolve(
+			process.cwd(),
+			'client',
+			'admin-php',
+			'index.js'
+		),
 	},
 	output: {
 		...defaultConfig.output,

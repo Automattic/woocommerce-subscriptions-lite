@@ -135,6 +135,34 @@ if ( ! function_exists( 'plugin_dir_url' ) ) {
 	}
 }
 
+if ( ! function_exists( 'plugins_url' ) ) {
+	/**
+	 * Return a stable fake plugin URL.
+	 *
+	 * @param string $path   Optional path.
+	 * @param string $plugin Plugin file or directory.
+	 * @return string
+	 */
+	function plugins_url( string $path = '', string $plugin = '' ): string {
+		$base = 'https://example.test/wp-content/plugins/woocommerce-subscriptions-lite';
+		$path = ltrim( $path, '/' );
+
+		return '' === $path ? $base : $base . '/' . $path;
+	}
+}
+
+if ( ! function_exists( 'untrailingslashit' ) ) {
+	/**
+	 * Remove trailing slashes.
+	 *
+	 * @param string $value Value.
+	 * @return string
+	 */
+	function untrailingslashit( string $value ): string {
+		return rtrim( $value, '/\\' );
+	}
+}
+
 if ( ! function_exists( 'add_submenu_page' ) ) {
 	/**
 	 * Record a submenu page registration.
@@ -175,6 +203,21 @@ if ( ! function_exists( 'wp_enqueue_script' ) ) {
 	}
 }
 
+if ( ! function_exists( 'wp_set_script_translations' ) ) {
+	/**
+	 * Record script translations.
+	 *
+	 * @param string $handle Script handle.
+	 * @param string $domain Text domain.
+	 * @param string $path   Language directory path.
+	 * @return bool
+	 */
+	function wp_set_script_translations( string $handle, string $domain = 'default', string $path = '' ): bool {
+		$GLOBALS['woocommerce_subscriptions_lite_test_script_translations'][ $handle ] = compact( 'domain', 'path' );
+		return true;
+	}
+}
+
 if ( ! function_exists( 'wp_add_inline_script' ) ) {
 	/**
 	 * Record inline script.
@@ -199,6 +242,21 @@ if ( ! function_exists( 'wp_enqueue_style' ) ) {
 	 */
 	function wp_enqueue_style( string $handle, string $src = '', array $deps = [], string $ver = '' ): void {
 		$GLOBALS['woocommerce_subscriptions_lite_test_enqueued_styles'][ $handle ] = compact( 'src', 'deps', 'ver' );
+	}
+}
+
+if ( ! function_exists( 'wp_style_add_data' ) ) {
+	/**
+	 * Record style metadata.
+	 *
+	 * @param string $handle Style handle.
+	 * @param string $key    Metadata key.
+	 * @param mixed  $value  Metadata value.
+	 * @return bool
+	 */
+	function wp_style_add_data( string $handle, string $key, $value ): bool {
+		$GLOBALS['woocommerce_subscriptions_lite_test_style_data'][ $handle ][ $key ] = $value;
+		return true;
 	}
 }
 
