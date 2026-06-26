@@ -59,7 +59,7 @@ The storefront must look like the merchant's **theme**, not wp-admin:
 
 ## File layout
 
-- SCSS lives beside the JS / block entry that imports it (`client/admin-php/style.scss`, `client/admin-react/style.scss` `src/blocks/<block>/style.scss`), not in a standalone `src/css/` folder.
+- SCSS lives beside the JS / block entry that imports it (`client/admin-php/style.scss`, `client/admin-react/style.scss`, `src/blocks/<block>/style.scss`), not in a standalone `src/css/` folder.
 - Blocks: one folder per block with `block.json` + `index.js` + `style.scss` (front-end) / `editor.scss` (editor) as needed.
 - Compiled output goes to `build/`; enqueue it from PHP via the generated `*.asset.php`.
 
