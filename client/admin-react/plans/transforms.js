@@ -39,7 +39,7 @@ export function planToFormData( plan = {} ) {
 		expires: Number( maxCycles ) > 0,
 		maxCycles,
 		pricingType,
-		pricingValue: pricingType === 'bogo' ? '' : firstPolicy?.value ?? '',
+		pricingValue: firstPolicy?.value ?? '',
 		pricingScope,
 		durationCycles,
 	};
@@ -71,16 +71,13 @@ export function pricingPolicyFromFormData( formData, plan = null ) {
 		? existing.one_time_fees
 		: [];
 
-	if ( formData.pricingType !== 'bogo' && formData.pricingValue === '' ) {
+	if ( formData.pricingValue === '' ) {
 		return { policies: [], one_time_fees: oneTimeFees };
 	}
 
 	const entry = {
 		type: formData.pricingType,
-		value:
-			formData.pricingType === 'bogo'
-				? 1
-				: Number( formData.pricingValue ),
+		value: Number( formData.pricingValue ),
 	};
 
 	if ( formData.pricingScope === 'first' ) {
@@ -116,11 +113,7 @@ export function formErrors( formData ) {
 			'woocommerce-subscriptions-lite'
 		);
 	}
-	if (
-		formData.pricingType !== 'bogo' &&
-		formData.pricingValue !== '' &&
-		Number( formData.pricingValue ) < 0
-	) {
+	if ( formData.pricingValue !== '' && Number( formData.pricingValue ) < 0 ) {
 		errors.pricingValue = __(
 			'Discount value cannot be negative.',
 			'woocommerce-subscriptions-lite'
@@ -209,8 +202,6 @@ export function formatDiscount( plan ) {
 		label = `${ value } off`;
 	} else if ( firstPolicy.type === 'price' ) {
 		label = `${ value }`;
-	} else if ( firstPolicy.type === 'bogo' ) {
-		label = __( 'Buy one get one', 'woocommerce-subscriptions-lite' );
 	}
 
 	if ( Number( firstPolicy.duration_cycles ) === 1 ) {
