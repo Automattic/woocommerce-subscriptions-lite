@@ -86,16 +86,22 @@ final class PlansPage {
 			Package::get_path() . '/languages'
 		);
 
+		$config_json = wp_json_encode(
+			[
+				'restBase'      => '/wc/v3/subscriptions-engine/plans',
+				'extensionSlug' => 'woocommerce-subscriptions-lite',
+				'defaultStatus' => 'active',
+				'definitions'   => $this->get_plan_data_definitions(),
+			]
+		);
+
+		if ( false === $config_json ) {
+			$config_json = '{}';
+		}
+
 		wp_add_inline_script(
 			self::SCRIPT_HANDLE,
-			'window.wcSubscriptionsLitePlans = ' . wp_json_encode(
-				[
-					'restBase'      => '/wc/v3/subscriptions-engine/plans',
-					'extensionSlug' => 'woocommerce-subscriptions-lite',
-					'defaultStatus' => 'active',
-					'definitions'   => $this->get_plan_data_definitions(),
-				]
-			) . ';',
+			'window.wcSubscriptionsLitePlans = ' . $config_json . ';',
 			'before'
 		);
 
