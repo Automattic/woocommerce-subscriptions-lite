@@ -212,17 +212,23 @@ export function formatDiscount( plan ) {
 		label = String( value );
 	}
 
-	if ( Number( firstPolicy.duration_cycles ) === 1 ) {
-		return `${ label } (${ __(
-			'first cycle',
-			'woocommerce-subscriptions-lite'
-		) })`;
+	const durationCycles = Number( firstPolicy.duration_cycles );
+
+	if ( durationCycles === 1 ) {
+		return sprintf(
+			/* translators: %s is a discount label, e.g. "10% off". */
+			__( '%s (first cycle)', 'woocommerce-subscriptions-lite' ),
+			label
+		);
 	}
-	if ( Number( firstPolicy.duration_cycles ) > 1 ) {
-		return `${ label } (${ firstPolicy.duration_cycles } ${ __(
-			'cycles',
-			'woocommerce-subscriptions-lite'
-		) })`;
+
+	if ( durationCycles > 1 ) {
+		return sprintf(
+			/* translators: 1: discount label (e.g. "10% off"), 2: number of cycles. */
+			__( '%1$s (%2$d cycles)', 'woocommerce-subscriptions-lite' ),
+			label,
+			durationCycles
+		);
 	}
 
 	return label;
