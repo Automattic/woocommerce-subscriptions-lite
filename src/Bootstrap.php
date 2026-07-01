@@ -47,6 +47,15 @@ final class Bootstrap {
 		// Guarded so Lite degrades gracefully if the engine class is unavailable.
 		if ( class_exists( \Automattic\WooCommerce\SubscriptionsEngine\Package::class ) ) {
 			\Automattic\WooCommerce\SubscriptionsEngine\Package::init();
+
+			// Declare Lite as a consumer of the engine. The engine stays inert until a
+			// consumer registers - its batch renewal dispatcher charges nothing while the
+			// consumer registry is empty - so this registration is what puts the engine to
+			// work on Lite's behalf. Registered on every load so it is present for the
+			// dispatcher's own scheduled request, not just interactive ones.
+			\Automattic\WooCommerce\SubscriptionsEngine\Integration\Ownership\ConsumerRegistry::register(
+				'woocommerce-subscriptions-lite'
+			);
 		}
 
 		// Product detail page: render the subscription plan picker and feed the
