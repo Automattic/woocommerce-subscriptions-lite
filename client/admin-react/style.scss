@@ -11,12 +11,22 @@
 
 		thead th:not(.dataviews-view-table__actions-column) {
 			text-align: left;
+			padding-left: variables.$grid-unit-15;
+		}
+
+		thead th:first-child,
+		tbody td:first-child {
+			padding-left: variables.$grid-unit-15;
 		}
 
 		thead th.dataviews-view-table__actions-column,
 		thead th.dataviews-view-table__actions-column:last-child {
 			text-align: right;
 			padding-right: variables.$grid-unit-30;
+		}
+
+		tbody td.dataviews-view-table__actions-column:last-child {
+			padding-right: variables.$grid-unit-15;
 		}
 
 		.dataviews-view-table__cell-content-wrapper {
@@ -94,7 +104,7 @@
 .wc-subscriptions-lite-plans__error {
 	margin: variables.$grid-unit-05 0 0;
 	color: colors.$alert-red;
-	font-size: variables.$font-size-x-small;
+	font-size: 12px;
 }
 
 .wc-subscriptions-lite-plans__saving {

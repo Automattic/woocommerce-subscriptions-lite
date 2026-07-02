@@ -72,6 +72,16 @@ final class PlansPage {
 			'version'      => Package::get_version(),
 		];
 
+		if ( file_exists( WP_CONTENT_DIR . '/plugins/woocommerce/assets/client/admin/settings-embed/style.asset.php' ) ) {
+			$style_asset = require WP_CONTENT_DIR . '/plugins/woocommerce/assets/client/admin/settings-embed/style.asset.php';
+			wp_register_style(
+				'wc-admin-settings-embed',
+				WP_CONTENT_URL . '/plugins/woocommerce/assets/client/admin/settings-embed/style.css',
+				array_merge( $style_asset['dependencies'] ?? [], [ 'wp-components' ] ),
+				$style_asset['version'] ?? WOOCOMMERCE_VERSION
+			);
+		}
+
 		wp_enqueue_script(
 			self::SCRIPT_HANDLE,
 			Package::get_url() . '/build/scripts/admin-react.js',
@@ -113,7 +123,7 @@ final class PlansPage {
 			wp_enqueue_style(
 				self::SCRIPT_HANDLE,
 				Package::get_url() . '/build/scripts/style-admin-react.css',
-				[ 'wp-components', 'woocommerce_admin_styles' ],
+				[ 'wp-components', 'woocommerce_admin_styles', 'wc-admin-settings-embed' ],
 				$asset['version'] ?? Package::get_version()
 			);
 			wp_style_add_data( self::SCRIPT_HANDLE, 'rtl', 'replace' );
