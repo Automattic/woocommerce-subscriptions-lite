@@ -1,0 +1,278 @@
+/**
+ * PlanManager - orchestrates the plan list, editor modal, and CRUD.
+ */
+
+import { useCallback, useMemo, useState } from '@wordpress/element';
+import {
+	Button,
+	Card,
+	CardBody,
+	Flex,
+	FlexItem,
+	Notice,
+} from '@wordpress/components';
+import { __ } from '@wordpress/i18n';
+import { plus } from '@wordpress/icons';
+import { config } from '../config';
+import { normalizeDefinitions } from '../definitions';
+import { buildFieldRegistry } from '../fields';
+import { usePlans } from '../hooks/use-plans';
+import { useNotifications } from '../hooks/use-notifications';
+import { useValidation } from '../hooks/use-validation';
+import { PlansTable } from './plans-table';
+import { PlanModal } from './plan-modal';
+
+const DEFAULT_VIEW = {
+	type: 'table',
+	perPage: 20,
+	page: 1,
+	search: '',
+	filters: [],
+	sort: { field: 'sort_order', direction: 'asc' },
+	layout: { density: 'comfortable' },
+};
+
+const CLOSED_EDITOR = {
+	isOpen: false,
+	plan: null,
+	isSaving: false,
+	apiError: '',
+	duplicateWarning: false,
+};
+
+/**
+ * @return {Object} PlanManager component.
+ */
+export function PlanManager() {
+	const [ view, setView ] = useState( DEFAULT_VIEW );
+	const [ editor, setEditor ] = useState( CLOSED_EDITOR );
+
+	const definitions = useMemo(
+		() => normalizeDefinitions( config.definitions ),
+		[]
+	);
+	const registry = useMemo(
+		() => buildFieldRegistry( { definitions, config } ),
+		[ definitions ]
+	);
+
+	const {
+		plans,
+		paginationInfo,
+		isLoading,
+		error: loadError,
+		setError: setLoadError,
+		reload,
+		savePlan,
+		setStatus,
+		reorder,
+	} = usePlans( view );
+	const { notice, error, showSuccess, showError, clear } = useNotifications();
+	const { findDuplicate } = useValidation( registry );
+
+	const openCreate = useCallback( () => {
+		clear();
+		setEditor( { ...CLOSED_EDITOR, isOpen: true } );
+	}, [ clear ] );
+
+	const openEdit = useCallback(
+		( plan ) => {
+			clear();
+			setEditor( { ...CLOSED_EDITOR, isOpen: true, plan } );
+		},
+		[ clear ]
+	);
+
+	const closeEditor = useCallback( () => setEditor( CLOSED_EDITOR ), [] );
+
+	const handleFieldChange = useCallback( () => {
+		setEditor( ( current ) =>
+			current.apiError || current.duplicateWarning
+				? { ...current, apiError: '', duplicateWarning: false }
+				: current
+		);
+	}, [] );
+
+	const handleSave = useCallback(
+		async ( payload ) => {
+			const { isDuplicate } = findDuplicate(
+				payload,
+				plans,
+				editor.plan?.id
+			);
+			if ( isDuplicate ) {
+				setEditor( ( current ) => ( {
+					...current,
+					duplicateWarning: true,
+				} ) );
+				return;
+			}
+
+			setEditor( ( current ) => ( {
+				...current,
+				isSaving: true,
+				apiError: '',
+			} ) );
+
+			try {
+				await savePlan( payload, editor.plan );
+				showSuccess(
+					editor.plan
+						? __(
+								'Plan updated.',
+								'woocommerce-subscriptions-lite'
+						  )
+						: __(
+								'Plan created.',
+								'woocommerce-subscriptions-lite'
+						  )
+				);
+				setEditor( CLOSED_EDITOR );
+				await reload();
+			} catch ( saveError ) {
+				setEditor( ( current ) => ( {
+					...current,
+					isSaving: false,
+					apiError:
+						saveError?.message ||
+						__(
+							'Subscription plan could not be saved.',
+							'woocommerce-subscriptions-lite'
+						),
+				} ) );
+			}
+		},
+		[ editor.plan, findDuplicate, plans, reload, savePlan, showSuccess ]
+	);
+
+	const changeStatus = useCallback(
+		async ( plan, status ) => {
+			try {
+				await setStatus( plan, status );
+				showSuccess(
+					status === 'archived'
+						? __(
+								'Plan archived.',
+								'woocommerce-subscriptions-lite'
+						  )
+						: __(
+								'Plan restored.',
+								'woocommerce-subscriptions-lite'
+						  )
+				);
+				await reload();
+			} catch ( statusError ) {
+				showError(
+					statusError?.message ||
+						__(
+							'Plan status could not be changed.',
+							'woocommerce-subscriptions-lite'
+						)
+				);
+			}
+		},
+		[ reload, setStatus, showError, showSuccess ]
+	);
+
+	const handleReorder = useCallback(
+		async ( ids ) => {
+			try {
+				await reorder( ids );
+				await reload();
+			} catch ( reorderError ) {
+				showError(
+					reorderError?.message ||
+						__(
+							'Plan order could not be saved.',
+							'woocommerce-subscriptions-lite'
+						)
+				);
+			}
+		},
+		[ reload, reorder, showError ]
+	);
+
+	return (
+		<div className="wc-subscriptions-lite-plans">
+			<Flex
+				className="wc-subscriptions-lite-plans__header"
+				justify="space-between"
+				align="center"
+			>
+				<FlexItem>
+					<h1>
+						{ __(
+							'Subscription Plans',
+							'woocommerce-subscriptions-lite'
+						) }
+					</h1>
+				</FlexItem>
+				<FlexItem>
+					<Button
+						variant="primary"
+						icon={ plus }
+						onClick={ openCreate }
+					>
+						{ __( 'Add plan', 'woocommerce-subscriptions-lite' ) }
+					</Button>
+				</FlexItem>
+			</Flex>
+
+			{ notice && (
+				<Notice
+					status="success"
+					onRemove={ clear }
+					className="wc-subscriptions-lite-plans__notice"
+				>
+					{ notice }
+				</Notice>
+			) }
+			{ ( error || loadError ) && (
+				<Notice
+					status="error"
+					onRemove={ () => {
+						clear();
+						setLoadError( '' );
+					} }
+					className="wc-subscriptions-lite-plans__notice"
+				>
+					{ error || loadError }
+				</Notice>
+			) }
+
+			<Card>
+				<CardBody>
+					<PlansTable
+						plans={ plans }
+						registry={ registry }
+						definitions={ definitions }
+						view={ view }
+						onChangeView={ setView }
+						paginationInfo={ paginationInfo }
+						isLoading={ isLoading }
+						onEdit={ openEdit }
+						onArchive={ ( plan ) =>
+							changeStatus( plan, 'archived' )
+						}
+						onRestore={ ( plan ) => changeStatus( plan, 'active' ) }
+						onReorder={ handleReorder }
+					/>
+				</CardBody>
+			</Card>
+
+			{ editor.isOpen && (
+				<PlanModal
+					registry={ registry }
+					definitions={ definitions }
+					plan={ editor.plan }
+					isSaving={ editor.isSaving }
+					apiError={ editor.apiError }
+					duplicateWarning={ editor.duplicateWarning }
+					onClose={ closeEditor }
+					onSave={ handleSave }
+					onFieldChange={ handleFieldChange }
+				/>
+			) }
+		</div>
+	);
+}
