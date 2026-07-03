@@ -209,13 +209,14 @@ $has_actions = $detail['cancel_visible'] || $detail['hold_visible'] || $detail['
 
 	<?php if ( '' !== (string) $detail['billing_address'] || '' !== (string) $detail['shipping_address'] ) : ?>
 		<?php $has_both_addresses = '' !== (string) $detail['billing_address'] && '' !== (string) $detail['shipping_address']; ?>
-		<?php // Mirrors WooCommerce's my-account addresses layout (myaccount/my-address.php, as on /my-account/edit-address/): the theme styles the u-columns / col2-set chrome, and the title header is the slot per-address actions (edit) land in later. ?>
+		<h3 class="subscription-detail-addresses-heading"><?php esc_html_e( 'Addresses', 'woocommerce-subscriptions-lite' ); ?></h3>
+		<?php // Columns mirror WooCommerce's my-account addresses layout (myaccount/my-address.php, as on /my-account/edit-address/): the theme styles the u-columns / col2-set chrome, and the title header is the slot per-address actions (edit) land in later. The section heading above is ours, so the per-column titles stay compact labels. ?>
 		<div class="<?php echo esc_attr( $has_both_addresses ? 'u-columns woocommerce-Addresses col2-set addresses subscription-detail-addresses' : 'subscription-detail-addresses' ); ?>">
 
 			<?php if ( '' !== (string) $detail['billing_address'] ) : ?>
 				<div class="<?php echo esc_attr( $has_both_addresses ? 'u-column1 col-1 woocommerce-Address' : 'woocommerce-Address' ); ?>">
 					<header class="woocommerce-Address-title title">
-						<h2><?php esc_html_e( 'Billing address', 'woocommerce-subscriptions-lite' ); ?></h2>
+						<h4 class="subscription-address-label"><?php esc_html_e( 'Billing', 'woocommerce-subscriptions-lite' ); ?></h4>
 					</header>
 					<address>
 						<?php echo wp_kses_post( (string) $detail['billing_address'] ); ?>
@@ -232,7 +233,7 @@ $has_actions = $detail['cancel_visible'] || $detail['hold_visible'] || $detail['
 			<?php if ( '' !== (string) $detail['shipping_address'] ) : ?>
 				<div class="<?php echo esc_attr( $has_both_addresses ? 'u-column2 col-2 woocommerce-Address' : 'woocommerce-Address' ); ?>">
 					<header class="woocommerce-Address-title title">
-						<h2><?php esc_html_e( 'Shipping address', 'woocommerce-subscriptions-lite' ); ?></h2>
+						<h4 class="subscription-address-label"><?php esc_html_e( 'Shipping', 'woocommerce-subscriptions-lite' ); ?></h4>
 					</header>
 					<address>
 						<?php echo wp_kses_post( (string) $detail['shipping_address'] ); ?>

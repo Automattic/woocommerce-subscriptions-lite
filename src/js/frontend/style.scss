@@ -115,7 +115,8 @@ $error-fg: $alert-red;
 
 .subscription-detail-actions-heading,
 .subscription-detail-related-heading,
-.subscription-detail-totals-heading {
+.subscription-detail-totals-heading,
+.subscription-detail-addresses-heading {
 	margin-top: $grid-unit-30;
 	margin-bottom: $grid-unit-10;
 }
@@ -178,9 +179,15 @@ $error-fg: $alert-red;
    section clear of the table above and render address lines upright. */
 /* Addresses reuse WooCommerce's native my-account layout (u-columns /
    col2-set, as on the edit-address page) so the theme owns the two-column
-   chrome; only the section spacing and the contact lines are ours. */
+   chrome. The section heading above is ours, so the per-column titles are
+   compact labels in the same muted style as the detail-block labels. */
 .subscription-detail-addresses {
-	margin-top: $grid-unit-30;
+	.subscription-address-label {
+		margin: 0 0 $grid-unit-05;
+		font-size: 1em;
+		font-weight: 500;
+		color: $gray-700;
+	}
 
 	.woocommerce-customer-details--phone,
 	.woocommerce-customer-details--email {
