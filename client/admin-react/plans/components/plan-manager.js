@@ -234,14 +234,17 @@ export function PlanManager() {
 						onReorder={ handleReorder }
 					/>
 
-					<Flex className="wc-subscriptions-lite-plans__add-plan-button" >
+					<Flex className="wc-subscriptions-lite-plans__add-plan-button">
 						<FlexItem>
 							<Button
 								variant="secondary"
 								icon={ plus }
 								onClick={ openCreate }
 							>
-								{ __( 'Add plan', 'woocommerce-subscriptions-lite' ) }
+								{ __(
+									'Add plan',
+									'woocommerce-subscriptions-lite'
+								) }
 							</Button>
 						</FlexItem>
 					</Flex>
