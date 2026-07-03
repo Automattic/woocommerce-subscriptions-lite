@@ -154,10 +154,10 @@ final class RowActionController {
 	 * Decide and perform a "Renew now".
 	 *
 	 * Guard order: capability, then a valid contract id, then the facade renewal.
-	 * A null facade return means the renewal was skipped (the contract's status
-	 * did not allow one between render and click) - surfaced as an info outcome,
-	 * not an error. An engine throwable is logged in full and surfaced as a
-	 * generic error outcome rather than a fatal or a leaked internal message.
+	 * A null facade return means the renewal was not processable - the contract is
+	 * awaiting a payment confirmation, inactive, or has no billing chain - surfaced
+	 * as an info outcome, not an error. An engine throwable is logged in full and
+	 * surfaced as a generic error outcome rather than a fatal or a leaked internal message.
 	 *
 	 * @param array<string, mixed> $params Request params: `contract_id`.
 	 * @return RowActionResult The outcome.
@@ -183,7 +183,7 @@ final class RowActionController {
 			return RowActionResult::info(
 				sprintf(
 					/* translators: %d: subscription number. */
-					__( 'Renewal skipped for subscription #%d - its status does not allow a renewal.', 'woocommerce-subscriptions-lite' ),
+					__( 'Renewal skipped for subscription #%d - it is not currently renewable (it may be awaiting a payment confirmation or no longer active).', 'woocommerce-subscriptions-lite' ),
 					$contract_id
 				)
 			);
