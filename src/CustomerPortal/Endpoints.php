@@ -66,6 +66,25 @@ final class Endpoints {
 	const REWRITE_VERSION = '1';
 
 	/**
+	 * Subscriptions per list page. The page number rides the endpoint value
+	 * (`/subscriptions-lite/2/`), the way WooCommerce's my-account orders
+	 * list pages.
+	 */
+	const LIST_PER_PAGE = 10;
+
+	/**
+	 * Related orders per detail-page window. The page number rides the
+	 * `orders-page` query arg on the detail URL - a long-running contract
+	 * accumulates one renewal order per period, so the list grows unbounded.
+	 */
+	const RELATED_ORDERS_PER_PAGE = 10;
+
+	/**
+	 * The related-orders page query arg on the detail URL.
+	 */
+	const ORDERS_PAGE_QUERY_ARG = 'orders-page';
+
+	/**
 	 * Wire the endpoints into WooCommerce's My Account framework.
 	 *
 	 * Idempotent; called once from the package bootstrap.
@@ -141,14 +160,22 @@ final class Endpoints {
 
 	/**
 	 * Render the subscriptions list for the current customer.
+	 *
+	 * @param int|string $endpoint_value Page number from the URL (or empty for page 1).
 	 */
-	public function render_list(): void {
-		$customer_id = get_current_user_id();
-		$view_model  = new ViewModel();
+	public function render_list( $endpoint_value = '' ): void {
+		$customer_id  = get_current_user_id();
+		$current_page = max( 1, absint( $endpoint_value ) );
+		$view_model   = new ViewModel();
 
+		// The +1 probe answers "is there a next page" without a count read; the
+		// extra row never renders.
 		$contracts = $customer_id > 0
-			? Providers::resolve()->get_contracts_for_customer( $customer_id )
+			? Providers::resolve()->get_contracts_for_customer( $customer_id, self::LIST_PER_PAGE + 1, ( $current_page - 1 ) * self::LIST_PER_PAGE )
 			: [];
+
+		$has_next  = count( $contracts ) > self::LIST_PER_PAGE;
+		$contracts = array_slice( $contracts, 0, self::LIST_PER_PAGE );
 
 		$rows = $view_model->build_list( $contracts );
 
@@ -178,6 +205,10 @@ final class Endpoints {
 				'rows'           => $rows,
 				'store'          => self::STORE_NAMESPACE,
 				'detail_url_for' => [ $this, 'detail_url' ],
+				'pagination'     => [
+					'previous_url' => $current_page > 1 ? $this->list_url( $current_page - 1 ) : '',
+					'next_url'     => $has_next ? $this->list_url( $current_page + 1 ) : '',
+				],
 			],
 			'',
 			Package::get_path() . '/templates/'
@@ -209,9 +240,17 @@ final class Endpoints {
 			return;
 		}
 
-		$related_orders = Providers::resolve()->get_related_orders( $contract_id );
-		$view_model     = new ViewModel();
-		$detail         = $view_model->build_detail( $contract, $related_orders );
+		// Read-only pagination arg; nothing state-changing happens on this read.
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended
+		$orders_page = isset( $_GET[ self::ORDERS_PAGE_QUERY_ARG ] ) ? max( 1, absint( wp_unslash( $_GET[ self::ORDERS_PAGE_QUERY_ARG ] ) ) ) : 1;
+
+		// The +1 probe answers "is there a next page" without a count read.
+		$related_orders   = Providers::resolve()->get_related_orders( $contract_id, self::RELATED_ORDERS_PER_PAGE + 1, ( $orders_page - 1 ) * self::RELATED_ORDERS_PER_PAGE );
+		$orders_have_next = count( $related_orders ) > self::RELATED_ORDERS_PER_PAGE;
+		$related_orders   = array_slice( $related_orders, 0, self::RELATED_ORDERS_PER_PAGE );
+
+		$view_model = new ViewModel();
+		$detail     = $view_model->build_detail( $contract, $related_orders );
 
 		/**
 		 * Filters the assembled detail view-model before render.
@@ -257,8 +296,12 @@ final class Endpoints {
 		wc_get_template(
 			'myaccount/subscription-detail.php',
 			[
-				'detail' => $detail,
-				'store'  => self::STORE_NAMESPACE,
+				'detail'            => $detail,
+				'store'             => self::STORE_NAMESPACE,
+				'orders_pagination' => [
+					'previous_url' => $orders_page > 1 ? $this->detail_orders_page_url( $contract_id, $orders_page - 1 ) : '',
+					'next_url'     => $orders_have_next ? $this->detail_orders_page_url( $contract_id, $orders_page + 1 ) : '',
+				],
 			],
 			'',
 			Package::get_path() . '/templates/'
@@ -276,5 +319,30 @@ final class Endpoints {
 			(string) $contract_id,
 			wc_get_page_permalink( 'myaccount' )
 		);
+	}
+
+	/**
+	 * Build the list-page URL for a page number (page 1 is the bare endpoint).
+	 *
+	 * @param int $page Page number.
+	 */
+	private function list_url( int $page ): string {
+		return wc_get_endpoint_url(
+			self::LIST_ENDPOINT,
+			$page > 1 ? (string) $page : '',
+			wc_get_page_permalink( 'myaccount' )
+		);
+	}
+
+	/**
+	 * Build the detail-page URL for a related-orders page (page 1 drops the arg).
+	 *
+	 * @param int $contract_id Contract id.
+	 * @param int $page        Related-orders page number.
+	 */
+	private function detail_orders_page_url( int $contract_id, int $page ): string {
+		$url = $this->detail_url( $contract_id );
+
+		return $page > 1 ? add_query_arg( self::ORDERS_PAGE_QUERY_ARG, $page, $url ) : $url;
 	}
 }

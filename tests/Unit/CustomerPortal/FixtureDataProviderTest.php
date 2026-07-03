@@ -88,4 +88,34 @@ final class FixtureDataProviderTest extends TestCase {
 	public function test_get_related_orders_is_empty_for_an_unknown_contract(): void {
 		$this->assertSame( [], ( new FixtureDataProvider() )->get_related_orders( 999999 ) );
 	}
+
+	public function test_list_windows_with_limit_and_offset_newest_first(): void {
+		$provider = new FixtureDataProvider();
+
+		$all = $provider->get_contracts_for_customer( 1 );
+		$this->assertCount( 12, $all, 'Twelve fixture contracts, so the list paginates out of the box.' );
+		$this->assertSame( 112, $all[0]['id'], 'Newest (highest id) first, matching the engine ordering.' );
+
+		$first_page = $provider->get_contracts_for_customer( 1, 10, 0 );
+		$this->assertCount( 10, $first_page );
+		$this->assertSame( 112, $first_page[0]['id'] );
+
+		$second_page = $provider->get_contracts_for_customer( 1, 10, 10 );
+		$this->assertCount( 2, $second_page );
+		$this->assertSame( [ 102, 101 ], array_column( $second_page, 'id' ) );
+	}
+
+	public function test_related_orders_window_over_the_long_history(): void {
+		$provider = new FixtureDataProvider();
+
+		$this->assertCount( 15, $provider->get_related_orders( 101 ), 'The long-running fixture carries a multi-page history.' );
+
+		$first_page = $provider->get_related_orders( 101, 10, 0 );
+		$this->assertCount( 10, $first_page );
+		$this->assertSame( '1015', $first_page[0]['number'], 'Newest order first.' );
+
+		$second_page = $provider->get_related_orders( 101, 10, 10 );
+		$this->assertCount( 5, $second_page );
+		$this->assertSame( '1005', $second_page[0]['number'] );
+	}
 }

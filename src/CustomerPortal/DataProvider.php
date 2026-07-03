@@ -40,10 +40,14 @@ interface DataProvider {
 	 * `payment_method` array (`title`, `expires`). Implementations return only
 	 * contracts the customer owns; the empty array means "no subscriptions".
 	 *
+	 * Takes a paging window so the list page can bound its reads.
+	 *
 	 * @param int $customer_id The logged-in customer id.
+	 * @param int $limit       Maximum contracts to return. Default 20.
+	 * @param int $offset      Contracts to skip (for paging). Default 0.
 	 * @return array<int, array<string, mixed>> Domain-ish contract arrays.
 	 */
-	public function get_contracts_for_customer( int $customer_id ): array;
+	public function get_contracts_for_customer( int $customer_id, int $limit = 20, int $offset = 0 ): array;
 
 	/**
 	 * Return one contract's detail as a domain-ish array, ownership-checked.
@@ -70,8 +74,13 @@ interface DataProvider {
 	 * resolved + ownership-checked by the caller via {@see self::get_contract()}
 	 * before this is called.
 	 *
+	 * Takes a paging window - a long-running contract accumulates one renewal
+	 * order per period, so the list grows with contract age.
+	 *
 	 * @param int $contract_id The contract id.
+	 * @param int $limit       Maximum orders to return; -1 (default) for all.
+	 * @param int $offset      Orders to skip (for paging). Default 0.
 	 * @return array<int, array<string, mixed>> Domain-ish related-order arrays.
 	 */
-	public function get_related_orders( int $contract_id ): array;
+	public function get_related_orders( int $contract_id, int $limit = -1, int $offset = 0 ): array;
 }

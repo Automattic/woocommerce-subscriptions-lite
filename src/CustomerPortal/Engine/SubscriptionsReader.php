@@ -41,12 +41,15 @@ interface SubscriptionsReader {
 	 * The customer's contracts, newest first, each with its plan snapshot hydrated.
 	 *
 	 * Owner-scoped by construction: the customer id is supplied by the caller, never
-	 * inferred, so the read never returns another customer's contracts.
+	 * inferred, so the read never returns another customer's contracts. Takes a
+	 * paging window so the list page can bound its reads.
 	 *
 	 * @param int $customer_id Owning customer id.
+	 * @param int $limit       Maximum contracts to return. Default 20.
+	 * @param int $offset      Contracts to skip (for paging). Default 0.
 	 * @return array<int, Contract> The customer's contracts, newest first.
 	 */
-	public function list_for_customer( int $customer_id ): array;
+	public function list_for_customer( int $customer_id, int $limit = 20, int $offset = 0 ): array;
 
 	/**
 	 * Fetch a contract the customer owns, or null - the ownership-checked read.
@@ -63,10 +66,13 @@ interface SubscriptionsReader {
 
 	/**
 	 * The orders related to a contract (origin, renewals, switches, resubscribes),
-	 * newest first, as live `WC_Order` objects.
+	 * newest first, as live `WC_Order` objects. Takes a paging window - a
+	 * long-running contract accumulates one renewal order per period.
 	 *
 	 * @param int $contract_id Contract id.
+	 * @param int $limit       Maximum orders to return; -1 (default) for all.
+	 * @param int $offset      Orders to skip (for paging). Default 0.
 	 * @return array<int, WC_Order> Related orders, newest first.
 	 */
-	public function get_related_orders( int $contract_id ): array;
+	public function get_related_orders( int $contract_id, int $limit = -1, int $offset = 0 ): array;
 }

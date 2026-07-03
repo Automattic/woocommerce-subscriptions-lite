@@ -9,6 +9,7 @@
  * @var array<int, array<string, mixed>> $rows           Pre-shaped contract rows.
  * @var string                           $store          The iAPI store namespace.
  * @var callable                         $detail_url_for Builds the detail URL for a contract id.
+ * @var array<string, string>            $pagination     Previous / next page URLs ('' = no link).
  *
  * @package Automattic\WooCommerce\SubscriptionsLite
  */
@@ -28,6 +29,13 @@ if ( empty( $rows ) ) :
 		<?php esc_html_e( 'You have no subscriptions yet.', 'woocommerce-subscriptions-lite' ); ?>
 	</div>
 	<?php
+	// A page past the end still gets a way back.
+	wc_get_template(
+		'myaccount/pagination.php',
+		[ 'pagination' => $pagination ?? [] ],
+		'',
+		\Automattic\WooCommerce\SubscriptionsLite\Package::get_path() . '/templates/'
+	);
 	return;
 endif;
 
@@ -145,4 +153,13 @@ $columns = apply_filters(
 			<?php endforeach; ?>
 		</tbody>
 	</table>
+
+	<?php
+	wc_get_template(
+		'myaccount/pagination.php',
+		[ 'pagination' => $pagination ?? [] ],
+		'',
+		\Automattic\WooCommerce\SubscriptionsLite\Package::get_path() . '/templates/'
+	);
+	?>
 </div>

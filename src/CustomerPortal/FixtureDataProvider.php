@@ -38,14 +38,15 @@ final class FixtureDataProvider implements DataProvider {
 	 * list is the full status spread for any logged-in customer.
 	 *
 	 * @param int $customer_id The logged-in customer id.
+	 * @param int $limit       Maximum contracts to return.
+	 * @param int $offset      Contracts to skip (for paging).
 	 * @return array<int, array<string, mixed>>
 	 */
-	public function get_contracts_for_customer( int $customer_id ): array {
-		$contracts = [];
-		foreach ( $this->contracts( $customer_id ) as $contract ) {
-			$contracts[] = $contract;
-		}
-		return $contracts;
+	public function get_contracts_for_customer( int $customer_id, int $limit = 20, int $offset = 0 ): array {
+		// Newest first (highest id first), matching the engine provider's ordering.
+		$contracts = array_reverse( array_values( $this->contracts( $customer_id ) ) );
+
+		return array_slice( $contracts, max( 0, $offset ), $limit > 0 ? $limit : null );
 	}
 
 	/**
@@ -64,15 +65,19 @@ final class FixtureDataProvider implements DataProvider {
 	 * Return the related orders for a fixture contract.
 	 *
 	 * @param int $contract_id The contract id.
+	 * @param int $limit       Maximum orders to return; -1 for all.
+	 * @param int $offset      Orders to skip (for paging).
 	 * @return array<int, array<string, mixed>>
 	 */
-	public function get_related_orders( int $contract_id ): array {
+	public function get_related_orders( int $contract_id, int $limit = -1, int $offset = 0 ): array {
 		$contracts = $this->contracts( 0 );
 		$contract  = $contracts[ $contract_id ] ?? null;
 		if ( null === $contract ) {
 			return [];
 		}
-		return is_array( $contract['related_orders'] ?? null ) ? $contract['related_orders'] : [];
+		$orders = is_array( $contract['related_orders'] ?? null ) ? $contract['related_orders'] : [];
+
+		return array_slice( $orders, max( 0, $offset ), $limit > 0 ? $limit : null );
 	}
 
 	/**
@@ -152,8 +157,24 @@ final class FixtureDataProvider implements DataProvider {
 			],
 		];
 
+		// A long-running subscription's order history: 15 linked orders (a renewal
+		// a month, newest first), so the related-orders pagination has multiple
+		// pages out of the box. The newest is still processing; the rest completed.
+		$coffee_history = [];
+		for ( $i = 0; $i < 15; $i++ ) {
+			$coffee_history[] = $this->order(
+				(string) ( 1015 - $i ),
+				$gmt( -10 - ( 30 * $i ) ),
+				0 === $i ? 'processing' : 'completed',
+				0 === $i ? __( 'Processing', 'woocommerce-subscriptions-lite' ) : __( 'Completed', 'woocommerce-subscriptions-lite' ),
+				'19.99',
+				'USD'
+			);
+		}
+
 		$contracts = [
-			// Active: next payment in the future, cancel -> at period end, hold available.
+			// Active + long-running: next payment in the future, cancel -> at period
+			// end, hold available, and a 15-order renewal history.
 			101 => [
 				'id'               => 101,
 				'status'           => ContractStatus::ACTIVE,
@@ -162,7 +183,7 @@ final class FixtureDataProvider implements DataProvider {
 				'billing_period'   => 'month',
 				'billing_interval' => 1,
 				'next_payment_gmt' => $gmt( 20 ),
-				'start_gmt'        => $gmt( -40 ),
+				'start_gmt'        => $gmt( -430 ),
 				'end_gmt'          => null,
 				'last_payment_gmt' => $gmt( -10 ),
 				'last_updated_gmt' => $gmt( -10 ),
@@ -171,10 +192,7 @@ final class FixtureDataProvider implements DataProvider {
 				'shipping_total'   => '3.00',
 				'tax_total'        => '1.50',
 				'items'            => $rich_items,
-				'related_orders'   => [
-					$this->order( '1001', $gmt( -40 ), 'completed', __( 'Completed', 'woocommerce-subscriptions-lite' ), '19.99', 'USD' ),
-					$this->order( '1042', $gmt( -10 ), 'processing', __( 'Processing', 'woocommerce-subscriptions-lite' ), '19.99', 'USD' ),
-				],
+				'related_orders'   => $coffee_history,
 			],
 			// On hold (admin-action path): no next payment, reactivate available.
 			102 => [
@@ -278,6 +296,31 @@ final class FixtureDataProvider implements DataProvider {
 				],
 			],
 		];
+
+		// Extra active contracts so the list paginates past one page out of the
+		// box (12 contracts total against the 10-per-page default).
+		for ( $extra_id = 107; $extra_id <= 112; $extra_id++ ) {
+			$age_days = ( $extra_id - 106 ) * 15;
+
+			$contracts[ $extra_id ] = [
+				'id'               => $extra_id,
+				'status'           => ContractStatus::ACTIVE,
+				'billing_total'    => '14.00',
+				'currency'         => 'USD',
+				'billing_period'   => 'month',
+				'billing_interval' => 1,
+				'next_payment_gmt' => $gmt( 30 - $age_days % 28 ),
+				'start_gmt'        => $gmt( -$age_days ),
+				'end_gmt'          => null,
+				'last_payment_gmt' => $gmt( -( $age_days % 28 ) ),
+				'last_updated_gmt' => $gmt( -( $age_days % 28 ) ),
+				'payment_method'   => $card,
+				'items'            => $line_items( '14.00' ),
+				'related_orders'   => [
+					$this->order( (string) ( 1100 + $extra_id ), $gmt( -$age_days ), 'completed', __( 'Completed', 'woocommerce-subscriptions-lite' ), '14.00', 'USD' ),
+				],
+			];
+		}
 
 		foreach ( $contracts as $id => $contract ) {
 			$contracts[ $id ]['customer_id'] = $customer_id;

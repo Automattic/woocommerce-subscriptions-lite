@@ -74,11 +74,13 @@ final class EngineDataProvider implements DataProvider {
 	 * the row shape {@see ViewModel} consumes. The empty array means "no subscriptions".
 	 *
 	 * @param int $customer_id The logged-in customer id.
+	 * @param int $limit       Maximum contracts to return.
+	 * @param int $offset      Contracts to skip (for paging).
 	 * @return array<int, array<string, mixed>>
 	 */
-	public function get_contracts_for_customer( int $customer_id ): array {
+	public function get_contracts_for_customer( int $customer_id, int $limit = 20, int $offset = 0 ): array {
 		$rows = [];
-		foreach ( $this->reader->list_for_customer( $customer_id ) as $contract ) {
+		foreach ( $this->reader->list_for_customer( $customer_id, $limit, $offset ) as $contract ) {
 			$rows[] = $this->contract_to_row( $contract );
 		}
 		return $rows;
@@ -115,11 +117,13 @@ final class EngineDataProvider implements DataProvider {
 	 * Live `WC_Order` objects are reduced to plain arrays here; none escape the provider.
 	 *
 	 * @param int $contract_id The contract id.
+	 * @param int $limit       Maximum orders to return; -1 for all.
+	 * @param int $offset      Orders to skip (for paging).
 	 * @return array<int, array<string, mixed>>
 	 */
-	public function get_related_orders( int $contract_id ): array {
+	public function get_related_orders( int $contract_id, int $limit = -1, int $offset = 0 ): array {
 		$rows = [];
-		foreach ( $this->reader->get_related_orders( $contract_id ) as $order ) {
+		foreach ( $this->reader->get_related_orders( $contract_id, $limit, $offset ) as $order ) {
 			if ( $order instanceof WC_Order ) {
 				$rows[] = $this->order_to_row( $order );
 			}

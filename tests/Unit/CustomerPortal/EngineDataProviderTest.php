@@ -162,8 +162,10 @@ final class EngineDataProviderTest extends TestCase {
 				$this->orders   = $orders;
 			}
 
-			public function list_for_customer( int $customer_id ): array {
-				return 1 === $customer_id ? [ $this->contract ] : [];
+			public function list_for_customer( int $customer_id, int $limit = 20, int $offset = 0 ): array {
+				$contracts = 1 === $customer_id ? [ $this->contract ] : [];
+
+				return array_slice( $contracts, max( 0, $offset ), $limit > 0 ? $limit : null );
 			}
 
 			public function get_for_customer( int $contract_id, int $customer_id ): ?Contract {
@@ -171,8 +173,8 @@ final class EngineDataProviderTest extends TestCase {
 				return ( (int) $this->contract->get_id() === $contract_id && 1 === $customer_id ) ? $this->contract : null;
 			}
 
-			public function get_related_orders( int $contract_id ): array {
-				return $this->orders;
+			public function get_related_orders( int $contract_id, int $limit = -1, int $offset = 0 ): array {
+				return array_slice( $this->orders, max( 0, $offset ), $limit > 0 ? $limit : null );
 			}
 		};
 	}

@@ -34,10 +34,12 @@ final class ApiSubscriptionsReader implements SubscriptionsReader {
 	 * {@inheritDoc}
 	 *
 	 * @param int $customer_id Owning customer id.
+	 * @param int $limit       Maximum contracts to return.
+	 * @param int $offset      Contracts to skip (for paging).
 	 * @return array<int, Contract>
 	 */
-	public function list_for_customer( int $customer_id ): array {
-		return Subscriptions::list_for_customer( $customer_id );
+	public function list_for_customer( int $customer_id, int $limit = 20, int $offset = 0 ): array {
+		return Subscriptions::list_for_customer( $customer_id, $limit, $offset );
 	}
 
 	/**
@@ -55,9 +57,11 @@ final class ApiSubscriptionsReader implements SubscriptionsReader {
 	 * {@inheritDoc}
 	 *
 	 * @param int $contract_id Contract id.
+	 * @param int $limit       Maximum orders to return; -1 for all.
+	 * @param int $offset      Orders to skip (for paging).
 	 * @return array<int, WC_Order>
 	 */
-	public function get_related_orders( int $contract_id ): array {
-		return Subscriptions::get_related_orders( $contract_id );
+	public function get_related_orders( int $contract_id, int $limit = -1, int $offset = 0 ): array {
+		return Subscriptions::get_related_orders( $contract_id, $limit, $offset );
 	}
 }

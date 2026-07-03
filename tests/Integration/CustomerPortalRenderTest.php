@@ -68,7 +68,7 @@ final class CustomerPortalRenderTest extends TestCase {
 		$this->assertStringContainsString( 'account-subscriptions-table', $html );
 		$this->assertStringContainsString( 'data-wp-interactive="' . Endpoints::STORE_NAMESPACE . '"', $html );
 
-		// A status badge for every known status appears in the list.
+		// A status badge for every known status appears on the first page.
 		foreach ( ContractStatus::all() as $status ) {
 			$this->assertStringContainsString(
 				'wc-subs-lite-status-badge--' . $status,
@@ -77,8 +77,62 @@ final class CustomerPortalRenderTest extends TestCase {
 			);
 		}
 
-		// The View link points at the detail endpoint slug.
-		$this->assertStringContainsString( Endpoints::DETAIL_ENDPOINT . '/101', $html );
+		// Newest first: the highest-id fixture leads page one.
+		$this->assertStringContainsString( Endpoints::DETAIL_ENDPOINT . '/112', $html );
+	}
+
+	public function test_list_paginates_at_ten_rows_per_page(): void {
+		$endpoints = new Endpoints();
+
+		// Page 1: ten rows, a Next link, no Previous.
+		$page_one = $this->capture( [ $endpoints, 'render_list' ] );
+		$this->assertSame( 10, substr_count( $page_one, '<tr class="subscription">' ), 'Page one carries ten rows.' );
+		$this->assertStringContainsString( 'woocommerce-pagination--without-numbers', $page_one );
+		$this->assertStringContainsString( 'woocommerce-button--next', $page_one );
+		$this->assertStringNotContainsString( 'woocommerce-button--previous', $page_one );
+		$this->assertStringNotContainsString( Endpoints::DETAIL_ENDPOINT . '/101', $page_one, 'The oldest fixtures fall to page two.' );
+
+		// Page 2: the remaining two rows, a Previous link, no Next.
+		$page_two = $this->capture(
+			static function () use ( $endpoints ): void {
+				$endpoints->render_list( '2' );
+			}
+		);
+		$this->assertSame( 2, substr_count( $page_two, '<tr class="subscription">' ), 'Page two carries the remainder.' );
+		$this->assertStringContainsString( Endpoints::DETAIL_ENDPOINT . '/101', $page_two );
+		$this->assertStringContainsString( Endpoints::DETAIL_ENDPOINT . '/102', $page_two );
+		$this->assertStringContainsString( 'woocommerce-button--previous', $page_two );
+		$this->assertStringNotContainsString( 'woocommerce-button--next', $page_two );
+	}
+
+	public function test_related_orders_paginate_on_the_detail_page(): void {
+		$endpoints = new Endpoints();
+
+		// Page 1 of the long-running fixture's history: ten orders + Next.
+		$page_one = $this->capture(
+			static function () use ( $endpoints ): void {
+				$endpoints->render_detail( 101 );
+			}
+		);
+		$this->assertSame( 10, substr_count( $page_one, '<tr class="subscription-related-order">' ), 'Ten related orders per page.' );
+		$this->assertStringContainsString( 'woocommerce-button--next', $page_one );
+		$this->assertStringContainsString( Endpoints::ORDERS_PAGE_QUERY_ARG . '=2', $page_one );
+		$this->assertStringNotContainsString( 'woocommerce-button--previous', $page_one );
+
+		// Page 2: the remaining five + Previous back to the bare detail URL.
+		$_GET[ Endpoints::ORDERS_PAGE_QUERY_ARG ] = '2';
+		try {
+			$page_two = $this->capture(
+				static function () use ( $endpoints ): void {
+					$endpoints->render_detail( 101 );
+				}
+			);
+		} finally {
+			unset( $_GET[ Endpoints::ORDERS_PAGE_QUERY_ARG ] );
+		}
+		$this->assertSame( 5, substr_count( $page_two, '<tr class="subscription-related-order">' ), 'Page two carries the remainder.' );
+		$this->assertStringContainsString( 'woocommerce-button--previous', $page_two );
+		$this->assertStringNotContainsString( 'woocommerce-button--next', $page_two );
 	}
 
 	public function test_active_detail_renders_actions_and_seeds_state(): void {

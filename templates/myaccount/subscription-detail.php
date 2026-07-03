@@ -7,8 +7,9 @@
  * view-model is pre-shaped by {@see \Automattic\WooCommerce\SubscriptionsLite\CustomerPortal\ViewModel}
  * so this template is pure presentation.
  *
- * @var array<string, mixed> $detail Pre-shaped detail view-model.
- * @var string               $store  The iAPI store namespace.
+ * @var array<string, mixed>  $detail            Pre-shaped detail view-model.
+ * @var string                $store             The iAPI store namespace.
+ * @var array<string, string> $orders_pagination Related-orders previous / next page URLs ('' = no link).
  *
  * @package Automattic\WooCommerce\SubscriptionsLite
  */
@@ -284,6 +285,16 @@ $has_actions = $detail['cancel_visible'] || $detail['hold_visible'] || $detail['
 			</tbody>
 		</table>
 	<?php endif; ?>
+
+	<?php
+	// Outside the table's guard, so a page past the end still gets a way back.
+	wc_get_template(
+		'myaccount/pagination.php',
+		[ 'pagination' => $orders_pagination ?? [] ],
+		'',
+		\Automattic\WooCommerce\SubscriptionsLite\Package::get_path() . '/templates/'
+	);
+	?>
 
 	<?php
 	/**

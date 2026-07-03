@@ -150,6 +150,34 @@ if ( ! function_exists( 'wc_get_endpoint_url' ) ) {
 	}
 }
 
+if ( ! function_exists( 'wp_unslash' ) ) {
+	/**
+	 * Unslash pass-through (test input is never slashed).
+	 *
+	 * @param mixed $value Value.
+	 * @return mixed
+	 */
+	function wp_unslash( $value ) {
+		return $value;
+	}
+}
+
+if ( ! function_exists( 'add_query_arg' ) ) {
+	/**
+	 * Minimal query-arg stub: appends `key=value` with the right separator (the
+	 * portal only adds a single pagination arg to already-built URLs).
+	 *
+	 * @param string     $key   Query key.
+	 * @param int|string $value Query value.
+	 * @param string     $url   Base URL.
+	 * @return string
+	 */
+	function add_query_arg( string $key, $value, string $url ): string {
+		$separator = false === strpos( $url, '?' ) ? '?' : '&';
+		return $url . $separator . $key . '=' . rawurlencode( (string) $value );
+	}
+}
+
 if ( ! function_exists( 'wc_print_notices' ) ) {
 	/**
 	 * Notice-print stub (no-op in tests).
