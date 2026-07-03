@@ -123,6 +123,19 @@ if ( ! function_exists( 'esc_html__' ) ) {
 	}
 }
 
+if ( ! function_exists( 'esc_html_e' ) ) {
+	/**
+	 * Pass-through escaping translation echo stub.
+	 *
+	 * @param string $text   Text.
+	 * @param string $domain Text domain.
+	 * @return void
+	 */
+	function esc_html_e( string $text, string $domain = 'default' ): void {
+		echo $text; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Test stub.
+	}
+}
+
 if ( ! function_exists( 'plugin_dir_url' ) ) {
 	/**
 	 * Return a stable fake plugin URL.
@@ -320,5 +333,29 @@ if ( ! function_exists( 'esc_attr' ) ) {
 	 */
 	function esc_attr( string $text ): string {
 		return $text;
+	}
+}
+
+if ( ! function_exists( 'wp_unslash' ) ) {
+	/**
+	 * Pass-through unslashing stub.
+	 *
+	 * @param mixed $value Value.
+	 * @return mixed
+	 */
+	function wp_unslash( $value ) {
+		return is_string( $value ) ? stripslashes( $value ) : $value;
+	}
+}
+
+if ( ! function_exists( 'sanitize_key' ) ) {
+	/**
+	 * Lowercase, restrict to alphanumerics, dashes and underscores.
+	 *
+	 * @param string $key Key.
+	 * @return string
+	 */
+	function sanitize_key( string $key ): string {
+		return preg_replace( '/[^a-z0-9_\-]/', '', strtolower( $key ) );
 	}
 }

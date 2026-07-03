@@ -73,7 +73,7 @@ final class Bootstrap {
 			Admin\PageController::register();
 			Admin\RowActionController::register();
 
-			// Register the plans page.
+			// Register the WooCommerce Settings > Subscriptions tab (plans manager).
 			Admin\PlansPage::register();
 		}
 

@@ -31,26 +31,37 @@ final class PlansPageTest extends TestCase {
 		$GLOBALS['woocommerce_subscriptions_lite_test_can_manage_woocommerce'] = false;
 	}
 
-	public function test_register_menu_adds_woocommerce_submenu(): void {
-		$page = new PlansPage();
-
-		$page->register_menu();
-
-		$this->assertCount( 1, $GLOBALS['woocommerce_subscriptions_lite_test_submenus'] );
-		$submenu = $GLOBALS['woocommerce_subscriptions_lite_test_submenus'][0];
-		$this->assertSame( 'woocommerce', $submenu['parent_slug'] );
-		$this->assertSame( PlansPage::CAPABILITY, $submenu['capability'] );
-		$this->assertSame( PlansPage::MENU_SLUG, $submenu['menu_slug'] );
+	public function tearDown(): void {
+		unset( $_GET['tab'], $GLOBALS['hide_save_button'] );
+		parent::tearDown();
 	}
 
-	public function test_enqueue_assets_only_runs_on_registered_hook_suffix(): void {
+	public function test_add_settings_tab_registers_subscriptions_tab(): void {
 		$page = new PlansPage();
-		$page->register_menu();
 
+		$tabs = $page->add_settings_tab( [ 'general' => 'General' ] );
+
+		$this->assertArrayHasKey( PlansPage::TAB_SLUG, $tabs );
+		$this->assertSame( 'subscriptions', PlansPage::TAB_SLUG );
+		$this->assertArrayHasKey( 'general', $tabs );
+	}
+
+	public function test_enqueue_assets_only_runs_on_subscriptions_settings_tab(): void {
+		$page = new PlansPage();
+
+		// Wrong screen entirely.
+		$_GET['tab'] = PlansPage::TAB_SLUG;
 		$page->enqueue_assets( 'dashboard_page_elsewhere' );
 		$this->assertSame( [], $GLOBALS['woocommerce_subscriptions_lite_test_enqueued_scripts'] );
 
-		$page->enqueue_assets( 'woocommerce_page_' . PlansPage::MENU_SLUG );
+		// Right screen, wrong tab.
+		$_GET['tab'] = 'general';
+		$page->enqueue_assets( 'woocommerce_page_wc-settings' );
+		$this->assertSame( [], $GLOBALS['woocommerce_subscriptions_lite_test_enqueued_scripts'] );
+
+		// Right screen, right tab.
+		$_GET['tab'] = PlansPage::TAB_SLUG;
+		$page->enqueue_assets( 'woocommerce_page_wc-settings' );
 
 		$this->assertArrayHasKey( self::SCRIPT_HANDLE, $GLOBALS['woocommerce_subscriptions_lite_test_enqueued_scripts'] );
 		$this->assertSame(
@@ -111,5 +122,16 @@ final class PlansPageTest extends TestCase {
 		$output = ob_get_clean();
 
 		$this->assertStringContainsString( 'wc-subscriptions-lite-plan-manager', $output );
+
+		// Two-column form-table layout: description in the left label cell,
+		// React table mount in the right control cell.
+		$this->assertStringContainsString( 'class="form-table"', $output );
+		$this->assertStringContainsString( 'wc-subscriptions-lite-settings-tab', $output );
+		$this->assertStringContainsString( 'titledesc', $output );
+		$this->assertStringContainsString( 'Storewide subscription plans', $output );
+		$this->assertStringContainsString( 'Create a set of subscription plans', $output );
+
+		// The tab has no form settings, so the default Save button is hidden.
+		$this->assertTrue( $GLOBALS['hide_save_button'] );
 	}
 }

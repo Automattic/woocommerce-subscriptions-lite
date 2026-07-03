@@ -194,30 +194,6 @@ export function PlanManager() {
 
 	return (
 		<div className="wc-subscriptions-lite-plans">
-			<Flex
-				className="wc-subscriptions-lite-plans__header"
-				justify="space-between"
-				align="center"
-			>
-				<FlexItem>
-					<h1>
-						{ __(
-							'Subscription Plans',
-							'woocommerce-subscriptions-lite'
-						) }
-					</h1>
-				</FlexItem>
-				<FlexItem>
-					<Button
-						variant="primary"
-						icon={ plus }
-						onClick={ openCreate }
-					>
-						{ __( 'Add plan', 'woocommerce-subscriptions-lite' ) }
-					</Button>
-				</FlexItem>
-			</Flex>
-
 			{ notice && (
 				<Notice
 					status="success"
@@ -257,6 +233,18 @@ export function PlanManager() {
 						onRestore={ ( plan ) => changeStatus( plan, 'active' ) }
 						onReorder={ handleReorder }
 					/>
+
+					<Flex className="wc-subscriptions-lite-plans__add-plan-button" >
+						<FlexItem>
+							<Button
+								variant="secondary"
+								icon={ plus }
+								onClick={ openCreate }
+							>
+								{ __( 'Add plan', 'woocommerce-subscriptions-lite' ) }
+							</Button>
+						</FlexItem>
+					</Flex>
 				</CardBody>
 			</Card>
 
