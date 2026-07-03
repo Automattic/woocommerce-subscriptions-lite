@@ -13,18 +13,26 @@
 			text-align: left;
 		}
 
-		thead th.dataviews-view-table__actions-column {
+		thead th.dataviews-view-table__actions-column,
+		thead th.dataviews-view-table__actions-column:last-child {
 			text-align: right;
 			padding-right: variables.$grid-unit-30;
 		}
 
 		.dataviews-view-table__cell-content-wrapper {
 			text-align: left;
-			padding-left: variables.$grid-unit-15;
+
+			&:not(.dataviews-title-field) {
+				padding-left: variables.$grid-unit-15;
+			}
 		}
 
 		tbody .dataviews-view-table__row {
 			border-top: variables.$border-width solid colors.$gray-400;
+
+			&.is-draggable {
+				cursor: grab;
+			}
 		}
 	}
 }
@@ -44,11 +52,59 @@
 	min-height: 220px;
 }
 
-.wc-subscriptions-lite-plans__modal .components-modal__content {
-	min-width: min(breakpoints.$break-medium, calc(100vw - variables.$grid-unit-60));
+// Form layout.
+.wc-subscriptions-lite-plans__form-section {
+	margin-bottom: variables.$grid-unit-30;
+
+	&:last-of-type {
+		margin-bottom: 0;
+	}
 }
 
-.wc-subscriptions-lite-plans__modal-footer {
+.wc-subscriptions-lite-plans__form-section-title {
+	margin: 0 0 variables.$grid-unit-15;
+	font-size: variables.$font-size-medium;
+	font-weight: 600;
+	text-transform: uppercase;
+	color: colors.$gray-700;
+}
+
+.wc-subscriptions-lite-plans__field {
+	margin-bottom: variables.$grid-unit-20;
+
+	&:last-child {
+		margin-bottom: 0;
+	}
+}
+
+.wc-subscriptions-lite-plans__field-row {
+	display: flex;
+	gap: variables.$grid-unit-15;
+	align-items: flex-end;
+
+	> * {
+		flex: 1 1 0;
+	}
+}
+
+.wc-subscriptions-lite-plans__total-payments {
+	margin-top: variables.$grid-unit-15;
+}
+
+.wc-subscriptions-lite-plans__error {
+	margin: variables.$grid-unit-05 0 0;
+	color: colors.$alert-red;
+	font-size: variables.$font-size-x-small;
+}
+
+.wc-subscriptions-lite-plans__saving {
+	display: flex;
+	align-items: center;
+	gap: variables.$grid-unit-10;
+	margin-bottom: variables.$grid-unit-20;
+}
+
+.wc-subscriptions-lite-plans__form-actions {
 	display: flex;
 	gap: variables.$grid-unit-15;
 	justify-content: flex-end;

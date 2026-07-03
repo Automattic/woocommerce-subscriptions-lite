@@ -1,147 +1,83 @@
-import { __, sprintf } from '@wordpress/i18n';
+/**
+ * Registry-driven transforms between the flat form model and the engine plan
+ * shape. Every function loops the field registry so injected fields round-trip
+ * without any change here; engine data no field owns (e.g. one_time_fees) is
+ * preserved on edit by seeding the payload from the existing plan.
+ */
+
 import { config } from './config';
 
-export const DEFAULT_FORM_DATA = {
-	name: '',
-	description: '',
-	period: 'month',
-	interval: 1,
-	expires: false,
-	maxCycles: '',
-	pricingType: 'percentage',
-	pricingValue: '',
-	pricingScope: 'all',
-	durationCycles: '',
-};
-
-export function planToFormData( plan = {} ) {
-	const billing = plan.billing_policy || {};
-	const pricing = plan.pricing_policy || {};
-	const firstPolicy = Array.isArray( pricing.policies )
-		? pricing.policies[ 0 ]
-		: null;
-	const maxCycles = billing.max_cycles || '';
-	const pricingType = firstPolicy?.type || 'percentage';
-	const durationCycles = firstPolicy?.duration_cycles || '';
-	let pricingScope = 'all';
-	if ( Number( durationCycles ) === 1 ) {
-		pricingScope = 'first';
-	} else if ( Number( durationCycles ) > 1 ) {
-		pricingScope = 'n_cycles';
-	}
-
-	return {
-		...DEFAULT_FORM_DATA,
-		name: plan.name || '',
-		description: plan.description || '',
-		period: billing.period || 'month',
-		interval: billing.interval || 1,
-		expires: Number( maxCycles ) > 0,
-		maxCycles,
-		pricingType,
-		pricingValue: firstPolicy?.value ?? '',
-		pricingScope,
-		durationCycles,
-	};
+/**
+ * Build the default form data by merging each descriptor's defaults.
+ *
+ * @param {Array<Object>} registry Field descriptors.
+ * @return {Object} Default form data.
+ */
+export function makeDefaultFormData( registry ) {
+	return registry.reduce(
+		( acc, field ) => ( { ...acc, ...( field.default || {} ) } ),
+		{}
+	);
 }
 
-export function formDataToPayload( formData, plan = null ) {
-	const payload = {
-		extension_slug: config.extensionSlug,
-		name: formData.name.trim(),
-		description: formData.description?.trim() || null,
-		billing_policy: {
-			period: formData.period,
-			interval: Number( formData.interval ),
-			max_cycles: formData.expires ? Number( formData.maxCycles ) : null,
-		},
-		pricing_policy: pricingPolicyFromFormData( formData, plan ),
-	};
+/**
+ * Map an engine plan to flat form data.
+ *
+ * @param {Array<Object>} registry Field descriptors.
+ * @param {Object}        plan     Engine plan object.
+ * @return {Object} Flat form data.
+ */
+export function planToFormData( registry, plan = {} ) {
+	return registry.reduce(
+		( acc, field ) =>
+			field.fromPlan ? { ...acc, ...field.fromPlan( plan ) } : acc,
+		makeDefaultFormData( registry )
+	);
+}
 
+/**
+ * Map flat form data to an engine REST payload.
+ *
+ * @param {Array<Object>} registry Field descriptors.
+ * @param {Object}        formData Flat form data.
+ * @param {Object|null}   plan     Existing plan when editing, else null.
+ * @return {Object} Engine REST payload.
+ */
+export function formDataToPayload( registry, formData, plan = null ) {
+	const base = { extension_slug: config.extensionSlug };
 	if ( ! plan ) {
-		payload.status = config.defaultStatus;
+		base.status = config.defaultStatus;
 	}
 
-	return payload;
+	return registry.reduce(
+		( payload, field ) =>
+			field.toPayload
+				? field.toPayload( formData, payload, plan )
+				: payload,
+		base
+	);
 }
 
-export function pricingPolicyFromFormData( formData, plan = null ) {
-	const existing = plan?.pricing_policy || {};
-	const oneTimeFees = Array.isArray( existing.one_time_fees )
-		? existing.one_time_fees
-		: [];
-
-	if ( formData.pricingValue === '' ) {
-		return { policies: [], one_time_fees: oneTimeFees };
-	}
-
-	const entry = {
-		type: formData.pricingType,
-		value: Number( formData.pricingValue ),
-	};
-
-	if ( formData.pricingScope === 'first' ) {
-		entry.duration_cycles = 1;
-	} else if ( formData.pricingScope === 'n_cycles' ) {
-		entry.duration_cycles = Number( formData.durationCycles );
-	}
-
-	return {
-		policies: [ entry ],
-		one_time_fees: oneTimeFees,
-	};
+/**
+ * Collect validation errors from every descriptor.
+ *
+ * @param {Array<Object>} registry Field descriptors.
+ * @param {Object}        formData Flat form data.
+ * @return {Object} Errors keyed by field key.
+ */
+export function formErrors( registry, formData ) {
+	return registry.reduce( ( acc, field ) => {
+		const errors = field.validate ? field.validate( formData ) : null;
+		return errors ? { ...acc, ...errors } : acc;
+	}, {} );
 }
 
-export function formErrors( formData ) {
-	const errors = {};
-
-	if ( ! formData.name.trim() ) {
-		errors.name = __(
-			'Name is required.',
-			'woocommerce-subscriptions-lite'
-		);
-	}
-	if ( Number( formData.interval ) < 1 ) {
-		errors.interval = __(
-			'Interval must be at least 1.',
-			'woocommerce-subscriptions-lite'
-		);
-	}
-	if ( formData.expires && Number( formData.maxCycles ) < 1 ) {
-		errors.maxCycles = __(
-			'Total payments must be at least 1.',
-			'woocommerce-subscriptions-lite'
-		);
-	}
-	if ( formData.pricingValue !== '' && Number( formData.pricingValue ) < 0 ) {
-		errors.pricingValue = __(
-			'Discount value cannot be negative.',
-			'woocommerce-subscriptions-lite'
-		);
-	}
-	if (
-		formData.pricingType === 'percentage' &&
-		formData.pricingValue !== '' &&
-		Number( formData.pricingValue ) > 100
-	) {
-		errors.pricingValue = __(
-			'Percentage cannot exceed 100.',
-			'woocommerce-subscriptions-lite'
-		);
-	}
-	if (
-		formData.pricingScope === 'n_cycles' &&
-		Number( formData.durationCycles ) < 2
-	) {
-		errors.durationCycles = __(
-			'Cycle count must be at least 2.',
-			'woocommerce-subscriptions-lite'
-		);
-	}
-
-	return errors;
-}
-
+/**
+ * Translate a DataViews view into engine list query params.
+ *
+ * @param {Object} view DataViews view state.
+ * @return {Object} Query params for the engine plans endpoint.
+ */
 export function viewToQuery( view ) {
 	const statusFilter = view.filters?.find(
 		( filter ) => filter.field === 'status'
@@ -158,78 +94,4 @@ export function viewToQuery( view ) {
 		orderby: view.sort?.field || 'sort_order',
 		order: view.sort?.direction || 'asc',
 	};
-}
-
-export function formatFrequency( plan, definitions = {} ) {
-	const billing = plan.billing_policy || {};
-	const interval = Number( billing.interval || 1 );
-	const unit = billing.period || 'month';
-	const unitDefinition = getBillingUnitDefinition( definitions, unit );
-
-	if ( interval === 1 ) {
-		return unitDefinition?.singular || unitDefinition?.label || unit;
-	}
-
-	return sprintf(
-		/* translators: 1: billing interval, 2: billing period unit. */
-		__( '%1$d %2$s', 'woocommerce-subscriptions-lite' ),
-		interval,
-		unitDefinition?.plural || unitDefinition?.label || unit
-	);
-}
-
-function getBillingUnitDefinition( definitions, unit ) {
-	const billingUnits =
-		definitions?.billingUnits ||
-		definitions?.billing_units ||
-		config.definitions?.billing_units ||
-		[];
-
-	return billingUnits.find( ( billingUnit ) => billingUnit.value === unit );
-}
-
-export function formatDiscount( plan ) {
-	const firstPolicy = plan.pricing_policy?.policies?.[ 0 ];
-	if ( ! firstPolicy ) {
-		return '-';
-	}
-
-	const value = Number( firstPolicy.value || 0 );
-	let label = '-';
-	if ( firstPolicy.type === 'percentage' ) {
-		label = sprintf(
-			/* translators: %s is a discount percentage value, e.g. '10' for "10% off". */
-			__( '%s%% off', 'woocommerce-subscriptions-lite' ),
-			value
-		);
-	} else if ( firstPolicy.type === 'fixed_amount' ) {
-		label = sprintf(
-			/* translators: %s is a monetary or numeric discount, e.g. '$10' for "$10 off". */
-			__( '%s off', 'woocommerce-subscriptions-lite' ),
-			value
-		);
-	} else if ( firstPolicy.type === 'price' ) {
-		label = String( value );
-	}
-
-	const durationCycles = Number( firstPolicy.duration_cycles );
-
-	if ( durationCycles === 1 ) {
-		return sprintf(
-			/* translators: %s is a discount label, e.g. "10% off". */
-			__( '%s (first cycle)', 'woocommerce-subscriptions-lite' ),
-			label
-		);
-	}
-
-	if ( durationCycles > 1 ) {
-		return sprintf(
-			/* translators: 1: discount label (e.g. "10% off"), 2: number of cycles. */
-			__( '%1$s (%2$d cycles)', 'woocommerce-subscriptions-lite' ),
-			label,
-			durationCycles
-		);
-	}
-
-	return label;
 }
