@@ -176,12 +176,11 @@ $error-fg: $alert-red;
 
 /* Customer-details addresses: rely on the theme's columns chrome; keep the
    section clear of the table above and render address lines upright. */
+/* Addresses reuse WooCommerce's native my-account layout (u-columns /
+   col2-set, as on the edit-address page) so the theme owns the two-column
+   chrome; only the section spacing and the contact lines are ours. */
 .subscription-detail-addresses {
 	margin-top: $grid-unit-30;
-
-	address {
-		font-style: normal;
-	}
 
 	.woocommerce-customer-details--phone,
 	.woocommerce-customer-details--email {

@@ -209,39 +209,38 @@ $has_actions = $detail['cancel_visible'] || $detail['hold_visible'] || $detail['
 
 	<?php if ( '' !== (string) $detail['billing_address'] || '' !== (string) $detail['shipping_address'] ) : ?>
 		<?php $has_both_addresses = '' !== (string) $detail['billing_address'] && '' !== (string) $detail['shipping_address']; ?>
-		<section class="woocommerce-customer-details subscription-detail-addresses">
-			<?php if ( $has_both_addresses ) : ?>
-			<div class="woocommerce-columns woocommerce-columns--2 woocommerce-columns--addresses col2-set addresses">
+		<?php // Mirrors WooCommerce's my-account addresses layout (myaccount/my-address.php, as on /my-account/edit-address/): the theme styles the u-columns / col2-set chrome, and the title header is the slot per-address actions (edit) land in later. ?>
+		<div class="<?php echo esc_attr( $has_both_addresses ? 'u-columns woocommerce-Addresses col2-set addresses subscription-detail-addresses' : 'subscription-detail-addresses' ); ?>">
+
+			<?php if ( '' !== (string) $detail['billing_address'] ) : ?>
+				<div class="<?php echo esc_attr( $has_both_addresses ? 'u-column1 col-1 woocommerce-Address' : 'woocommerce-Address' ); ?>">
+					<header class="woocommerce-Address-title title">
+						<h2><?php esc_html_e( 'Billing address', 'woocommerce-subscriptions-lite' ); ?></h2>
+					</header>
+					<address>
+						<?php echo wp_kses_post( (string) $detail['billing_address'] ); ?>
+						<?php if ( '' !== (string) $detail['billing_phone'] ) : ?>
+							<p class="woocommerce-customer-details--phone"><?php echo esc_html( (string) $detail['billing_phone'] ); ?></p>
+						<?php endif; ?>
+						<?php if ( '' !== (string) $detail['billing_email'] ) : ?>
+							<p class="woocommerce-customer-details--email"><?php echo esc_html( (string) $detail['billing_email'] ); ?></p>
+						<?php endif; ?>
+					</address>
+				</div>
 			<?php endif; ?>
 
-				<?php if ( '' !== (string) $detail['billing_address'] ) : ?>
-					<div class="woocommerce-column woocommerce-column--1 woocommerce-column--billing-address col-1">
-						<h3 class="woocommerce-column__title"><?php esc_html_e( 'Billing address', 'woocommerce-subscriptions-lite' ); ?></h3>
-						<address>
-							<?php echo wp_kses_post( (string) $detail['billing_address'] ); ?>
-							<?php if ( '' !== (string) $detail['billing_phone'] ) : ?>
-								<p class="woocommerce-customer-details--phone"><?php echo esc_html( (string) $detail['billing_phone'] ); ?></p>
-							<?php endif; ?>
-							<?php if ( '' !== (string) $detail['billing_email'] ) : ?>
-								<p class="woocommerce-customer-details--email"><?php echo esc_html( (string) $detail['billing_email'] ); ?></p>
-							<?php endif; ?>
-						</address>
-					</div>
-				<?php endif; ?>
-
-				<?php if ( '' !== (string) $detail['shipping_address'] ) : ?>
-					<div class="woocommerce-column woocommerce-column--2 woocommerce-column--shipping-address col-2">
-						<h3 class="woocommerce-column__title"><?php esc_html_e( 'Shipping address', 'woocommerce-subscriptions-lite' ); ?></h3>
-						<address>
-							<?php echo wp_kses_post( (string) $detail['shipping_address'] ); ?>
-						</address>
-					</div>
-				<?php endif; ?>
-
-			<?php if ( $has_both_addresses ) : ?>
-			</div>
+			<?php if ( '' !== (string) $detail['shipping_address'] ) : ?>
+				<div class="<?php echo esc_attr( $has_both_addresses ? 'u-column2 col-2 woocommerce-Address' : 'woocommerce-Address' ); ?>">
+					<header class="woocommerce-Address-title title">
+						<h2><?php esc_html_e( 'Shipping address', 'woocommerce-subscriptions-lite' ); ?></h2>
+					</header>
+					<address>
+						<?php echo wp_kses_post( (string) $detail['shipping_address'] ); ?>
+					</address>
+				</div>
 			<?php endif; ?>
-		</section>
+
+		</div>
 	<?php endif; ?>
 
 	<?php // Related orders render last: the list can grow long, while the sections above carry (future) actions. ?>

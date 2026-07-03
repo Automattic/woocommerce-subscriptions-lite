@@ -115,10 +115,13 @@ final class CustomerPortalRenderTest extends TestCase {
 			$this->assertStringContainsString( $totals_label, $html, "Totals row '{$totals_label}' renders." );
 		}
 
-		// Customer details render both fixture addresses with the contact lines.
+		// Addresses render in WooCommerce's native my-account layout (u-columns /
+		// col2-set, as on the edit-address page) with the contact lines.
 		$this->assertStringContainsString( 'subscription-detail-addresses', $html );
-		$this->assertStringContainsString( 'woocommerce-column--billing-address', $html );
-		$this->assertStringContainsString( 'woocommerce-column--shipping-address', $html );
+		$this->assertStringContainsString( 'u-columns woocommerce-Addresses col2-set addresses', $html );
+		$this->assertStringContainsString( 'u-column1 col-1 woocommerce-Address', $html );
+		$this->assertStringContainsString( 'u-column2 col-2 woocommerce-Address', $html );
+		$this->assertStringContainsString( 'woocommerce-Address-title', $html );
 		$this->assertStringContainsString( '10 Analytical Way', $html );
 		$this->assertStringContainsString( '1 Engine House', $html );
 		$this->assertStringContainsString( 'ada@example.com', $html );
