@@ -27,6 +27,18 @@ if ( ! function_exists( 'wc_get_logger' ) ) {
 	}
 }
 
+if ( ! function_exists( 'wc_get_is_paid_statuses' ) ) {
+	/**
+	 * WooCommerce's default paid statuses - the engine's completion listeners read
+	 * these at registration time.
+	 *
+	 * @return array<int, string>
+	 */
+	function wc_get_is_paid_statuses(): array {
+		return array( 'processing', 'completed' );
+	}
+}
+
 if ( ! function_exists( 'add_action' ) ) {
 	/**
 	 * Record an action registration.
