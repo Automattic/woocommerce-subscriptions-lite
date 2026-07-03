@@ -165,6 +165,15 @@ $error-fg: $alert-red;
 	white-space: nowrap;
 }
 
+/* Previous / Next pagination controls (shared by the list and the detail's
+   related orders): own the layout so adjacent buttons never fuse into one
+   block, matching the spacing of the core my-account orders pagination. */
+.subscriptions-lite-pagination {
+	display: flex;
+	gap: $grid-unit-10;
+	margin-top: $grid-unit-20;
+}
+
 /* Subscription-totals table: quantity marker + right-aligned amounts. */
 .subscription-totals .product-quantity {
 	white-space: nowrap;
