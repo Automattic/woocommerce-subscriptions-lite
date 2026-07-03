@@ -172,46 +172,6 @@ $has_actions = $detail['cancel_visible'] || $detail['hold_visible'] || $detail['
 		?>
 	<?php endif; ?>
 
-	<?php if ( ! empty( $detail['related_orders'] ) ) : ?>
-		<h3 class="subscription-detail-related-heading"><?php esc_html_e( 'Related orders', 'woocommerce-subscriptions-lite' ); ?></h3>
-		<table class="shop_table shop_table_responsive subscription-related-orders">
-			<thead>
-				<tr>
-					<th class="related-order-number"><?php esc_html_e( 'Order', 'woocommerce-subscriptions-lite' ); ?></th>
-					<th class="related-order-date"><?php esc_html_e( 'Date', 'woocommerce-subscriptions-lite' ); ?></th>
-					<th class="related-order-status"><?php esc_html_e( 'Status', 'woocommerce-subscriptions-lite' ); ?></th>
-					<th class="related-order-total"><?php esc_html_e( 'Total', 'woocommerce-subscriptions-lite' ); ?></th>
-					<th class="related-order-actions">&nbsp;</th>
-				</tr>
-			</thead>
-			<tbody>
-				<?php foreach ( $detail['related_orders'] as $related_order ) : ?>
-					<tr class="subscription-related-order">
-						<td class="related-order-number" data-title="<?php esc_attr_e( 'Order', 'woocommerce-subscriptions-lite' ); ?>">
-							<a href="<?php echo esc_url( (string) $related_order['view_url'] ); ?>">#<?php echo esc_html( (string) $related_order['number'] ); ?></a>
-						</td>
-						<td class="related-order-date" data-title="<?php esc_attr_e( 'Date', 'woocommerce-subscriptions-lite' ); ?>">
-							<?php echo '' !== (string) $related_order['date'] ? esc_html( (string) $related_order['date'] ) : '&mdash;'; ?>
-						</td>
-						<td class="related-order-status" data-title="<?php esc_attr_e( 'Status', 'woocommerce-subscriptions-lite' ); ?>">
-							<span class="wc-subs-lite-status-badge wc-subs-lite-status-badge--<?php echo esc_attr( (string) $related_order['status'] ); ?>">
-								<?php echo esc_html( (string) $related_order['status_label'] ); ?>
-							</span>
-						</td>
-						<td class="related-order-total" data-title="<?php esc_attr_e( 'Total', 'woocommerce-subscriptions-lite' ); ?>">
-							<?php echo esc_html( (string) $related_order['total'] ); ?>
-						</td>
-						<td class="related-order-actions">
-							<a href="<?php echo esc_url( (string) $related_order['view_url'] ); ?>" class="woocommerce-button button view<?php echo esc_attr( $wp_button_class ); ?>">
-								<?php esc_html_e( 'View order', 'woocommerce-subscriptions-lite' ); ?>
-							</a>
-						</td>
-					</tr>
-				<?php endforeach; ?>
-			</tbody>
-		</table>
-	<?php endif; ?>
-
 	<?php if ( ! empty( $detail['items'] ) ) : ?>
 		<h3 class="subscription-detail-totals-heading"><?php esc_html_e( 'Subscription totals', 'woocommerce-subscriptions-lite' ); ?></h3>
 		<table class="shop_table shop_table_responsive subscription-totals">
@@ -282,6 +242,47 @@ $has_actions = $detail['cancel_visible'] || $detail['hold_visible'] || $detail['
 			</div>
 			<?php endif; ?>
 		</section>
+	<?php endif; ?>
+
+	<?php // Related orders render last: the list can grow long, while the sections above carry (future) actions. ?>
+	<?php if ( ! empty( $detail['related_orders'] ) ) : ?>
+		<h3 class="subscription-detail-related-heading"><?php esc_html_e( 'Related orders', 'woocommerce-subscriptions-lite' ); ?></h3>
+		<table class="shop_table shop_table_responsive subscription-related-orders">
+			<thead>
+				<tr>
+					<th class="related-order-number"><?php esc_html_e( 'Order', 'woocommerce-subscriptions-lite' ); ?></th>
+					<th class="related-order-date"><?php esc_html_e( 'Date', 'woocommerce-subscriptions-lite' ); ?></th>
+					<th class="related-order-status"><?php esc_html_e( 'Status', 'woocommerce-subscriptions-lite' ); ?></th>
+					<th class="related-order-total"><?php esc_html_e( 'Total', 'woocommerce-subscriptions-lite' ); ?></th>
+					<th class="related-order-actions">&nbsp;</th>
+				</tr>
+			</thead>
+			<tbody>
+				<?php foreach ( $detail['related_orders'] as $related_order ) : ?>
+					<tr class="subscription-related-order">
+						<td class="related-order-number" data-title="<?php esc_attr_e( 'Order', 'woocommerce-subscriptions-lite' ); ?>">
+							<a href="<?php echo esc_url( (string) $related_order['view_url'] ); ?>">#<?php echo esc_html( (string) $related_order['number'] ); ?></a>
+						</td>
+						<td class="related-order-date" data-title="<?php esc_attr_e( 'Date', 'woocommerce-subscriptions-lite' ); ?>">
+							<?php echo '' !== (string) $related_order['date'] ? esc_html( (string) $related_order['date'] ) : '&mdash;'; ?>
+						</td>
+						<td class="related-order-status" data-title="<?php esc_attr_e( 'Status', 'woocommerce-subscriptions-lite' ); ?>">
+							<span class="wc-subs-lite-status-badge wc-subs-lite-status-badge--<?php echo esc_attr( (string) $related_order['status'] ); ?>">
+								<?php echo esc_html( (string) $related_order['status_label'] ); ?>
+							</span>
+						</td>
+						<td class="related-order-total" data-title="<?php esc_attr_e( 'Total', 'woocommerce-subscriptions-lite' ); ?>">
+							<?php echo esc_html( (string) $related_order['total'] ); ?>
+						</td>
+						<td class="related-order-actions">
+							<a href="<?php echo esc_url( (string) $related_order['view_url'] ); ?>" class="woocommerce-button button view<?php echo esc_attr( $wp_button_class ); ?>">
+								<?php esc_html_e( 'View order', 'woocommerce-subscriptions-lite' ); ?>
+							</a>
+						</td>
+					</tr>
+				<?php endforeach; ?>
+			</tbody>
+		</table>
 	<?php endif; ?>
 
 	<?php

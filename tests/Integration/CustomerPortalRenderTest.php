@@ -123,6 +123,17 @@ final class CustomerPortalRenderTest extends TestCase {
 		$this->assertStringContainsString( '1 Engine House', $html );
 		$this->assertStringContainsString( 'ada@example.com', $html );
 
+		// Section order: totals, then addresses, then related orders last - the
+		// order list can grow long, while totals/addresses carry (future) actions.
+		$totals_at    = strpos( $html, 'subscription-detail-totals-heading' );
+		$addresses_at = strpos( $html, 'subscription-detail-addresses' );
+		$related_at   = strpos( $html, 'subscription-related-orders' );
+		$this->assertIsInt( $totals_at );
+		$this->assertIsInt( $addresses_at );
+		$this->assertIsInt( $related_at );
+		$this->assertLessThan( $addresses_at, $totals_at, 'Totals render before addresses.' );
+		$this->assertLessThan( $related_at, $addresses_at, 'Addresses render before related orders.' );
+
 		// The store state seeded for the client carries the contract + cancel mode.
 		$state = $GLOBALS['wc_subs_lite_iapi_state'][ Endpoints::STORE_NAMESPACE ];
 		$this->assertSame( 101, $state['contractId'] );
