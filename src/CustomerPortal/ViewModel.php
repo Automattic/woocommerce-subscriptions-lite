@@ -121,7 +121,164 @@ final class ViewModel {
 			'at_period_end'          => ContractStatus::ACTIVE === $status,
 			'cancel_modal_copy'      => $this->cancel_modal_copy( $status, $contract ),
 			'related_orders'         => $this->build_related_orders( $related_orders ),
+			'items'                  => $this->build_items( $contract ),
+			'totals_rows'            => $this->build_totals_rows( $contract ),
+			'billing_address'        => $this->format_address( $this->address( $contract, 'billing' ) ),
+			'billing_phone'          => $this->to_string( $this->address( $contract, 'billing' )['phone'] ?? null ),
+			'billing_email'          => $this->to_string( $this->address( $contract, 'billing' )['email'] ?? null ),
+			'shipping_address'       => $this->format_address( $this->address( $contract, 'shipping' ) ),
 		];
+	}
+
+	/**
+	 * Build the subscription-totals line-item rows: name, display quantity, and the
+	 * formatted line subtotal (discounts surface as their own totals row, WC-style).
+	 *
+	 * @param array<string, mixed> $contract Domain-ish contract array.
+	 * @return array<int, array<string, string>>
+	 */
+	private function build_items( array $contract ): array {
+		$items = [];
+		foreach ( (array) ( $contract['items'] ?? [] ) as $item ) {
+			if ( ! is_array( $item ) ) {
+				continue;
+			}
+			$name = $this->to_string( $item['name'] ?? null );
+			if ( '' === $name ) {
+				continue;
+			}
+			$items[] = [
+				'name'     => $name,
+				'quantity' => $this->format_quantity( $item['quantity'] ?? 1 ),
+				'subtotal' => $this->format_price( $this->to_string( $item['subtotal'] ?? '0' ), $contract ),
+			];
+		}
+		return $items;
+	}
+
+	/**
+	 * Build the subscription-totals footer rows: Subtotal, then the conditional
+	 * Discount / Shipping / Tax rows (only when non-zero), then the recurring Total
+	 * (price + cadence). Empty when the contract carries no line items - the
+	 * template skips the whole section.
+	 *
+	 * @param array<string, mixed> $contract Domain-ish contract array.
+	 * @return array<int, array<string, string>>
+	 */
+	private function build_totals_rows( array $contract ): array {
+		$items = (array) ( $contract['items'] ?? [] );
+		if ( [] === $items ) {
+			return [];
+		}
+
+		$subtotal = 0.0;
+		foreach ( $items as $item ) {
+			if ( is_array( $item ) ) {
+				$subtotal += (float) $this->to_string( $item['subtotal'] ?? '0' );
+			}
+		}
+
+		$rows = [
+			[
+				'label' => __( 'Subtotal', 'woocommerce-subscriptions-lite' ),
+				'value' => $this->format_price( (string) $subtotal, $contract ),
+			],
+		];
+
+		$discount = (float) $this->to_string( $contract['discount_total'] ?? '0' );
+		if ( $discount > 0 ) {
+			$rows[] = [
+				'label' => __( 'Discount', 'woocommerce-subscriptions-lite' ),
+				'value' => '-' . $this->format_price( (string) $discount, $contract ),
+			];
+		}
+
+		$shipping = (float) $this->to_string( $contract['shipping_total'] ?? '0' );
+		if ( $shipping > 0 ) {
+			$rows[] = [
+				'label' => __( 'Shipping', 'woocommerce-subscriptions-lite' ),
+				'value' => $this->format_price( (string) $shipping, $contract ),
+			];
+		}
+
+		$tax = (float) $this->to_string( $contract['tax_total'] ?? '0' );
+		if ( $tax > 0 ) {
+			$rows[] = [
+				'label' => __( 'Tax', 'woocommerce-subscriptions-lite' ),
+				'value' => $this->format_price( (string) $tax, $contract ),
+			];
+		}
+
+		$rows[] = [
+			'label' => __( 'Total', 'woocommerce-subscriptions-lite' ),
+			'value' => $this->recurring_summary( $contract ),
+		];
+
+		return $rows;
+	}
+
+	/**
+	 * One typed address off the contract's `addresses` map, or an empty array.
+	 *
+	 * @param array<string, mixed> $contract Domain-ish contract array.
+	 * @param string               $type     Address type: `billing` or `shipping`.
+	 * @return array<string, string>
+	 */
+	private function address( array $contract, string $type ): array {
+		$addresses = $contract['addresses'] ?? [];
+		$address   = is_array( $addresses ) && isset( $addresses[ $type ] ) && is_array( $addresses[ $type ] ) ? $addresses[ $type ] : [];
+
+		$fields = [];
+		foreach ( $address as $key => $value ) {
+			if ( is_string( $key ) && is_scalar( $value ) ) {
+				$fields[ $key ] = (string) $value;
+			}
+		}
+		return $fields;
+	}
+
+	/**
+	 * Format an address field array into localized display HTML through WooCommerce's
+	 * per-country address formatter. Contact fields (email/phone) are not part of the
+	 * formatted block - the template renders them as their own lines, WC-style.
+	 *
+	 * @param array<string, string> $address WC-style address fields.
+	 * @return string Formatted address HTML (line breaks as `<br/>`), or '' when empty.
+	 */
+	private function format_address( array $address ): string {
+		unset( $address['email'], $address['phone'] );
+		if ( [] === array_filter( $address ) ) {
+			return '';
+		}
+
+		$formatted = WC()->countries->get_formatted_address( $address );
+
+		return is_string( $formatted ) ? $formatted : '';
+	}
+
+	/**
+	 * Display form of a line-item quantity: whole quantities drop the decimals
+	 * (storage is DECIMAL, so `1.0000` renders as `1`), fractional ones keep them.
+	 *
+	 * @param mixed $quantity Raw quantity.
+	 */
+	private function format_quantity( $quantity ): string {
+		$quantity = is_numeric( $quantity ) ? (float) $quantity : 1.0;
+
+		return floor( $quantity ) === $quantity ? (string) (int) $quantity : (string) $quantity;
+	}
+
+	/**
+	 * Format an amount in the contract's currency, tags stripped - the one money
+	 * formatter every portal money string goes through.
+	 *
+	 * @param string               $amount   Raw amount string.
+	 * @param array<string, mixed> $contract Domain-ish contract array (for the currency).
+	 */
+	private function format_price( string $amount, array $contract ): string {
+		$currency = (string) ( $contract['currency'] ?? '' );
+
+		return wp_strip_all_tags( wc_price( (float) $amount, [ 'currency' => '' !== $currency ? $currency : null ] ) );
 	}
 
 	/**
@@ -320,8 +477,7 @@ final class ViewModel {
 			return '';
 		}
 
-		$currency = (string) ( $contract['currency'] ?? '' );
-		$price    = wp_strip_all_tags( wc_price( (float) $billing_total, [ 'currency' => '' !== $currency ? $currency : null ] ) );
+		$price = $this->format_price( $billing_total, $contract );
 
 		$period   = (string) ( $contract['billing_period'] ?? '' );
 		$interval = (int) ( $contract['billing_interval'] ?? 0 );

@@ -106,6 +106,23 @@ final class CustomerPortalRenderTest extends TestCase {
 		// Related orders render.
 		$this->assertStringContainsString( 'subscription-related-orders', $html );
 
+		// Subscription totals render: both fixture line items and every totals row
+		// (the active fixture carries a discount, shipping, and tax).
+		$this->assertStringContainsString( 'subscription-totals', $html );
+		$this->assertStringContainsString( 'Monthly coffee box', $html );
+		$this->assertStringContainsString( 'Espresso beans top-up', $html );
+		foreach ( [ 'Subtotal', 'Discount', 'Shipping', 'Tax' ] as $totals_label ) {
+			$this->assertStringContainsString( $totals_label, $html, "Totals row '{$totals_label}' renders." );
+		}
+
+		// Customer details render both fixture addresses with the contact lines.
+		$this->assertStringContainsString( 'subscription-detail-addresses', $html );
+		$this->assertStringContainsString( 'woocommerce-column--billing-address', $html );
+		$this->assertStringContainsString( 'woocommerce-column--shipping-address', $html );
+		$this->assertStringContainsString( '10 Analytical Way', $html );
+		$this->assertStringContainsString( '1 Engine House', $html );
+		$this->assertStringContainsString( 'ada@example.com', $html );
+
 		// The store state seeded for the client carries the contract + cancel mode.
 		$state = $GLOBALS['wc_subs_lite_iapi_state'][ Endpoints::STORE_NAMESPACE ];
 		$this->assertSame( 101, $state['contractId'] );

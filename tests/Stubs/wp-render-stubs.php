@@ -195,6 +195,20 @@ if ( ! function_exists( 'esc_attr' ) ) {
 	}
 }
 
+if ( ! function_exists( 'wp_kses_post' ) ) {
+	/**
+	 * Post-kses pass-through: the templates feed it trusted formatter output
+	 * (address HTML with `<br/>` line breaks), which the render assertions
+	 * inspect verbatim.
+	 *
+	 * @param string $text Text.
+	 * @return string
+	 */
+	function wp_kses_post( string $text ): string {
+		return $text;
+	}
+}
+
 if ( ! function_exists( 'esc_url' ) ) {
 	/**
 	 * URL escape pass-through.

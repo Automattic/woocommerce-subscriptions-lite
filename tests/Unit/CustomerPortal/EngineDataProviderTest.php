@@ -61,14 +61,42 @@ final class EngineDataProviderTest extends TestCase {
 				'billing_total'        => '19.99',
 				'last_payment_gmt'     => '2026-06-15 00:00:00',
 				'status'               => $status,
+				'discount_total'       => '2.00',
+				'shipping_total'       => '3.00',
+				'tax_total'            => '1.50',
 				'items'                => [
 					[
 						'item_name'  => 'Monthly coffee box',
 						'item_type'  => 'line_item',
 						'product_id' => 200,
-						'quantity'   => '1',
+						'quantity'   => '1.0000',
 						'subtotal'   => '19.99',
-						'total'      => '19.99',
+						'total'      => '17.99',
+					],
+				],
+				'addresses'            => [
+					'billing'  => [
+						// Storage bookkeeping keys the provider must drop.
+						'contract_id'  => 101,
+						'address_type' => 'billing',
+						'first_name'   => 'Ada',
+						'last_name'    => 'Lovelace',
+						'address_1'    => '10 Analytical Way',
+						'city'         => 'London',
+						'postcode'     => 'SW1A 1AA',
+						'country'      => 'GB',
+						'email'        => 'ada@example.com',
+						'phone'        => '+44 20 7946 0000',
+					],
+					'shipping' => [
+						'contract_id'  => 101,
+						'address_type' => 'shipping',
+						'first_name'   => 'Ada',
+						'last_name'    => 'Lovelace',
+						'address_1'    => '1 Engine House',
+						'city'         => 'Manchester',
+						'postcode'     => 'M1 1AE',
+						'country'      => 'GB',
 					],
 				],
 			]
@@ -187,7 +215,7 @@ final class EngineDataProviderTest extends TestCase {
 		$this->assertNotNull( $fixture_detail );
 
 		// Every detail field the view-model reads is present with the same type.
-		foreach ( [ 'id', 'status', 'billing_total', 'currency', 'billing_period', 'billing_interval', 'next_payment_gmt', 'payment_method', 'start_gmt', 'end_gmt', 'last_payment_gmt', 'last_updated_gmt', 'items' ] as $key ) {
+		foreach ( [ 'id', 'status', 'billing_total', 'currency', 'billing_period', 'billing_interval', 'next_payment_gmt', 'payment_method', 'start_gmt', 'end_gmt', 'last_payment_gmt', 'last_updated_gmt', 'discount_total', 'shipping_total', 'tax_total', 'items', 'addresses' ] as $key ) {
 			$this->assertArrayHasKey( $key, $engine_detail, "Engine detail carries the {$key} field." );
 			$this->assertArrayHasKey( $key, $fixture_detail, "Fixture detail carries the {$key} field." );
 			$this->assertSame(
@@ -196,6 +224,47 @@ final class EngineDataProviderTest extends TestCase {
 				"Engine and fixture detail agree on the type of {$key}."
 			);
 		}
+
+		// The line-item rows agree on the canonical item keys.
+		$this->assertSame(
+			array_keys( $fixture_detail['items'][0] ),
+			array_keys( $engine_detail['items'][0] ),
+			'Engine and fixture line items carry the same keys.'
+		);
+	}
+
+	public function test_detail_items_are_normalized_to_the_canonical_shape(): void {
+		$provider = new EngineDataProvider( $this->reader( $this->contract() ) );
+
+		$detail = $provider->get_contract( 101, 1 );
+
+		$this->assertNotNull( $detail );
+		$this->assertSame(
+			[
+				[
+					'name'     => 'Monthly coffee box',
+					'quantity' => 1.0,
+					'subtotal' => '19.99',
+					'total'    => '17.99',
+				],
+			],
+			$detail['items'],
+			'Engine item rows reduce to name/quantity/subtotal/total.'
+		);
+	}
+
+	public function test_detail_addresses_are_reduced_to_wc_field_arrays(): void {
+		$provider = new EngineDataProvider( $this->reader( $this->contract() ) );
+
+		$detail = $provider->get_contract( 101, 1 );
+
+		$this->assertNotNull( $detail );
+		$this->assertSame( [ 'billing', 'shipping' ], array_keys( $detail['addresses'] ), 'Both address types survive.' );
+		$this->assertSame( 'Ada', $detail['addresses']['billing']['first_name'] );
+		$this->assertSame( 'ada@example.com', $detail['addresses']['billing']['email'] );
+		$this->assertArrayNotHasKey( 'contract_id', $detail['addresses']['billing'], 'Storage bookkeeping keys are dropped.' );
+		$this->assertArrayNotHasKey( 'address_type', $detail['addresses']['billing'], 'Storage bookkeeping keys are dropped.' );
+		$this->assertArrayNotHasKey( 'email', $detail['addresses']['shipping'], 'Empty/absent fields are omitted.' );
 	}
 
 	public function test_related_orders_shape_matches_the_fixture_order_shape(): void {

@@ -52,6 +52,147 @@ final class ViewModelTest extends TestCase {
 		);
 	}
 
+	public function test_detail_items_and_totals_rows(): void {
+		$detail = ( new ViewModel() )->build_detail(
+			$this->contract(
+				[
+					'discount_total' => '2.00',
+					'shipping_total' => '3.00',
+					'tax_total'      => '1.50',
+					'items'          => [
+						[
+							'name'     => 'Monthly coffee box',
+							'quantity' => '1.0000',
+							'subtotal' => '12.49',
+							'total'    => '10.49',
+						],
+						[
+							'name'     => 'Espresso beans top-up',
+							'quantity' => 2,
+							'subtotal' => '5.00',
+							'total'    => '5.00',
+						],
+					],
+				]
+			)
+		);
+
+		$this->assertSame(
+			[
+				[
+					'name'     => 'Monthly coffee box',
+					'quantity' => '1',
+					'subtotal' => 'USD12.49',
+				],
+				[
+					'name'     => 'Espresso beans top-up',
+					'quantity' => '2',
+					'subtotal' => 'USD5.00',
+				],
+			],
+			$detail['items'],
+			'Items carry the display name, whole-number quantity, and formatted line subtotal.'
+		);
+
+		$this->assertSame(
+			[
+				[
+					'label' => 'Subtotal',
+					'value' => 'USD17.49',
+				],
+				[
+					'label' => 'Discount',
+					'value' => '-USD2.00',
+				],
+				[
+					'label' => 'Shipping',
+					'value' => 'USD3.00',
+				],
+				[
+					'label' => 'Tax',
+					'value' => 'USD1.50',
+				],
+				[
+					'label' => 'Total',
+					'value' => 'USD19.99 / month',
+				],
+			],
+			$detail['totals_rows'],
+			'Totals rows: subtotal, the non-zero conditionals, and the recurring total.'
+		);
+	}
+
+	public function test_detail_totals_rows_omit_zero_conditionals_and_vanish_without_items(): void {
+		$view_model = new ViewModel();
+
+		$with_items = $view_model->build_detail(
+			$this->contract(
+				[
+					'items' => [
+						[
+							'name'     => 'Monthly coffee box',
+							'quantity' => 1,
+							'subtotal' => '19.99',
+							'total'    => '19.99',
+						],
+					],
+				]
+			)
+		);
+		$this->assertSame(
+			[ 'Subtotal', 'Total' ],
+			array_column( $with_items['totals_rows'], 'label' ),
+			'Zero discount/shipping/tax rows are omitted.'
+		);
+
+		$without_items = $view_model->build_detail( $this->contract() );
+		$this->assertSame( [], $without_items['items'] );
+		$this->assertSame( [], $without_items['totals_rows'], 'No items means no totals section.' );
+	}
+
+	public function test_detail_addresses_are_formatted_with_contact_fields_split_out(): void {
+		$detail = ( new ViewModel() )->build_detail(
+			$this->contract(
+				[
+					'addresses' => [
+						'billing'  => [
+							'first_name' => 'Ada',
+							'last_name'  => 'Lovelace',
+							'address_1'  => '10 Analytical Way',
+							'city'       => 'London',
+							'postcode'   => 'SW1A 1AA',
+							'country'    => 'GB',
+							'email'      => 'ada@example.com',
+							'phone'      => '+44 20 7946 0000',
+						],
+						'shipping' => [
+							'first_name' => 'Ada',
+							'last_name'  => 'Lovelace',
+							'address_1'  => '1 Engine House',
+							'city'       => 'Manchester',
+							'postcode'   => 'M1 1AE',
+							'country'    => 'GB',
+						],
+					],
+				]
+			)
+		);
+
+		$this->assertSame( 'Ada Lovelace<br/>10 Analytical Way<br/>London SW1A 1AA<br/>GB', $detail['billing_address'] );
+		$this->assertSame( 'Ada Lovelace<br/>1 Engine House<br/>Manchester M1 1AE<br/>GB', $detail['shipping_address'] );
+		$this->assertSame( '+44 20 7946 0000', $detail['billing_phone'] );
+		$this->assertSame( 'ada@example.com', $detail['billing_email'] );
+	}
+
+	public function test_detail_addresses_degrade_to_empty_when_absent(): void {
+		$detail = ( new ViewModel() )->build_detail( $this->contract() );
+
+		$this->assertSame( '', $detail['billing_address'] );
+		$this->assertSame( '', $detail['shipping_address'] );
+		$this->assertSame( '', $detail['billing_phone'] );
+		$this->assertSame( '', $detail['billing_email'] );
+	}
+
 	public function test_active_status_label_and_action_flags(): void {
 		$detail = ( new ViewModel() )->build_detail( $this->contract() );
 

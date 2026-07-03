@@ -473,3 +473,60 @@ if ( ! function_exists( 'wc_get_order_status_name' ) ) {
 		return ucfirst( str_replace( '-', ' ', $slug ) );
 	}
 }
+
+if ( ! function_exists( 'WC' ) ) {
+	/**
+	 * Minimal WooCommerce-instance stub: exposes only `countries` with the one
+	 * formatter the portal view-model calls. The stub joins non-empty address
+	 * lines with `<br/>` (real WooCommerce applies per-country formats; the
+	 * portal only needs deterministic display lines).
+	 *
+	 * @return object
+	 */
+	function WC() { // phpcs:ignore WordPress.NamingConventions.ValidFunctionName.FunctionNameInvalid -- Mirrors WooCommerce core's real function name.
+		static $wc = null;
+		if ( null === $wc ) {
+			$countries = new class() {
+				/**
+				 * Format an address field array into display HTML.
+				 *
+				 * @param array<string, string> $fields WC-style address fields.
+				 */
+				public function get_formatted_address( array $fields ): string {
+					$not_blank = static function ( string $part ): bool {
+						return '' !== trim( $part );
+					};
+
+					$name     = trim( ( $fields['first_name'] ?? '' ) . ' ' . ( $fields['last_name'] ?? '' ) );
+					$locality = implode(
+						' ',
+						array_filter(
+							[
+								$fields['city'] ?? '',
+								$fields['state'] ?? '',
+								$fields['postcode'] ?? '',
+							],
+							$not_blank
+						)
+					);
+					$lines    = array_filter(
+						[
+							$name,
+							$fields['company'] ?? '',
+							$fields['address_1'] ?? '',
+							$fields['address_2'] ?? '',
+							$locality,
+							$fields['country'] ?? '',
+						],
+						$not_blank
+					);
+					return implode( '<br/>', $lines );
+				}
+			};
+
+			$wc            = new stdClass();
+			$wc->countries = $countries;
+		}
+		return $wc;
+	}
+}

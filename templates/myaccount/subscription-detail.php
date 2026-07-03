@@ -212,9 +212,81 @@ $has_actions = $detail['cancel_visible'] || $detail['hold_visible'] || $detail['
 		</table>
 	<?php endif; ?>
 
+	<?php if ( ! empty( $detail['items'] ) ) : ?>
+		<h3 class="subscription-detail-totals-heading"><?php esc_html_e( 'Subscription totals', 'woocommerce-subscriptions-lite' ); ?></h3>
+		<table class="shop_table shop_table_responsive subscription-totals">
+			<thead>
+				<tr>
+					<th class="subscription-item-name"><?php esc_html_e( 'Product', 'woocommerce-subscriptions-lite' ); ?></th>
+					<th class="subscription-item-subtotal"><?php esc_html_e( 'Total', 'woocommerce-subscriptions-lite' ); ?></th>
+				</tr>
+			</thead>
+			<tbody>
+				<?php foreach ( $detail['items'] as $item ) : ?>
+					<tr class="subscription-item">
+						<td class="subscription-item-name" data-title="<?php esc_attr_e( 'Product', 'woocommerce-subscriptions-lite' ); ?>">
+							<?php echo esc_html( (string) $item['name'] ); ?>
+							<strong class="product-quantity">&times;&nbsp;<?php echo esc_html( (string) $item['quantity'] ); ?></strong>
+						</td>
+						<td class="subscription-item-subtotal" data-title="<?php esc_attr_e( 'Total', 'woocommerce-subscriptions-lite' ); ?>">
+							<?php echo esc_html( (string) $item['subtotal'] ); ?>
+						</td>
+					</tr>
+				<?php endforeach; ?>
+			</tbody>
+			<?php if ( ! empty( $detail['totals_rows'] ) ) : ?>
+				<tfoot>
+					<?php foreach ( $detail['totals_rows'] as $totals_row ) : ?>
+						<tr class="subscription-totals-row">
+							<th scope="row"><?php echo esc_html( (string) $totals_row['label'] ); ?></th>
+							<td data-title="<?php echo esc_attr( (string) $totals_row['label'] ); ?>"><?php echo esc_html( (string) $totals_row['value'] ); ?></td>
+						</tr>
+					<?php endforeach; ?>
+				</tfoot>
+			<?php endif; ?>
+		</table>
+	<?php endif; ?>
+
+	<?php if ( '' !== (string) $detail['billing_address'] || '' !== (string) $detail['shipping_address'] ) : ?>
+		<?php $has_both_addresses = '' !== (string) $detail['billing_address'] && '' !== (string) $detail['shipping_address']; ?>
+		<section class="woocommerce-customer-details subscription-detail-addresses">
+			<?php if ( $has_both_addresses ) : ?>
+			<div class="woocommerce-columns woocommerce-columns--2 woocommerce-columns--addresses col2-set addresses">
+			<?php endif; ?>
+
+				<?php if ( '' !== (string) $detail['billing_address'] ) : ?>
+					<div class="woocommerce-column woocommerce-column--1 woocommerce-column--billing-address col-1">
+						<h3 class="woocommerce-column__title"><?php esc_html_e( 'Billing address', 'woocommerce-subscriptions-lite' ); ?></h3>
+						<address>
+							<?php echo wp_kses_post( (string) $detail['billing_address'] ); ?>
+							<?php if ( '' !== (string) $detail['billing_phone'] ) : ?>
+								<p class="woocommerce-customer-details--phone"><?php echo esc_html( (string) $detail['billing_phone'] ); ?></p>
+							<?php endif; ?>
+							<?php if ( '' !== (string) $detail['billing_email'] ) : ?>
+								<p class="woocommerce-customer-details--email"><?php echo esc_html( (string) $detail['billing_email'] ); ?></p>
+							<?php endif; ?>
+						</address>
+					</div>
+				<?php endif; ?>
+
+				<?php if ( '' !== (string) $detail['shipping_address'] ) : ?>
+					<div class="woocommerce-column woocommerce-column--2 woocommerce-column--shipping-address col-2">
+						<h3 class="woocommerce-column__title"><?php esc_html_e( 'Shipping address', 'woocommerce-subscriptions-lite' ); ?></h3>
+						<address>
+							<?php echo wp_kses_post( (string) $detail['shipping_address'] ); ?>
+						</address>
+					</div>
+				<?php endif; ?>
+
+			<?php if ( $has_both_addresses ) : ?>
+			</div>
+			<?php endif; ?>
+		</section>
+	<?php endif; ?>
+
 	<?php
 	/**
-	 * Fires after the related-orders table, at the end of the detail page.
+	 * Fires after the default sections, at the end of the detail page.
 	 *
 	 * Additive-only: an overlay may append extra sections; it must not alter
 	 * the default sections.

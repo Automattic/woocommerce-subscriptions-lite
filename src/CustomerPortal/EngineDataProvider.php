@@ -151,7 +151,8 @@ final class EngineDataProvider implements DataProvider {
 	/**
 	 * Reduce a contract to the domain-ish detail array {@see ViewModel::build_detail()} reads.
 	 *
-	 * The detail array is the list row plus the contract's date stamps and line items.
+	 * The detail array is the list row plus the contract's date stamps, recurring totals,
+	 * line items, and addresses.
 	 *
 	 * @param Contract $contract The contract.
 	 * @return array<string, mixed>
@@ -164,9 +165,61 @@ final class EngineDataProvider implements DataProvider {
 				'end_gmt'          => $contract->get_end_gmt(),
 				'last_payment_gmt' => $contract->get_last_payment_gmt(),
 				'last_updated_gmt' => $this->resolve_last_updated_gmt( $contract ),
-				'items'            => $contract->get_items(),
+				'discount_total'   => $contract->get_discount_total(),
+				'shipping_total'   => $contract->get_shipping_total(),
+				'tax_total'        => $contract->get_tax_total(),
+				'items'            => $this->items( $contract ),
+				'addresses'        => $this->addresses( $contract ),
 			]
 		);
+	}
+
+	/**
+	 * Reduce the contract's line items to the canonical provider item shape
+	 * (`name`, `quantity`, `subtotal`, `total` - raw amount strings, the view-model
+	 * formats), matching {@see FixtureDataProvider}.
+	 *
+	 * @param Contract $contract The contract.
+	 * @return array<int, array<string, mixed>>
+	 */
+	private function items( Contract $contract ): array {
+		$items = [];
+		foreach ( $contract->get_items() as $item ) {
+			$items[] = [
+				'name'     => (string) ( $item['item_name'] ?? '' ),
+				'quantity' => (float) ( $item['quantity'] ?? 1 ),
+				'subtotal' => (string) ( $item['subtotal'] ?? '0' ),
+				'total'    => (string) ( $item['total'] ?? '0' ),
+			];
+		}
+		return $items;
+	}
+
+	/**
+	 * Reduce the contract's addresses to WC-style field arrays keyed by type
+	 * (`billing` / `shipping`), matching {@see FixtureDataProvider}. Only the address
+	 * fields survive - storage bookkeeping keys (contract id, type) are dropped.
+	 *
+	 * @param Contract $contract The contract.
+	 * @return array<string, array<string, string>>
+	 */
+	private function addresses( Contract $contract ): array {
+		$fields = [ 'first_name', 'last_name', 'company', 'address_1', 'address_2', 'city', 'state', 'postcode', 'country', 'email', 'phone' ];
+
+		$addresses = [];
+		foreach ( $contract->get_addresses() as $type => $row ) {
+			$address = [];
+			foreach ( $fields as $field ) {
+				$value = $row[ $field ] ?? null;
+				if ( null !== $value && '' !== (string) $value ) {
+					$address[ $field ] = (string) $value;
+				}
+			}
+			if ( [] !== $address ) {
+				$addresses[ (string) $type ] = $address;
+			}
+		}
+		return $addresses;
 	}
 
 	/**

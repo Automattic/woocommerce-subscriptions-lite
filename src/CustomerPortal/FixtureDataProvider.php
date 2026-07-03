@@ -98,10 +98,57 @@ final class FixtureDataProvider implements DataProvider {
 			'expires' => __( '(expires 12/30)', 'woocommerce-subscriptions-lite' ),
 		];
 
-		$items = [
+		// One line item priced at the contract's billing total - the common case.
+		$line_items = static function ( string $amount ): array {
+			return [
+				[
+					'name'     => __( 'Monthly coffee box', 'woocommerce-subscriptions-lite' ),
+					'quantity' => 1,
+					'subtotal' => $amount,
+					'total'    => $amount,
+				],
+			];
+		};
+
+		// The active contract exercises every totals row: two line items (one with a
+		// line discount), shipping, and tax that sum to its 19.99 billing total.
+		$rich_items = [
 			[
 				'name'     => __( 'Monthly coffee box', 'woocommerce-subscriptions-lite' ),
 				'quantity' => 1,
+				'subtotal' => '12.49',
+				'total'    => '10.49',
+			],
+			[
+				'name'     => __( 'Espresso beans top-up', 'woocommerce-subscriptions-lite' ),
+				'quantity' => 2,
+				'subtotal' => '5.00',
+				'total'    => '5.00',
+			],
+		];
+
+		// WC-style address field arrays keyed by type, matching the engine provider's
+		// shape: billing carries contact fields; shipping differs so both render.
+		$addresses = [
+			'billing'  => [
+				'first_name' => 'Ada',
+				'last_name'  => 'Lovelace',
+				'address_1'  => '10 Analytical Way',
+				'city'       => 'London',
+				'postcode'   => 'SW1A 1AA',
+				'country'    => 'GB',
+				'email'      => 'ada@example.com',
+				'phone'      => '+44 20 7946 0000',
+			],
+			'shipping' => [
+				'first_name' => 'Ada',
+				'last_name'  => 'Lovelace',
+				'company'    => 'Analytical Engines Ltd',
+				'address_1'  => '1 Engine House',
+				'address_2'  => 'Unit 2',
+				'city'       => 'Manchester',
+				'postcode'   => 'M1 1AE',
+				'country'    => 'GB',
 			],
 		];
 
@@ -120,7 +167,10 @@ final class FixtureDataProvider implements DataProvider {
 				'last_payment_gmt' => $gmt( -10 ),
 				'last_updated_gmt' => $gmt( -10 ),
 				'payment_method'   => $card,
-				'items'            => $items,
+				'discount_total'   => '2.00',
+				'shipping_total'   => '3.00',
+				'tax_total'        => '1.50',
+				'items'            => $rich_items,
 				'related_orders'   => [
 					$this->order( '1001', $gmt( -40 ), 'completed', __( 'Completed', 'woocommerce-subscriptions-lite' ), '19.99', 'USD' ),
 					$this->order( '1042', $gmt( -10 ), 'processing', __( 'Processing', 'woocommerce-subscriptions-lite' ), '19.99', 'USD' ),
@@ -140,7 +190,7 @@ final class FixtureDataProvider implements DataProvider {
 				'last_payment_gmt' => $gmt( -14 ),
 				'last_updated_gmt' => $gmt( -7 ),
 				'payment_method'   => $card,
-				'items'            => $items,
+				'items'            => $line_items( '9.50' ),
 				'related_orders'   => [
 					$this->order( '1002', $gmt( -90 ), 'completed', __( 'Completed', 'woocommerce-subscriptions-lite' ), '9.50', 'USD' ),
 				],
@@ -160,7 +210,7 @@ final class FixtureDataProvider implements DataProvider {
 				'last_payment_gmt' => $gmt( -27 ),
 				'last_updated_gmt' => $gmt( -2 ),
 				'payment_method'   => $card,
-				'items'            => $items,
+				'items'            => $line_items( '49.00' ),
 				'related_orders'   => [
 					$this->order( '1003', $gmt( -120 ), 'completed', __( 'Completed', 'woocommerce-subscriptions-lite' ), '49.00', 'USD' ),
 					$this->order( '1071', $gmt( -2 ), 'failed', __( 'Failed', 'woocommerce-subscriptions-lite' ), '49.00', 'USD' ),
@@ -180,7 +230,7 @@ final class FixtureDataProvider implements DataProvider {
 				'last_payment_gmt' => $gmt( -22 ),
 				'last_updated_gmt' => $gmt( -1 ),
 				'payment_method'   => $card,
-				'items'            => $items,
+				'items'            => $line_items( '12.00' ),
 				'related_orders'   => [
 					$this->order( '1004', $gmt( -200 ), 'completed', __( 'Completed', 'woocommerce-subscriptions-lite' ), '12.00', 'USD' ),
 				],
@@ -199,7 +249,7 @@ final class FixtureDataProvider implements DataProvider {
 				'last_payment_gmt' => $gmt( -60 ),
 				'last_updated_gmt' => $gmt( -30 ),
 				'payment_method'   => $card,
-				'items'            => $items,
+				'items'            => $line_items( '29.99' ),
 				'related_orders'   => [
 					$this->order( '1005', $gmt( -365 ), 'completed', __( 'Completed', 'woocommerce-subscriptions-lite' ), '29.99', 'USD' ),
 					$this->order( '1090', $gmt( -60 ), 'cancelled', __( 'Cancelled', 'woocommerce-subscriptions-lite' ), '29.99', 'USD' ),
@@ -222,7 +272,7 @@ final class FixtureDataProvider implements DataProvider {
 					'title'   => '',
 					'expires' => '',
 				],
-				'items'            => $items,
+				'items'            => $line_items( '5.00' ),
 				'related_orders'   => [
 					$this->order( '1006', $gmt( -800 ), 'completed', __( 'Completed', 'woocommerce-subscriptions-lite' ), '5.00', 'USD' ),
 				],
@@ -231,6 +281,12 @@ final class FixtureDataProvider implements DataProvider {
 
 		foreach ( $contracts as $id => $contract ) {
 			$contracts[ $id ]['customer_id'] = $customer_id;
+			$contracts[ $id ]['addresses']   = $addresses;
+			$contracts[ $id ]               += [
+				'discount_total' => '0',
+				'shipping_total' => '0',
+				'tax_total'      => '0',
+			];
 		}
 
 		return $contracts;

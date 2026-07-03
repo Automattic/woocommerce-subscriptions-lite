@@ -114,7 +114,8 @@ $error-fg: $alert-red;
 }
 
 .subscription-detail-actions-heading,
-.subscription-detail-related-heading {
+.subscription-detail-related-heading,
+.subscription-detail-totals-heading {
 	margin-top: $grid-unit-30;
 	margin-bottom: $grid-unit-10;
 }
@@ -161,6 +162,31 @@ $error-fg: $alert-red;
 .subscription-related-orders .related-order-actions a {
 	display: inline-block;
 	white-space: nowrap;
+}
+
+/* Subscription-totals table: quantity marker + right-aligned amounts. */
+.subscription-totals .product-quantity {
+	white-space: nowrap;
+}
+
+.subscription-totals td.subscription-item-subtotal,
+.subscription-totals tfoot td {
+	text-align: right;
+}
+
+/* Customer-details addresses: rely on the theme's columns chrome; keep the
+   section clear of the table above and render address lines upright. */
+.subscription-detail-addresses {
+	margin-top: $grid-unit-30;
+
+	address {
+		font-style: normal;
+	}
+
+	.woocommerce-customer-details--phone,
+	.woocommerce-customer-details--email {
+		margin: $grid-unit-05 0 0;
+	}
 }
 
 /* Cancel confirmation modal (native <dialog>, wired to the iAPI store). */
