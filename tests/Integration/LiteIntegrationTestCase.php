@@ -43,7 +43,7 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 	 *
 	 * @var array<string, string>
 	 */
-	protected const BILLING_ADDRESS = array(
+	protected const BILLING_ADDRESS = [
 		'first_name' => 'Ada',
 		'last_name'  => 'Lovelace',
 		'address_1'  => '12 Analytical Row',
@@ -52,21 +52,21 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 		'country'    => 'GB',
 		'email'      => 'ada@example.com',
 		'phone'      => '020 7946 0018',
-	);
+	];
 
 	/**
 	 * Default shipping address used when seeding contracts.
 	 *
 	 * @var array<string, string>
 	 */
-	protected const SHIPPING_ADDRESS = array(
+	protected const SHIPPING_ADDRESS = [
 		'first_name' => 'Ada',
 		'last_name'  => 'Lovelace',
 		'address_1'  => '1 Engine Court',
 		'city'       => 'London',
 		'postcode'   => 'SW1A 1AA',
 		'country'    => 'GB',
-	);
+	];
 
 	/**
 	 * Create a customer user.
@@ -74,13 +74,13 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 	 * @param array<string, mixed> $overrides WP user field overrides.
 	 * @return int User id.
 	 */
-	protected function create_customer( array $overrides = array() ): int {
+	protected function create_customer( array $overrides = [] ): int {
 		return self::factory()->user->create(
 			array_merge(
-				array(
+				[
 					'role'       => 'customer',
 					'user_email' => 'customer-' . wp_generate_password( 6, false ) . '@example.com',
-				),
+				],
 				$overrides
 			)
 		);
@@ -94,16 +94,16 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 	 * @param int|null $max_cycles Maximum billing cycles, or null for open-ended.
 	 */
 	protected function make_plan( string $period = 'month', int $interval = 1, ?int $max_cycles = null ): Plan {
-		$group_id = ( new PlanGroupRepository() )->insert( PlanGroup::create( array( 'name' => 'Lite Tests' ) ) );
+		$group_id = ( new PlanGroupRepository() )->insert( PlanGroup::create( [ 'name' => 'Lite Tests' ] ) );
 
 		$plan = Plan::create(
 			$group_id,
-			array(
+			[
 				'name'           => ucfirst( $period ) . 'ly plan',
 				'billing_policy' => new BillingPolicy( $period, $interval, null, $max_cycles, null ),
 				'category'       => Plan::DEFAULT_CATEGORY,
 				'extension_slug' => 'woocommerce-subscriptions-lite',
-			)
+			]
 		);
 		( new PlanRepository() )->insert( $plan );
 
@@ -119,16 +119,16 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 	 * @param int                  $customer_id Owning customer.
 	 * @param array<string, mixed> $args        product_name, price, quantity, payment_method, payment_method_title, date_paid.
 	 */
-	protected function create_subscription_order( int $customer_id, array $args = array() ): WC_Order {
+	protected function create_subscription_order( int $customer_id, array $args = [] ): WC_Order {
 		$product = new WC_Product_Simple();
 		$product->set_name( (string) ( $args['product_name'] ?? 'Monthly Coffee Box' ) );
 		$product->set_regular_price( (string) ( $args['price'] ?? '19.99' ) );
 		$product->save();
 
-		$order = wc_create_order( array( 'customer_id' => $customer_id ) );
+		$order = wc_create_order( [ 'customer_id' => $customer_id ] );
 		$order->add_product( $product, (int) ( $args['quantity'] ?? 1 ) );
-		$order->set_address( array_merge( self::BILLING_ADDRESS, (array) ( $args['billing'] ?? array() ) ), 'billing' );
-		$order->set_address( array_merge( self::SHIPPING_ADDRESS, (array) ( $args['shipping'] ?? array() ) ), 'shipping' );
+		$order->set_address( array_merge( self::BILLING_ADDRESS, (array) ( $args['billing'] ?? [] ) ), 'billing' );
+		$order->set_address( array_merge( self::SHIPPING_ADDRESS, (array) ( $args['shipping'] ?? [] ) ), 'shipping' );
 		$order->set_currency( 'USD' );
 		$order->set_payment_method( (string) ( $args['payment_method'] ?? 'dummy' ) );
 		$order->set_payment_method_title( (string) ( $args['payment_method_title'] ?? 'Dummy Payments' ) );
@@ -149,7 +149,7 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 	 *                                          {@see self::create_subscription_order()}.
 	 * @return int Contract id.
 	 */
-	protected function create_contract( int $customer_id, array $args = array() ): int {
+	protected function create_contract( int $customer_id, array $args = [] ): int {
 		$plan  = $this->make_plan(
 			(string) ( $args['period'] ?? 'month' ),
 			(int) ( $args['interval'] ?? 1 ),
@@ -189,8 +189,8 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Test seeding shortcut for states without a transition verb.
 		$wpdb->update(
 			SchemaInstaller::get_table_name( SchemaInstaller::TABLE_CONTRACTS ),
-			array( 'status' => $status ),
-			array( 'id' => $contract_id )
+			[ 'status' => $status ],
+			[ 'id' => $contract_id ]
 		);
 	}
 
@@ -202,8 +202,8 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 	 * @param int                  $customer_id Owning customer.
 	 * @param array<string, mixed> $args        total, status, date_created.
 	 */
-	protected function create_renewal_order( int $contract_id, int $customer_id, array $args = array() ): WC_Order {
-		$order = wc_create_order( array( 'customer_id' => $customer_id ) );
+	protected function create_renewal_order( int $contract_id, int $customer_id, array $args = [] ): WC_Order {
+		$order = wc_create_order( [ 'customer_id' => $customer_id ] );
 		$order->set_total( (string) ( $args['total'] ?? '19.99' ) );
 		$order->set_status( (string) ( $args['status'] ?? 'completed' ) );
 		if ( isset( $args['date_created'] ) ) {

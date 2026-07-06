@@ -122,7 +122,13 @@ final class EngineDataProviderTest extends LiteIntegrationTestCase {
 
 	public function test_cadence_is_sourced_from_the_plan_snapshot(): void {
 		$customer_id = $this->create_customer();
-		$this->create_contract( $customer_id, [ 'period' => 'year', 'interval' => 1 ] );
+		$this->create_contract(
+			$customer_id,
+			[
+				'period'   => 'year',
+				'interval' => 1,
+			]
+		);
 
 		$rows = $this->provider->get_contracts_for_customer( $customer_id );
 

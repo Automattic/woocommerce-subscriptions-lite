@@ -30,7 +30,13 @@ final class SmokeTest extends LiteIntegrationTestCase {
 
 	public function test_seeded_contract_reads_back_through_the_facade(): void {
 		$customer_id = $this->create_customer();
-		$contract_id = $this->create_contract( $customer_id, array( 'product_name' => 'Smoke Box', 'price' => '12.00' ) );
+		$contract_id = $this->create_contract(
+			$customer_id,
+			[
+				'product_name' => 'Smoke Box',
+				'price'        => '12.00',
+			]
+		);
 
 		$contract = Subscriptions::get_for_customer( $contract_id, $customer_id );
 
