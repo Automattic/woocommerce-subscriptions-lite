@@ -69,11 +69,13 @@ final class Bootstrap {
 		// engine factory, then schedule its first renewal.
 		Checkout\ContractCreationHandler::register();
 
-		// Customer portal (My Account): list the customer's subscriptions and
-		// cancel an owned one through the engine. Detail / reactivate land in a
-		// later widening slice.
-		Portal\SubscriptionsEndpoint::register();
-		Portal\CancelHandler::register();
+		// Customer portal (My Account): the subscriptions list + single
+		// subscription detail, with the lifecycle actions (cancel / hold /
+		// reactivate) over the namespaced Interactivity API store. Endpoints
+		// register the My Account surfaces; Assets loads the iAPI store + styles
+		// on those endpoints.
+		CustomerPortal\Endpoints::register();
+		CustomerPortal\Assets::register();
 
 		// Admin (back office only): the WooCommerce > Subscriptions list + detail
 		// page and its Renew now / Cancel handlers, driven through the engine's

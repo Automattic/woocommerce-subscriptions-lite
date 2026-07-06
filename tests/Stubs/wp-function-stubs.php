@@ -35,7 +35,7 @@ if ( ! function_exists( 'wc_get_is_paid_statuses' ) ) {
 	 * @return array<int, string>
 	 */
 	function wc_get_is_paid_statuses(): array {
-		return array( 'processing', 'completed' );
+		return [ 'processing', 'completed' ];
 	}
 }
 
@@ -63,7 +63,13 @@ if ( ! function_exists( 'add_action' ) ) {
 
 if ( ! function_exists( 'add_filter' ) ) {
 	/**
-	 * Record a filter registration.
+	 * Record a filter registration AND register the callback for dispatch.
+	 *
+	 * Recording into `woocommerce_subscriptions_lite_test_hooks` keeps the
+	 * hook-binding assertions in the unit suite working; the separate dispatch
+	 * registry lets {@see apply_filters()} actually run the callback, so a test
+	 * can substitute a filtered value (e.g. the portal data provider) the same
+	 * way production does.
 	 *
 	 * @param string   $hook          Hook name.
 	 * @param callable $callback      Callback.
@@ -79,6 +85,10 @@ if ( ! function_exists( 'add_filter' ) ) {
 			'priority'      => $priority,
 			'accepted_args' => $accepted_args,
 		];
+
+		// Register for dispatch by apply_filters() below.
+		$GLOBALS['woocommerce_subscriptions_lite_test_filters'][ $hook ][ $priority ][] = $callback;
+
 		return true;
 	}
 }
@@ -332,5 +342,191 @@ if ( ! function_exists( 'esc_attr' ) ) {
 	 */
 	function esc_attr( string $text ): string {
 		return $text;
+	}
+}
+
+if ( ! function_exists( '_n' ) ) {
+	/**
+	 * Plural-aware translation stub: returns singular for count 1, else plural.
+	 *
+	 * @param string $single Singular text.
+	 * @param string $plural Plural text.
+	 * @param int    $number The count.
+	 * @param string $domain Text domain.
+	 * @return string
+	 */
+	function _n( string $single, string $plural, int $number, string $domain = 'default' ): string {
+		return 1 === $number ? $single : $plural;
+	}
+}
+
+if ( ! function_exists( 'apply_filters' ) ) {
+	/**
+	 * Filter stub: runs any callbacks {@see add_filter()} registered for the hook
+	 * (priority-ordered), else returns the value unchanged.
+	 *
+	 * Only the first argument is passed to callbacks, which is all the Lite
+	 * filters that tests exercise need (e.g. the portal data-provider filter).
+	 *
+	 * @param string $hook  Filter name.
+	 * @param mixed  $value The value being filtered.
+	 * @param mixed  ...$args Extra filter args (unused by the registered callbacks).
+	 * @return mixed
+	 */
+	function apply_filters( string $hook, $value = null, ...$args ) {
+		unset( $args );
+		if ( ! isset( $GLOBALS['woocommerce_subscriptions_lite_test_filters'][ $hook ] ) ) {
+			return $value;
+		}
+		$by_priority = $GLOBALS['woocommerce_subscriptions_lite_test_filters'][ $hook ];
+		ksort( $by_priority );
+		foreach ( $by_priority as $callbacks ) {
+			foreach ( $callbacks as $callback ) {
+				$value = $callback( $value );
+			}
+		}
+		return $value;
+	}
+}
+
+if ( ! defined( 'DAY_IN_SECONDS' ) ) {
+	define( 'DAY_IN_SECONDS', 86400 );
+}
+
+if ( ! function_exists( 'get_option' ) ) {
+	/**
+	 * Option stub: returns a fixed date format, the default otherwise.
+	 *
+	 * @param string $name    Option name.
+	 * @param mixed  $default Default value.
+	 * @return mixed
+	 */
+	function get_option( string $name, $default = false ) {
+		if ( 'date_format' === $name ) {
+			return 'Y-m-d';
+		}
+		return $default;
+	}
+}
+
+if ( ! function_exists( 'date_i18n' ) ) {
+	/**
+	 * Date-format stub backed by gmdate so tests are timezone-stable.
+	 *
+	 * @param string   $format    PHP date format.
+	 * @param int|null $timestamp Unix timestamp.
+	 * @return string
+	 */
+	function date_i18n( string $format, ?int $timestamp = null ): string {
+		return gmdate( $format, null === $timestamp ? time() : $timestamp );
+	}
+}
+
+if ( ! function_exists( 'wp_strip_all_tags' ) ) {
+	/**
+	 * Strip tags stub.
+	 *
+	 * @param string $text Input.
+	 * @return string
+	 */
+	function wp_strip_all_tags( string $text ): string {
+		return trim( (string) wp_strip_all_tags_inner( $text ) );
+	}
+
+	/**
+	 * Inner strip helper kept separate so the guard above stays a one-liner.
+	 *
+	 * @param string $text Input.
+	 * @return string
+	 */
+	function wp_strip_all_tags_inner( string $text ): string {
+		return preg_replace( '/<[^>]*>/', '', $text );
+	}
+}
+
+if ( ! function_exists( 'wc_price' ) ) {
+	/**
+	 * Minimal price-format stub: `{CUR}{amount}` with two decimals.
+	 *
+	 * @param float                $amount Amount.
+	 * @param array<string, mixed> $args   Format args (reads `currency`).
+	 * @return string
+	 */
+	function wc_price( float $amount, array $args = [] ): string {
+		$currency = isset( $args['currency'] ) && is_string( $args['currency'] ) && '' !== $args['currency']
+			? $args['currency']
+			: 'USD';
+		return $currency . number_format( $amount, 2 );
+	}
+}
+
+if ( ! function_exists( 'wc_get_order_status_name' ) ) {
+	/**
+	 * Minimal order-status-label stub: humanizes the slug (real WooCommerce maps
+	 * registered statuses to their display names; the portal only needs a label).
+	 *
+	 * @param string $status Order status slug (with or without the `wc-` prefix).
+	 * @return string
+	 */
+	function wc_get_order_status_name( string $status ): string {
+		$slug = 0 === strpos( $status, 'wc-' ) ? substr( $status, 3 ) : $status;
+		return ucfirst( str_replace( '-', ' ', $slug ) );
+	}
+}
+
+if ( ! function_exists( 'WC' ) ) {
+	/**
+	 * Minimal WooCommerce-instance stub: exposes only `countries` with the one
+	 * formatter the portal view-model calls. The stub joins non-empty address
+	 * lines with `<br/>` (real WooCommerce applies per-country formats; the
+	 * portal only needs deterministic display lines).
+	 *
+	 * @return object
+	 */
+	function WC() { // phpcs:ignore WordPress.NamingConventions.ValidFunctionName.FunctionNameInvalid -- Mirrors WooCommerce core's real function name.
+		static $wc = null;
+		if ( null === $wc ) {
+			$countries = new class() {
+				/**
+				 * Format an address field array into display HTML.
+				 *
+				 * @param array<string, string> $fields WC-style address fields.
+				 */
+				public function get_formatted_address( array $fields ): string {
+					$not_blank = static function ( string $part ): bool {
+						return '' !== trim( $part );
+					};
+
+					$name     = trim( ( $fields['first_name'] ?? '' ) . ' ' . ( $fields['last_name'] ?? '' ) );
+					$locality = implode(
+						' ',
+						array_filter(
+							[
+								$fields['city'] ?? '',
+								$fields['state'] ?? '',
+								$fields['postcode'] ?? '',
+							],
+							$not_blank
+						)
+					);
+					$lines    = array_filter(
+						[
+							$name,
+							$fields['company'] ?? '',
+							$fields['address_1'] ?? '',
+							$fields['address_2'] ?? '',
+							$locality,
+							$fields['country'] ?? '',
+						],
+						$not_blank
+					);
+					return implode( '<br/>', $lines );
+				}
+			};
+
+			$wc            = new stdClass();
+			$wc->countries = $countries;
+		}
+		return $wc;
 	}
 }
