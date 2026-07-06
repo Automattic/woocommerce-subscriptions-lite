@@ -4,7 +4,7 @@
  *
  * Both the server render (templates + the `wp_interactivity_state()` seed) and
  * the REST response use this builder, so the page-load shape and the refetch
- * shape never drift. The {@see DataProvider} returns domain-ish data; this
+ * shape never drift. The {@see EngineDataProvider} returns domain-ish data; this
  * class formats it into the presentation shape: customer-facing status labels,
  * money strings, formatted dates, the per-status detail date-row, and the
  * action-visibility flags the templates and the iAPI store both read.

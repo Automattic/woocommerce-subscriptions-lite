@@ -2,17 +2,10 @@
 /**
  * EngineDataProvider - reads customer-portal data from the subscriptions engine.
  *
- * The engine-backed implementation of {@see DataProvider} and the production default
- * (see the provider resolver). It consumes engine functionality through the engine's
- * public {@see \Automattic\WooCommerce\SubscriptionsEngine\Api\Subscriptions} facade
- * ONLY - never the engine's `Integration\` internals - and reduces the facade's interim
- * return types to the same domain-ish arrays {@see FixtureDataProvider} returns, so
- * {@see ViewModel} and the templates render identically whichever provider is active.
- *
- * The facade is static and database-bound, so the Contract-to-array mapping lives here
- * (unit-testable in isolation) behind one thin injectable seam, {@see Engine\SubscriptionsReader}:
- * production wires the real {@see Engine\ApiSubscriptionsReader} (which calls the facade);
- * tests inject a double that returns engine value objects without a booted database.
+ * The portal's one data source. It consumes engine functionality through the engine's
+ * public {@see Subscriptions} facade ONLY - never the engine's `Integration\` internals -
+ * and reduces the facade's interim return types ({@see Contract}, `WC_Order`) to the
+ * domain-ish arrays {@see ViewModel} and the templates consume.
  *
  * Ownership / not-found: {@see self::get_contract()} delegates the asymmetric not-found
  * rule to the facade's ownership-checked read - an unknown id and a contract owned by
@@ -23,9 +16,8 @@
  * order read runs and no orders can leak across customers.
  *
  * Cadence (`billing_period` / `billing_interval`) is read off the contract's own frozen
- * plan snapshot ({@see \Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Contract::get_plan_snapshot()}),
- * not a live plan read, and degrades to an empty period / zero interval when the snapshot
- * or its billing policy is absent.
+ * plan snapshot ({@see Contract::get_plan_snapshot()}), not a live plan read, and degrades
+ * to an empty period / zero interval when the snapshot or its billing policy is absent.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\CustomerPortal
  */
@@ -36,36 +28,16 @@ namespace Automattic\WooCommerce\SubscriptionsLite\CustomerPortal;
 
 use DateTimeInterface;
 use WC_Order;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\Subscriptions;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Contract;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\ValueObject\BillingPolicy;
-use Automattic\WooCommerce\SubscriptionsLite\CustomerPortal\Engine\ApiSubscriptionsReader;
-use Automattic\WooCommerce\SubscriptionsLite\CustomerPortal\Engine\SubscriptionsReader;
 
 defined( 'ABSPATH' ) || exit;
 
 /**
- * Engine-backed implementation of {@see DataProvider}.
+ * Reads the customer's contracts, one contract's detail, and related orders.
  */
-final class EngineDataProvider implements DataProvider {
-
-	/**
-	 * The engine read seam.
-	 *
-	 * @var SubscriptionsReader
-	 */
-	private $reader;
-
-	/**
-	 * Build the provider over the engine read seam.
-	 *
-	 * Defaults to the production facade adapter ({@see ApiSubscriptionsReader}); tests
-	 * pass a double in its place.
-	 *
-	 * @param SubscriptionsReader|null $reader Engine read seam; default facade adapter when omitted.
-	 */
-	public function __construct( ?SubscriptionsReader $reader = null ) {
-		$this->reader = $reader ?? new ApiSubscriptionsReader();
-	}
+final class EngineDataProvider {
 
 	/**
 	 * Return the customer's contracts as domain-ish list-row arrays.
@@ -80,7 +52,7 @@ final class EngineDataProvider implements DataProvider {
 	 */
 	public function get_contracts_for_customer( int $customer_id, int $limit = 20, int $offset = 0 ): array {
 		$rows = [];
-		foreach ( $this->reader->list_for_customer( $customer_id, $limit, $offset ) as $contract ) {
+		foreach ( Subscriptions::list_for_customer( $customer_id, $limit, $offset ) as $contract ) {
 			$rows[] = $this->contract_to_row( $contract );
 		}
 		return $rows;
@@ -99,7 +71,7 @@ final class EngineDataProvider implements DataProvider {
 	 * @return array<string, mixed>|null
 	 */
 	public function get_contract( int $contract_id, int $customer_id ): ?array {
-		$contract = $this->reader->get_for_customer( $contract_id, $customer_id );
+		$contract = Subscriptions::get_for_customer( $contract_id, $customer_id );
 		if ( null === $contract ) {
 			return null;
 		}
@@ -123,7 +95,7 @@ final class EngineDataProvider implements DataProvider {
 	 */
 	public function get_related_orders( int $contract_id, int $limit = -1, int $offset = 0 ): array {
 		$rows = [];
-		foreach ( $this->reader->get_related_orders( $contract_id, $limit, $offset ) as $order ) {
+		foreach ( Subscriptions::get_related_orders( $contract_id, $limit, $offset ) as $order ) {
 			if ( $order instanceof WC_Order ) {
 				$rows[] = $this->order_to_row( $order );
 			}
@@ -181,7 +153,7 @@ final class EngineDataProvider implements DataProvider {
 	/**
 	 * Reduce the contract's line items to the canonical provider item shape
 	 * (`name`, `quantity`, `subtotal`, `total` - raw amount strings, the view-model
-	 * formats), matching {@see FixtureDataProvider}.
+	 * formats).
 	 *
 	 * @param Contract $contract The contract.
 	 * @return array<int, array<string, mixed>>
@@ -201,7 +173,7 @@ final class EngineDataProvider implements DataProvider {
 
 	/**
 	 * Reduce the contract's addresses to WC-style field arrays keyed by type
-	 * (`billing` / `shipping`), matching {@see FixtureDataProvider}. Only the address
+	 * (`billing` / `shipping`). Only the address
 	 * fields survive - storage bookkeeping keys (contract id, type) are dropped.
 	 *
 	 * @param Contract $contract The contract.

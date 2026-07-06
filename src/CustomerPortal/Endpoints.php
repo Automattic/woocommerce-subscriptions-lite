@@ -16,8 +16,8 @@
  * avoid the collision; the canonical slugs return once the premium plugin
  * consumes this package.
  *
- * Each render callback resolves the active data provider, builds the
- * presentation view-model via {@see ViewModel}, seeds client state with
+ * Each render callback reads through the engine-backed {@see EngineDataProvider},
+ * builds the presentation view-model via {@see ViewModel}, seeds client state with
  * `wp_interactivity_state()`, and renders a server-side template carrying the
  * Interactivity API directives.
  *
@@ -83,6 +83,20 @@ final class Endpoints {
 	 * The related-orders page query arg on the detail URL.
 	 */
 	const ORDERS_PAGE_QUERY_ARG = 'orders-page';
+
+	/**
+	 * The portal's data source over the engine facade.
+	 *
+	 * @var EngineDataProvider
+	 */
+	private $provider;
+
+	/**
+	 * Build the endpoints over the engine-backed data provider.
+	 */
+	public function __construct() {
+		$this->provider = new EngineDataProvider();
+	}
 
 	/**
 	 * Wire the endpoints into WooCommerce's My Account framework.
@@ -171,7 +185,7 @@ final class Endpoints {
 		// The +1 probe answers "is there a next page" without a count read; the
 		// extra row never renders.
 		$contracts = $customer_id > 0
-			? Providers::resolve()->get_contracts_for_customer( $customer_id, self::LIST_PER_PAGE + 1, ( $current_page - 1 ) * self::LIST_PER_PAGE )
+			? $this->provider->get_contracts_for_customer( $customer_id, self::LIST_PER_PAGE + 1, ( $current_page - 1 ) * self::LIST_PER_PAGE )
 			: [];
 
 		$has_next  = count( $contracts ) > self::LIST_PER_PAGE;
@@ -225,7 +239,7 @@ final class Endpoints {
 		$customer_id = get_current_user_id();
 
 		$contract = ( $contract_id > 0 && $customer_id > 0 )
-			? Providers::resolve()->get_contract( $contract_id, $customer_id )
+			? $this->provider->get_contract( $contract_id, $customer_id )
 			: null;
 
 		// Asymmetric not-found: an unknown id and a foreign-owned contract both
@@ -245,7 +259,7 @@ final class Endpoints {
 		$orders_page = isset( $_GET[ self::ORDERS_PAGE_QUERY_ARG ] ) ? max( 1, absint( wp_unslash( $_GET[ self::ORDERS_PAGE_QUERY_ARG ] ) ) ) : 1;
 
 		// The +1 probe answers "is there a next page" without a count read.
-		$related_orders   = Providers::resolve()->get_related_orders( $contract_id, self::RELATED_ORDERS_PER_PAGE + 1, ( $orders_page - 1 ) * self::RELATED_ORDERS_PER_PAGE );
+		$related_orders   = $this->provider->get_related_orders( $contract_id, self::RELATED_ORDERS_PER_PAGE + 1, ( $orders_page - 1 ) * self::RELATED_ORDERS_PER_PAGE );
 		$orders_have_next = count( $related_orders ) > self::RELATED_ORDERS_PER_PAGE;
 		$related_orders   = array_slice( $related_orders, 0, self::RELATED_ORDERS_PER_PAGE );
 

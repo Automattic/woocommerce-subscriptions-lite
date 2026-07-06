@@ -11,19 +11,13 @@
  *
  * Transport: lifecycle actions POST to the engine's authenticated `wc/v3` REST
  * routes with the `X-WP-Nonce` cookie-auth header. There is NO Store API path.
- * Until the engine routes exist, the store runs in MOCK MODE (see `isMockMode`):
- * the request is short-circuited to a resolved success (or a forced failure for
- * the failure-path demo) so the full open -> confirm -> submit -> refresh and
- * the failure -> retry flows are exercisable with no engine dependency. The
- * single swap point is `performAction()`: once the real routes land, mock mode
- * is off by default and the fetch path runs.
  *
  * Translatable copy is seeded into `state.i18n` from PHP rather than called via
  * `@wordpress/i18n` in the module, so the strings stay in the text domain and
  * the module has no runtime i18n dependency.
  */
 
-import { store, getContext, getElement } from '@wordpress/interactivity';
+import { store, getElement } from '@wordpress/interactivity';
 
 // Import the portal stylesheet so @wordpress/scripts compiles the SCSS, adds
 // vendor prefixes, and emits the stylesheet (style-customer-portal.css) plus
@@ -34,45 +28,14 @@ import './style.scss';
 const STORE_NAMESPACE = 'woocommerce-subscriptions-lite/customer-portal';
 
 /**
- * Mock-mode sentinel. When the localized REST base is empty or this sentinel,
- * the store does not hit the network - it resolves the action locally so the
- * UX can be exercised end-to-end without the engine. Swap point: real wiring
- * passes a concrete `wc/v3` base, which turns mock mode off.
- *
- * @param {Object} currentState The store state.
- * @return {boolean} Whether to run the mock transport.
- */
-function isMockMode( currentState ) {
-	return ! currentState.restBase || currentState.restBase === 'mock';
-}
-
-/**
- * Run the configured transport for a lifecycle action.
- *
- * Real mode: POST to `{restBase}{contractId}/{action}` with the REST nonce.
- * Mock mode: resolve success, unless the per-action context opts into a forced
- * failure (`context.forceFailure`) so the inline-retry path is demonstrable.
+ * POST a lifecycle action to `{restBase}{contractId}/{action}` with the REST nonce.
  *
  * @param {Object} currentState The store state.
  * @param {string} action       The action segment ('cancel' | 'hold' | 'reactivate').
  * @param {Object} body         The JSON request body.
- * @param {Object} context      The element interactivity context (for mock flags).
  * @return {Promise<void>} Resolves on success; rejects with an Error on failure.
  */
-function performAction( currentState, action, body, context ) {
-	if ( isMockMode( currentState ) ) {
-		return new Promise( ( resolve, reject ) => {
-			// Defer so the "submitting" state is observable before resolution.
-			setTimeout( () => {
-				if ( context && context.forceFailure ) {
-					reject( new Error( '' ) );
-					return;
-				}
-				resolve();
-			}, 300 );
-		} );
-	}
-
+function performAction( currentState, action, body ) {
 	return fetch(
 		`${ currentState.restBase }${ currentState.contractId }/${ action }`,
 		{
@@ -155,28 +118,21 @@ const { state } = store( STORE_NAMESPACE, {
 		 * Submit the cancel. Forwards the server-resolved `atPeriodEnd` mode.
 		 */
 		*submitCancel() {
-			const context = getContext();
-			yield runLifecycle(
-				'cancel',
-				{ at_period_end: state.atPeriodEnd },
-				context
-			);
+			yield runLifecycle( 'cancel', { at_period_end: state.atPeriodEnd } );
 		},
 
 		/**
 		 * Submit the hold/pause action.
 		 */
 		*submitHold() {
-			const context = getContext();
-			yield runLifecycle( 'hold', {}, context );
+			yield runLifecycle( 'hold', {} );
 		},
 
 		/**
 		 * Submit the reactivate action.
 		 */
 		*submitReactivate() {
-			const context = getContext();
-			yield runLifecycle( 'reactivate', {}, context );
+			yield runLifecycle( 'reactivate', {} );
 		},
 	},
 	callbacks: {
@@ -206,12 +162,11 @@ const { state } = store( STORE_NAMESPACE, {
  * double-submit, runs the transport, refreshes on success, and surfaces an
  * inline retryable error on failure.
  *
- * @param {string} action  The action segment.
- * @param {Object} body    The JSON request body.
- * @param {Object} context The element interactivity context.
+ * @param {string} action The action segment.
+ * @param {Object} body   The JSON request body.
  * @return {Promise<void>} Resolves when the submit completes (success or handled failure).
  */
-function runLifecycle( action, body, context ) {
+function runLifecycle( action, body ) {
 	if ( state.submitting ) {
 		return Promise.resolve();
 	}
@@ -223,7 +178,7 @@ function runLifecycle( action, body, context ) {
 	state.submitting = true;
 	state[ errorField ] = '';
 
-	return performAction( state, action, body, context ).then(
+	return performAction( state, action, body ).then(
 		() => {
 			refresh();
 		},

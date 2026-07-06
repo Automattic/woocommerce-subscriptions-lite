@@ -101,15 +101,6 @@ final class BootstrapTest extends TestCase {
 		unset( $GLOBALS['woocommerce_subscriptions_lite_test_is_admin'] );
 	}
 
-	public function test_init_registers_the_post_action_notice_hooks(): void {
-		Bootstrap::init();
-
-		$this->assertContains(
-			'woocommerce_subscriptions_lite_customer_portal_cancelled',
-			$this->registered_hook_names()
-		);
-	}
-
 	public function test_init_is_idempotent(): void {
 		Bootstrap::init();
 		$first = count( $GLOBALS['woocommerce_subscriptions_lite_test_hooks'] );
