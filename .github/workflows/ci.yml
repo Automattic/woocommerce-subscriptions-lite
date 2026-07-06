@@ -1,0 +1,104 @@
+name: CI
+
+on:
+  push:
+    branches: [ trunk ]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# The engine dependency is a composer path repository expecting the WooCommerce
+# monorepo as a sibling checkout (../woocommerce). Every job reconstructs that
+# layout with a blobless sparse clone of just the engine package. The clone
+# tracks the monorepo trunk, so engine changes surface here as they land; the
+# clone step becomes a Packagist dependency once the engine package is
+# published.
+jobs:
+  lint:
+    name: Lint (PHP + JS + CSS)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: woocommerce-subscriptions-lite
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: woocommerce-subscriptions-lite
+
+      - name: Check out the engine package (monorepo sparse clone)
+        working-directory: ${{ github.workspace }}
+        run: |
+          git clone --depth 1 --filter=blob:none --sparse https://github.com/woocommerce/woocommerce.git woocommerce
+          git -C woocommerce sparse-checkout set packages/php/woocommerce-subscriptions-engine
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          coverage: none
+
+      - name: Install composer dependencies
+        run: composer install --prefer-dist --no-progress
+
+      - name: PHP coding standards
+        run: composer lint
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: woocommerce-subscriptions-lite/package-lock.json
+
+      - name: Install npm dependencies (builds the bundles)
+        run: npm ci
+
+      - name: JS lint
+        run: npm run lint:js
+
+      - name: CSS lint
+        run: npm run lint:css
+
+  test:
+    name: Integration tests (wp-env)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: woocommerce-subscriptions-lite
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: woocommerce-subscriptions-lite
+
+      - name: Check out the engine package (monorepo sparse clone)
+        working-directory: ${{ github.workspace }}
+        run: |
+          git clone --depth 1 --filter=blob:none --sparse https://github.com/woocommerce/woocommerce.git woocommerce
+          git -C woocommerce sparse-checkout set packages/php/woocommerce-subscriptions-engine
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          coverage: none
+
+      - name: Install composer dependencies
+        run: composer install --prefer-dist --no-progress
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: woocommerce-subscriptions-lite/package-lock.json
+
+      - name: Install npm dependencies (builds the bundles)
+        run: npm ci
+
+      - name: Start the WordPress test environment
+        run: npx wp-env start
+
+      - name: Run the integration suite
+        run: composer test:integration
+
+      - name: Show wp-env debug logs on failure
+        if: failure()
+        run: npx wp-env logs tests || true
