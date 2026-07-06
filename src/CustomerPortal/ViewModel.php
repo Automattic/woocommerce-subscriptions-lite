@@ -80,7 +80,7 @@ final class ViewModel {
 	/**
 	 * Build the detail-page presentation array for one contract.
 	 *
-	 * Ports the PoC's per-status logic: the dynamic date-row label/value, the
+	 * Carries the per-status logic: the dynamic date-row label/value, the
 	 * recurring summary, the payment-method line, and the action-visibility
 	 * flags (`cancel_visible`, `hold_visible`, `reactivate_visible`,
 	 * `needs_payment_notice`, `at_period_end`).
