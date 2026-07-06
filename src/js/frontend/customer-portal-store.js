@@ -118,7 +118,9 @@ const { state } = store( STORE_NAMESPACE, {
 		 * Submit the cancel. Forwards the server-resolved `atPeriodEnd` mode.
 		 */
 		*submitCancel() {
-			yield runLifecycle( 'cancel', { at_period_end: state.atPeriodEnd } );
+			yield runLifecycle( 'cancel', {
+				at_period_end: state.atPeriodEnd,
+			} );
 		},
 
 		/**
