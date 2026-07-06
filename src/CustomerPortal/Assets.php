@@ -86,26 +86,14 @@ final class Assets {
 	}
 
 	/**
-	 * The REST base the iAPI store posts lifecycle actions to.
-	 *
-	 * Filterable so Track-C wiring can point at the live engine routes and so
-	 * tests can substitute a stub. In mock mode the store short-circuits the
-	 * request, so the base is informational until the engine routes exist.
+	 * The REST base the iAPI store posts lifecycle actions to: the engine's
+	 * contracts route - the one implementation of the lifecycle transitions,
+	 * which consumers call rather than re-route.
 	 *
 	 * @return string Absolute REST base URL, no trailing contract id.
 	 */
 	public static function rest_base(): string {
-		/**
-		 * Filters the REST base URL the customer-portal lifecycle actions post to.
-		 *
-		 * @since 0.0.1
-		 *
-		 * @param string $base The default REST base (the engine contracts route).
-		 */
-		return (string) apply_filters(
-			'woocommerce_subscriptions_lite_customer_portal_rest_base',
-			rest_url( 'wc/v3/subscriptions-engine/contracts/' )
-		);
+		return rest_url( 'wc/v3/subscriptions-engine/contracts/' );
 	}
 
 	/**
