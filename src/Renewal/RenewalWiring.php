@@ -1,18 +1,17 @@
 <?php
 /**
- * RenewalWiring - schedules a contract's first renewal through the engine.
+ * RenewalWiring - arms the engine's renewal machinery for a new contract.
  *
- * After the checkout handler creates a contract, the first renewal has to be
- * armed. The engine's {@see RenewalEngine::schedule()} owns that: it reads the
- * contract's `next_payment_gmt` (set by the engine factory) and enqueues one
- * Action Scheduler row - but only when the contract's gateway declares the
- * `recurring` capability. This wiring is the thin Lite-side delegate: it hands
- * the contract to the engine and logs when scheduling is skipped, so a merchant
- * whose gateway has not declared `recurring` gets a signal rather than a silent
- * no-renewal.
+ * The engine schedules renewals through a batch dispatcher: a recurring scan
+ * over the due index, not one Action Scheduler row per contract. After the
+ * checkout handler creates a contract, this wiring makes sure that scan is
+ * armed ({@see RenewalDispatcher::ensure_scheduled()} - idempotent, and a
+ * no-op when it already runs) so the new contract's `next_payment_gmt` is
+ * picked up when due. The gateway `recurring` capability gate applies inside
+ * the engine at charge time.
  *
- * Lite owns the driver - the call site after contract creation; the engine owns
- * the capability gate and the Action Scheduler coupling.
+ * Lite owns the driver - the call site after contract creation; the engine
+ * owns the dispatcher and the Action Scheduler coupling.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Renewal
  */
@@ -22,16 +21,16 @@ declare( strict_types=1 );
 namespace Automattic\WooCommerce\SubscriptionsLite\Renewal;
 
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Contract;
-use Automattic\WooCommerce\SubscriptionsEngine\Integration\Renewal\RenewalEngine;
+use Automattic\WooCommerce\SubscriptionsEngine\Integration\Renewal\RenewalDispatcher;
 
 defined( 'ABSPATH' ) || exit;
 
 /**
- * Schedule the first renewal for a freshly-created contract.
+ * Arm the renewal machinery for a freshly-created contract.
  *
- * Construct via the no-arg constructor in production (delegates to the engine's
- * `RenewalEngine`); tests inject a fake scheduler seam to drive the
- * scheduled / gated-off outcomes without Action Scheduler.
+ * Construct via the no-arg constructor in production (ensures the engine's
+ * dispatcher scan is scheduled); tests inject a fake scheduler seam to drive
+ * the armed / gated-off outcomes without Action Scheduler.
  */
 final class RenewalWiring {
 
@@ -41,7 +40,7 @@ final class RenewalWiring {
 	private const LOG_SOURCE = 'woocommerce-subscriptions-lite';
 
 	/**
-	 * Engine scheduler. Production: `RenewalEngine::schedule()`.
+	 * Engine scheduler. Production: `RenewalDispatcher::ensure_scheduled()`.
 	 *
 	 * @var callable(Contract): bool
 	 */
@@ -50,25 +49,26 @@ final class RenewalWiring {
 	/**
 	 * Construct the wiring.
 	 *
-	 * @param (callable(Contract): bool)|null $scheduler Scheduler; defaults to the engine `RenewalEngine`.
+	 * @param (callable(Contract): bool)|null $scheduler Scheduler; defaults to arming the engine dispatcher's recurring scan.
 	 */
 	public function __construct( ?callable $scheduler = null ) {
 		$this->scheduler = $scheduler ?? static function ( Contract $contract ): bool {
-			return ( new RenewalEngine() )->schedule( $contract );
+			unset( $contract ); // The batch scan covers all due contracts; nothing per-contract to enqueue.
+			RenewalDispatcher::ensure_scheduled();
+			return true;
 		};
 	}
 
 	/**
-	 * Schedule `$contract`'s first renewal through the engine.
+	 * Arm `$contract`'s renewals through the engine.
 	 *
-	 * Returns the engine's result: true when a renewal row was enqueued, false
-	 * when the engine skipped it (the gateway does not declare `recurring`, the
-	 * contract is gateway-scheduled, or it has no next-payment date). A skip is
-	 * logged - the contract is created and active, but nothing will charge it
-	 * until the gateway declares the capability.
+	 * Returns the seam's result: true when the renewal machinery is armed for
+	 * the contract, false when it was turned down. A turn-down is logged - the
+	 * contract is created and active, but nothing will charge it until the
+	 * cause (typically a gateway without the `recurring` capability) is fixed.
 	 *
-	 * @param Contract $contract The contract to schedule. Must have an id and a next-payment date.
-	 * @return bool True when the engine enqueued a renewal; false when it was skipped.
+	 * @param Contract $contract The contract to arm. Must have an id and a next-payment date.
+	 * @return bool True when renewals are armed; false when turned down.
 	 */
 	public function schedule_first_renewal( Contract $contract ): bool {
 		$scheduled = ( $this->scheduler )( $contract );
