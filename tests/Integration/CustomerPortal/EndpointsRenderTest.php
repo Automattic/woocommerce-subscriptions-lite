@@ -54,6 +54,11 @@ final class EndpointsRenderTest extends LiteIntegrationTestCase {
 	/**
 	 * Read the store state seeded for the client during the last render.
 	 *
+	 * The Interactivity API store is a per-process singleton that transaction
+	 * rollback does not reset, so state persists across tests in this process.
+	 * Only assert keys the render under test just (re)seeded - a key seeded
+	 * solely by an earlier test would read stale.
+	 *
 	 * @return array<string, mixed>
 	 */
 	private function seeded_state(): array {
