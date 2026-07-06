@@ -199,11 +199,18 @@ function runLifecycle( action, body ) {
  */
 function formatError( action, detail ) {
 	const copy = state.i18n || {};
-	const base =
-		( action === 'reactivate' && copy.reactivateError ) ||
-		( action === 'hold' && copy.holdError ) ||
-		copy.cancelError ||
-		'';
+	let base = '';
+	switch ( action ) {
+		case 'hold':
+			base = copy.holdError || '';
+			break;
+		case 'reactivate':
+			base = copy.reactivateError || '';
+			break;
+		default:
+			base = copy.cancelError || '';
+			break;
+	}
 
 	const suffix = copy.errorSuffix || '';
 	const message = detail ? `${ base } ${ detail }` : base;
