@@ -49,6 +49,9 @@
 		"lint": "phpcs -s -p",
 		"lint:fix": "phpcbf -p",
 		"test": "@test:unit",
-		"test:unit": "phpunit --testsuite=Unit"
+		"test:unit": "phpunit --testsuite=Unit",
+		"env:start": "npx wp-env start",
+		"env:stop": "npx wp-env stop",
+		"test:integration": "npx wp-env run tests-cli --env-cwd=wp-content/plugins/woocommerce-subscriptions-lite ./vendor/bin/phpunit --configuration phpunit-integration.xml.dist"
 	}
 }
