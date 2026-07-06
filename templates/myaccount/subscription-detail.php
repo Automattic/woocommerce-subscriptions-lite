@@ -67,19 +67,6 @@ $has_actions = $detail['cancel_visible'] || $detail['hold_visible'] || $detail['
 			<?php endif; ?>
 		</dd>
 
-		<?php
-		/**
-		 * Fires inside the detail data block, after the default rows.
-		 *
-		 * Additive-only: an overlay may append extra `<dt>`/`<dd>` rows; it
-		 * must not alter the default rows.
-		 *
-		 * @since 0.0.1
-		 *
-		 * @param array<string, mixed> $detail The detail view-model.
-		 */
-		do_action( 'woocommerce_subscriptions_lite_customer_portal_detail_rows', $detail );
-		?>
 	</dl>
 
 	<?php if ( $has_actions ) : ?>
@@ -123,20 +110,6 @@ $has_actions = $detail['cancel_visible'] || $detail['hold_visible'] || $detail['
 					<?php esc_html_e( 'Your payment method needs updating before this subscription can resume. The option to update your payment method is coming soon.', 'woocommerce-subscriptions-lite' ); ?>
 				</div>
 			<?php endif; ?>
-
-			<?php
-			/**
-			 * Fires after the default detail action buttons.
-			 *
-			 * Additive-only: an overlay may append extra action buttons wired
-			 * through the shared iAPI store; it must not alter the defaults.
-			 *
-			 * @since 0.0.1
-			 *
-			 * @param array<string, mixed> $detail The detail view-model.
-			 */
-			do_action( 'woocommerce_subscriptions_lite_customer_portal_detail_actions', $detail );
-			?>
 
 			<?php
 			// Inline error region for the in-page lifecycle actions (Pause /
@@ -296,17 +269,4 @@ $has_actions = $detail['cancel_visible'] || $detail['hold_visible'] || $detail['
 	);
 	?>
 
-	<?php
-	/**
-	 * Fires after the default sections, at the end of the detail page.
-	 *
-	 * Additive-only: an overlay may append extra sections; it must not alter
-	 * the default sections.
-	 *
-	 * @since 0.0.1
-	 *
-	 * @param array<string, mixed> $detail The detail view-model.
-	 */
-	do_action( 'woocommerce_subscriptions_lite_customer_portal_detail_sections', $detail );
-	?>
 </div>

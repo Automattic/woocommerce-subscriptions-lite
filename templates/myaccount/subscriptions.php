@@ -39,26 +39,13 @@ if ( empty( $rows ) ) :
 	return;
 endif;
 
-/**
- * Filters the customer-portal list column headers.
- *
- * Additive-only: an overlay may add column headers; the four default columns
- * keep their order and meaning.
- *
- * @since 0.0.1
- *
- * @param array<string, string> $columns Column key => header label.
- */
-$columns = apply_filters(
-	'woocommerce_subscriptions_lite_customer_portal_list_columns',
-	[
-		'subscription' => __( 'Subscription', 'woocommerce-subscriptions-lite' ),
-		'status'       => __( 'Status', 'woocommerce-subscriptions-lite' ),
-		'next-payment' => __( 'Next payment', 'woocommerce-subscriptions-lite' ),
-		'total'        => __( 'Total', 'woocommerce-subscriptions-lite' ),
-		'actions'      => '',
-	]
-);
+$columns = [
+	'subscription' => __( 'Subscription', 'woocommerce-subscriptions-lite' ),
+	'status'       => __( 'Status', 'woocommerce-subscriptions-lite' ),
+	'next-payment' => __( 'Next payment', 'woocommerce-subscriptions-lite' ),
+	'total'        => __( 'Total', 'woocommerce-subscriptions-lite' ),
+	'actions'      => '',
+];
 ?>
 
 <div
@@ -122,33 +109,7 @@ $columns = apply_filters(
 						<a href="<?php echo esc_url( $detail_url ); ?>" class="woocommerce-button button view<?php echo esc_attr( $wp_button_class ); ?>">
 							<?php esc_html_e( 'View', 'woocommerce-subscriptions-lite' ); ?>
 						</a>
-						<?php
-						/**
-						 * Fires after the default per-row actions in the list.
-						 *
-						 * Additive-only: an overlay may append extra per-row
-						 * actions; it must not alter the default View action.
-						 *
-						 * @since 0.0.1
-						 *
-						 * @param array<string, mixed> $row The row view-model.
-						 */
-						do_action( 'woocommerce_subscriptions_lite_customer_portal_list_row_actions', $row );
-						?>
 					</td>
-					<?php
-					/**
-					 * Fires at the end of a list row.
-					 *
-					 * Additive-only: an overlay may append extra cell markup;
-					 * it must not alter the default cells.
-					 *
-					 * @since 0.0.1
-					 *
-					 * @param array<string, mixed> $row The row view-model.
-					 */
-					do_action( 'woocommerce_subscriptions_lite_customer_portal_list_row', $row );
-					?>
 				</tr>
 			<?php endforeach; ?>
 		</tbody>

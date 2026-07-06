@@ -193,24 +193,9 @@ final class Endpoints {
 
 		$rows = $view_model->build_list( $contracts );
 
-		/**
-		 * Filters the assembled list view-model before render.
-		 *
-		 * The value is a zero-indexed array of row view-models, one per contract
-		 * (the shape {@see ViewModel::build_list()} returns). Additive-only: an
-		 * overlay may decorate the existing rows but must not change the shape the
-		 * template relies on.
-		 *
-		 * @since 0.0.1
-		 *
-		 * @param array<int, array<string, mixed>> $rows The list rows.
-		 */
-		$rows = apply_filters( 'woocommerce_subscriptions_lite_customer_portal_list_view_model', $rows );
-
-		// Register the store namespace on the list page so the shared store is
-		// present for the interactivity root and for any overlay that adds list
-		// actions. The list is fully server-rendered (View links only), so no
-		// per-row data needs seeding into client state.
+		// Register the store namespace for the list page's interactivity root.
+		// The list is fully server-rendered (View links only), so no per-row
+		// data needs seeding into client state.
 		wp_interactivity_state( self::STORE_NAMESPACE, [] );
 
 		wc_get_template(
@@ -265,20 +250,6 @@ final class Endpoints {
 
 		$view_model = new ViewModel();
 		$detail     = $view_model->build_detail( $contract, $related_orders );
-
-		/**
-		 * Filters the assembled detail view-model before render.
-		 *
-		 * The value is a single associative detail view-model for one contract
-		 * (the shape {@see ViewModel::build_detail()} returns). Additive-only: an
-		 * overlay may decorate the existing fields but must not change the shape
-		 * the template + iAPI store rely on.
-		 *
-		 * @since 0.0.1
-		 *
-		 * @param array<string, mixed> $detail The detail view-model.
-		 */
-		$detail = apply_filters( 'woocommerce_subscriptions_lite_customer_portal_detail_view_model', $detail );
 
 		wp_interactivity_state(
 			self::STORE_NAMESPACE,
