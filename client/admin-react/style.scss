@@ -102,6 +102,17 @@
 			padding-right: 0;
 		}
 
+		// DataViews gives every cell content wrapper a 15ch minimum;
+		// the grip column is icon-only, so let it collapse.
+		thead th:first-child .dataviews-view-table__cell-content-wrapper,
+		tbody td:first-child .dataviews-view-table__cell-content-wrapper {
+			min-width: 0;
+		}
+
+		tbody tr.is-dragging {
+			opacity: 0.6;
+		}
+
 		thead th.dataviews-view-table__actions-column,
 		thead th.dataviews-view-table__actions-column:last-child {
 			text-align: right;
