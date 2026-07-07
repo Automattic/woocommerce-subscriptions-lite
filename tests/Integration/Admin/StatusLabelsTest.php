@@ -1,28 +1,26 @@
 <?php
 /**
- * Unit tests for the admin status-label helper.
+ * Integration tests for the admin status-label helper.
  *
  * The helper turns engine status slugs into merchant-facing labels and decides
- * which actions a status allows. Pure functions, so these assert the label
- * vocabulary, the humanizing fallback for unknown statuses, and the
- * action-gating predicates directly.
+ * which actions a status allows - asserted here with real translations loaded.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Tests
  */
 
 declare( strict_types=1 );
 
-namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Unit\Admin;
+namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Admin;
 
-use PHPUnit\Framework\TestCase;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\CycleStatus;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\StatusLabels;
+use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
 
 /**
  * @covers \Automattic\WooCommerce\SubscriptionsLite\Admin\StatusLabels
  */
-final class StatusLabelsTest extends TestCase {
+final class StatusLabelsTest extends LiteIntegrationTestCase {
 
 	public function test_contract_label_uses_merchant_wording(): void {
 		$this->assertSame( 'Active', StatusLabels::contract_label( ContractStatus::ACTIVE ) );

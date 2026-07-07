@@ -1,42 +1,42 @@
 <?php
 /**
- * Unit tests for the admin row-action handlers.
+ * Integration tests for the admin row-action handlers.
  *
  * The handlers back the Renew now / Cancel actions on the admin subscriptions
  * screens: the decision method verifies the capability, then drives the engine
- * through its public facade, returning a {@see RowActionResult}. The nonce is a
- * request-boundary concern (check_admin_referer), so it is out of scope here.
- * These tests inject fake renew / cancel / capability / logger seams so every
- * decision branch runs without a booted WordPress and without the static facade.
+ * facade, returning a {@see RowActionResult}. The decision branches are driven
+ * through the controller's own constructor seams (its public API); the hook
+ * registration is asserted against the real hook table. The nonce is a
+ * request-boundary concern (check_admin_referer), out of scope here.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Tests
  */
 
 declare( strict_types=1 );
 
-namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Unit\Admin;
+namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Admin;
 
-use PHPUnit\Framework\TestCase;
-use RuntimeException;
-use WC_Order;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\RowActionController;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\RowActionResult;
+use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
+use RuntimeException;
+use WC_Order;
 
 /**
  * @covers \Automattic\WooCommerce\SubscriptionsLite\Admin\RowActionController
  * @covers \Automattic\WooCommerce\SubscriptionsLite\Admin\RowActionResult
  */
-final class RowActionControllerTest extends TestCase {
+final class RowActionControllerTest extends LiteIntegrationTestCase {
 
 	/**
-	 * Captured log messages from the injected logger seam, per controller.
+	 * Captured log messages from the injected logger seam.
 	 *
 	 * @var array<int, string>
 	 */
 	private $logged = [];
 
-	protected function setUp(): void {
-		parent::setUp();
+	public function set_up(): void {
+		parent::set_up();
 		$this->logged = [];
 	}
 
@@ -44,8 +44,7 @@ final class RowActionControllerTest extends TestCase {
 	 * A controller whose seams all pass, with spies on the engine + logger seams.
 	 *
 	 * @param array<string, mixed> $overrides Seam overrides: can, renew_return,
-	 *                                        renew_calls, cancel_return,
-	 *                                        cancel_calls.
+	 *                                        renew_calls, cancel_return, cancel_calls.
 	 */
 	private function make_controller( array $overrides = [] ): RowActionController {
 		$can           = $overrides['can'] ?? true;
@@ -79,10 +78,11 @@ final class RowActionControllerTest extends TestCase {
 	}
 
 	public function test_renew_now_runs_the_facade_for_an_authorised_request(): void {
-		$renew_calls = [];
-		$controller  = $this->make_controller(
+		$renewal_order = wc_create_order();
+		$renew_calls   = [];
+		$controller    = $this->make_controller(
 			[
-				'renew_return' => new WC_Order( 4242 ),
+				'renew_return' => $renewal_order,
 				'renew_calls'  => &$renew_calls,
 			]
 		);
@@ -91,7 +91,7 @@ final class RowActionControllerTest extends TestCase {
 
 		$this->assertTrue( $result->is_success() );
 		$this->assertSame( [ 100 ], $renew_calls, 'The facade renewal runs for the authorised contract.' );
-		$this->assertStringContainsString( '4242', $result->message(), 'The renewal order number is surfaced.' );
+		$this->assertStringContainsString( $renewal_order->get_order_number(), $result->message(), 'The renewal order number is surfaced.' );
 	}
 
 	public function test_renew_now_reports_a_skipped_renewal_as_info(): void {
@@ -191,16 +191,9 @@ final class RowActionControllerTest extends TestCase {
 	}
 
 	public function test_register_binds_the_admin_post_handlers(): void {
-		$GLOBALS['woocommerce_subscriptions_lite_test_hooks'] = [];
-
 		RowActionController::register();
 
-		$names = array_map(
-			static fn ( array $h ): string => (string) $h['hook'],
-			$GLOBALS['woocommerce_subscriptions_lite_test_hooks']
-		);
-
-		$this->assertContains( 'admin_post_wc_subscriptions_lite_renew_now', $names );
-		$this->assertContains( 'admin_post_wc_subscriptions_lite_cancel_admin', $names );
+		$this->assertNotFalse( has_action( 'admin_post_wc_subscriptions_lite_renew_now' ) );
+		$this->assertNotFalse( has_action( 'admin_post_wc_subscriptions_lite_cancel_admin' ) );
 	}
 }

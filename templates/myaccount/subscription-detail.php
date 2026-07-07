@@ -1,0 +1,272 @@
+<?php
+/**
+ * My Account -> Subscription detail template (customer portal).
+ *
+ * Server-rendered markup carrying Interactivity API directives. The action
+ * buttons call the namespaced iAPI store rather than any Store-API JS. The
+ * view-model is pre-shaped by {@see \Automattic\WooCommerce\SubscriptionsLite\CustomerPortal\ViewModel}
+ * so this template is pure presentation.
+ *
+ * @var array<string, mixed>  $detail            Pre-shaped detail view-model.
+ * @var string                $store             The iAPI store namespace.
+ * @var array<string, string> $orders_pagination Related-orders previous / next page URLs ('' = no link).
+ *
+ * @package Automattic\WooCommerce\SubscriptionsLite
+ */
+
+defined( 'ABSPATH' ) || exit;
+
+$wp_button_class = function_exists( 'wc_wp_theme_get_element_class_name' ) && wc_wp_theme_get_element_class_name( 'button' )
+	? ' ' . wc_wp_theme_get_element_class_name( 'button' )
+	: '';
+
+$has_actions = $detail['cancel_visible'] || $detail['hold_visible'] || $detail['reactivate_visible'] || $detail['needs_payment_notice'];
+?>
+
+<div
+	data-wp-interactive="<?php echo esc_attr( $store ); ?>"
+	class="woocommerce-subscriptions-lite-portal woocommerce-subscriptions-lite-portal--detail"
+>
+	<?php
+	// Render any queued WC notices (the post-action success notices queued by
+	// PostActionNoticeListener land here after the action + refresh).
+	if ( function_exists( 'wc_print_notices' ) ) {
+		wc_print_notices();
+	}
+	?>
+
+	<dl class="subscription-detail-block">
+		<dt><?php esc_html_e( 'Status', 'woocommerce-subscriptions-lite' ); ?></dt>
+		<dd>
+			<span class="wc-subs-lite-status-badge wc-subs-lite-status-badge--<?php echo esc_attr( (string) $detail['status'] ); ?>">
+				<?php echo esc_html( (string) $detail['status_label'] ); ?>
+			</span>
+		</dd>
+
+		<dt><?php esc_html_e( 'Recurring', 'woocommerce-subscriptions-lite' ); ?></dt>
+		<dd><?php echo '' !== (string) $detail['recurring_summary'] ? esc_html( (string) $detail['recurring_summary'] ) : '&mdash;'; ?></dd>
+
+		<dt><?php esc_html_e( 'Start date', 'woocommerce-subscriptions-lite' ); ?></dt>
+		<dd><?php echo '' !== (string) $detail['start_date'] ? esc_html( (string) $detail['start_date'] ) : '&mdash;'; ?></dd>
+
+		<dt><?php esc_html_e( 'Last order date', 'woocommerce-subscriptions-lite' ); ?></dt>
+		<dd><?php echo '' !== (string) $detail['last_order_date'] ? esc_html( (string) $detail['last_order_date'] ) : '&mdash;'; ?></dd>
+
+		<dt><?php echo esc_html( (string) $detail['date_row_label'] ); ?></dt>
+		<dd><?php echo '' !== (string) $detail['date_row_value'] ? esc_html( (string) $detail['date_row_value'] ) : '&mdash;'; ?></dd>
+
+		<dt><?php esc_html_e( 'Payment', 'woocommerce-subscriptions-lite' ); ?></dt>
+		<dd>
+			<?php if ( '' !== (string) $detail['payment_method_title'] ) : ?>
+				<?php echo esc_html( (string) $detail['payment_method_title'] ); ?>
+				<?php if ( '' !== (string) $detail['payment_method_expires'] ) : ?>
+					<br /><small><?php echo esc_html( (string) $detail['payment_method_expires'] ); ?></small>
+				<?php endif; ?>
+			<?php else : ?>
+				&mdash;
+			<?php endif; ?>
+		</dd>
+
+	</dl>
+
+	<?php if ( $has_actions ) : ?>
+		<h3 class="subscription-detail-actions-heading"><?php esc_html_e( 'Actions', 'woocommerce-subscriptions-lite' ); ?></h3>
+
+		<div class="subscription-detail-actions">
+			<?php if ( $detail['cancel_visible'] ) : ?>
+				<button
+					type="button"
+					class="woocommerce-button button cancel-subscription<?php echo esc_attr( $wp_button_class ); ?>"
+					data-wp-on--click="actions.openCancelModal"
+				>
+					<?php esc_html_e( 'Cancel subscription', 'woocommerce-subscriptions-lite' ); ?>
+				</button>
+			<?php endif; ?>
+
+			<?php if ( $detail['hold_visible'] ) : ?>
+				<button
+					type="button"
+					class="woocommerce-button button hold-subscription<?php echo esc_attr( $wp_button_class ); ?>"
+					data-wp-on--click="actions.submitHold"
+					data-wp-bind--disabled="state.submitting"
+				>
+					<?php esc_html_e( 'Pause subscription', 'woocommerce-subscriptions-lite' ); ?>
+				</button>
+			<?php endif; ?>
+
+			<?php if ( $detail['reactivate_visible'] ) : ?>
+				<button
+					type="button"
+					class="woocommerce-button button reactivate-subscription<?php echo esc_attr( $wp_button_class ); ?>"
+					data-wp-on--click="actions.submitReactivate"
+					data-wp-bind--disabled="state.submitting"
+				>
+					<?php esc_html_e( 'Reactivate subscription', 'woocommerce-subscriptions-lite' ); ?>
+				</button>
+			<?php endif; ?>
+
+			<?php if ( $detail['needs_payment_notice'] ) : ?>
+				<div class="woocommerce-message woocommerce-info subscription-needs-payment-notice">
+					<?php esc_html_e( 'Your payment method needs updating before this subscription can resume. The option to update your payment method is coming soon.', 'woocommerce-subscriptions-lite' ); ?>
+				</div>
+			<?php endif; ?>
+
+			<?php
+			// Inline error region for the in-page lifecycle actions (Pause /
+			// Reactivate). A failed submit re-enables its button and writes the
+			// message here. Bound to its own state field (`state.actionError`) so
+			// it never cross-renders with the cancel modal's error region. The
+			// seeded copy already carries the "try again" affordance, and the
+			// re-enabled button is the retry. role="alert" announces the message
+			// to assistive tech the moment it appears.
+			?>
+			<div
+				class="subscription-detail-actions__error"
+				role="alert"
+				aria-live="polite"
+				data-wp-bind--hidden="!state.actionError"
+				data-wp-text="state.actionError"
+			></div>
+		</div>
+
+		<?php
+		// The cancel confirmation modal. Rendered for cancelable contracts so
+		// the cancel button has a dialog to open.
+		if ( $detail['cancel_visible'] ) {
+			wc_get_template(
+				'myaccount/cancel-modal.php',
+				[
+					'detail' => $detail,
+					'store'  => $store,
+				],
+				'',
+				\Automattic\WooCommerce\SubscriptionsLite\Package::get_path() . '/templates/'
+			);
+		}
+		?>
+	<?php endif; ?>
+
+	<?php if ( ! empty( $detail['items'] ) ) : ?>
+		<h3 class="subscription-detail-totals-heading"><?php esc_html_e( 'Subscription totals', 'woocommerce-subscriptions-lite' ); ?></h3>
+		<table class="shop_table shop_table_responsive subscription-totals">
+			<thead>
+				<tr>
+					<th class="subscription-item-name"><?php esc_html_e( 'Product', 'woocommerce-subscriptions-lite' ); ?></th>
+					<th class="subscription-item-subtotal"><?php esc_html_e( 'Total', 'woocommerce-subscriptions-lite' ); ?></th>
+				</tr>
+			</thead>
+			<tbody>
+				<?php foreach ( $detail['items'] as $item ) : ?>
+					<tr class="subscription-item">
+						<td class="subscription-item-name" data-title="<?php esc_attr_e( 'Product', 'woocommerce-subscriptions-lite' ); ?>">
+							<?php echo esc_html( (string) $item['name'] ); ?>
+							<strong class="product-quantity">&times;&nbsp;<?php echo esc_html( (string) $item['quantity'] ); ?></strong>
+						</td>
+						<td class="subscription-item-subtotal" data-title="<?php esc_attr_e( 'Total', 'woocommerce-subscriptions-lite' ); ?>">
+							<?php echo esc_html( (string) $item['subtotal'] ); ?>
+						</td>
+					</tr>
+				<?php endforeach; ?>
+			</tbody>
+			<?php if ( ! empty( $detail['totals_rows'] ) ) : ?>
+				<tfoot>
+					<?php foreach ( $detail['totals_rows'] as $totals_row ) : ?>
+						<tr class="subscription-totals-row">
+							<th scope="row"><?php echo esc_html( (string) $totals_row['label'] ); ?></th>
+							<td data-title="<?php echo esc_attr( (string) $totals_row['label'] ); ?>"><?php echo esc_html( (string) $totals_row['value'] ); ?></td>
+						</tr>
+					<?php endforeach; ?>
+				</tfoot>
+			<?php endif; ?>
+		</table>
+	<?php endif; ?>
+
+	<?php if ( '' !== (string) $detail['billing_address'] || '' !== (string) $detail['shipping_address'] ) : ?>
+		<?php $has_both_addresses = '' !== (string) $detail['billing_address'] && '' !== (string) $detail['shipping_address']; ?>
+		<h3 class="subscription-detail-addresses-heading"><?php esc_html_e( 'Addresses', 'woocommerce-subscriptions-lite' ); ?></h3>
+		<?php // Columns mirror WooCommerce's my-account addresses layout (myaccount/my-address.php, as on /my-account/edit-address/): the theme styles the u-columns / col2-set chrome, and the title header is the slot per-address actions (edit) land in later. The section heading above is ours, so the per-column titles stay compact labels. ?>
+		<div class="<?php echo esc_attr( $has_both_addresses ? 'u-columns woocommerce-Addresses col2-set addresses subscription-detail-addresses' : 'subscription-detail-addresses' ); ?>">
+
+			<?php if ( '' !== (string) $detail['billing_address'] ) : ?>
+				<div class="<?php echo esc_attr( $has_both_addresses ? 'u-column1 col-1 woocommerce-Address' : 'woocommerce-Address' ); ?>">
+					<header class="woocommerce-Address-title title">
+						<h4 class="subscription-address-label"><?php esc_html_e( 'Billing', 'woocommerce-subscriptions-lite' ); ?></h4>
+					</header>
+					<address>
+						<?php echo wp_kses_post( (string) $detail['billing_address'] ); ?>
+						<?php if ( '' !== (string) $detail['billing_phone'] ) : ?>
+							<p class="woocommerce-customer-details--phone"><?php echo esc_html( (string) $detail['billing_phone'] ); ?></p>
+						<?php endif; ?>
+						<?php if ( '' !== (string) $detail['billing_email'] ) : ?>
+							<p class="woocommerce-customer-details--email"><?php echo esc_html( (string) $detail['billing_email'] ); ?></p>
+						<?php endif; ?>
+					</address>
+				</div>
+			<?php endif; ?>
+
+			<?php if ( '' !== (string) $detail['shipping_address'] ) : ?>
+				<div class="<?php echo esc_attr( $has_both_addresses ? 'u-column2 col-2 woocommerce-Address' : 'woocommerce-Address' ); ?>">
+					<header class="woocommerce-Address-title title">
+						<h4 class="subscription-address-label"><?php esc_html_e( 'Shipping', 'woocommerce-subscriptions-lite' ); ?></h4>
+					</header>
+					<address>
+						<?php echo wp_kses_post( (string) $detail['shipping_address'] ); ?>
+					</address>
+				</div>
+			<?php endif; ?>
+
+		</div>
+	<?php endif; ?>
+
+	<?php // Related orders render last: the list can grow long, while the sections above carry (future) actions. ?>
+	<?php if ( ! empty( $detail['related_orders'] ) ) : ?>
+		<h3 class="subscription-detail-related-heading"><?php esc_html_e( 'Related orders', 'woocommerce-subscriptions-lite' ); ?></h3>
+		<table class="shop_table shop_table_responsive subscription-related-orders">
+			<thead>
+				<tr>
+					<th class="related-order-number"><?php esc_html_e( 'Order', 'woocommerce-subscriptions-lite' ); ?></th>
+					<th class="related-order-date"><?php esc_html_e( 'Date', 'woocommerce-subscriptions-lite' ); ?></th>
+					<th class="related-order-status"><?php esc_html_e( 'Status', 'woocommerce-subscriptions-lite' ); ?></th>
+					<th class="related-order-total"><?php esc_html_e( 'Total', 'woocommerce-subscriptions-lite' ); ?></th>
+					<th class="related-order-actions">&nbsp;</th>
+				</tr>
+			</thead>
+			<tbody>
+				<?php foreach ( $detail['related_orders'] as $related_order ) : ?>
+					<tr class="subscription-related-order">
+						<td class="related-order-number" data-title="<?php esc_attr_e( 'Order', 'woocommerce-subscriptions-lite' ); ?>">
+							<a href="<?php echo esc_url( (string) $related_order['view_url'] ); ?>">#<?php echo esc_html( (string) $related_order['number'] ); ?></a>
+						</td>
+						<td class="related-order-date" data-title="<?php esc_attr_e( 'Date', 'woocommerce-subscriptions-lite' ); ?>">
+							<?php echo '' !== (string) $related_order['date'] ? esc_html( (string) $related_order['date'] ) : '&mdash;'; ?>
+						</td>
+						<td class="related-order-status" data-title="<?php esc_attr_e( 'Status', 'woocommerce-subscriptions-lite' ); ?>">
+							<span class="wc-subs-lite-status-badge wc-subs-lite-status-badge--<?php echo esc_attr( (string) $related_order['status'] ); ?>">
+								<?php echo esc_html( (string) $related_order['status_label'] ); ?>
+							</span>
+						</td>
+						<td class="related-order-total" data-title="<?php esc_attr_e( 'Total', 'woocommerce-subscriptions-lite' ); ?>">
+							<?php echo esc_html( (string) $related_order['total'] ); ?>
+						</td>
+						<td class="related-order-actions">
+							<a href="<?php echo esc_url( (string) $related_order['view_url'] ); ?>" class="woocommerce-button button view<?php echo esc_attr( $wp_button_class ); ?>">
+								<?php esc_html_e( 'View order', 'woocommerce-subscriptions-lite' ); ?>
+							</a>
+						</td>
+					</tr>
+				<?php endforeach; ?>
+			</tbody>
+		</table>
+	<?php endif; ?>
+
+	<?php
+	// Outside the table's guard, so a page past the end still gets a way back.
+	wc_get_template(
+		'myaccount/pagination.php',
+		[ 'pagination' => $orders_pagination ?? [] ],
+		'',
+		\Automattic\WooCommerce\SubscriptionsLite\Package::get_path() . '/templates/'
+	);
+	?>
+
+</div>

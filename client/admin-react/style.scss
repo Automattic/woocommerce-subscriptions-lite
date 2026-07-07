@@ -2,12 +2,96 @@
 @use "@wordpress/base-styles/colors";
 @use "@wordpress/base-styles/variables";
 
+.wc-subscriptions-lite-settings-tab {
+
+	table.form-table th.titledesc {
+		width: 250px;
+		padding: variables.$grid-unit-20 variables.$grid-unit-20 variables.$grid-unit-20 0;
+		vertical-align: top;
+	}
+
+	table.form-table td.item-description {
+		padding: variables.$grid-unit-20 0 variables.$grid-unit-20 variables.$grid-unit-20;
+		vertical-align: top;
+	}
+
+	.wc-subscriptions-lite-plans-list-label {
+		display: block;
+		margin: 0 0 variables.$grid-unit-10;
+		padding: 0;
+		color: colors.$gray-900;
+		font-size: variables.$font-size-large;
+		font-weight: variables.$font-weight-medium;
+		line-height: variables.$font-line-height-small;
+	}
+
+	.wc-subscriptions-lite-plans-list-description {
+		display: block;
+		margin: 0;
+		color: colors.$gray-900;
+		font-size: variables.$font-size-medium;
+		font-weight: variables.$font-weight-regular;
+		line-height: variables.$font-line-height-small;
+	}
+
+	/*
+	 * At WP admin's mobile breakpoint the outer form-table stacks the label
+	 * above the control (WP core sets th/td to `display: block`). Drop the
+	 * horizontal padding so the plans card can use the full content width,
+	 * and restore native table display on the inner DataViews table, which
+	 * WP core's stacking rule would otherwise break.
+	 */
+	@media screen and (max-width: #{ breakpoints.$break-medium }) {
+
+		table.form-table th.titledesc {
+			width: auto;
+			padding: 0 0 variables.$grid-unit-15;
+		}
+
+		table.form-table td.item-description {
+			padding: 0 0 variables.$grid-unit-20;
+		}
+
+		.dataviews-view-table {
+			display: table;
+		}
+
+		.dataviews-view-table thead {
+			display: table-header-group;
+		}
+
+		.dataviews-view-table tbody {
+			display: table-row-group;
+		}
+
+		.dataviews-view-table tr {
+			display: table-row;
+		}
+
+		.dataviews-view-table th,
+		.dataviews-view-table td {
+			display: table-cell;
+		}
+	}
+}
+
 .wc-subscriptions-lite-plans {
 	max-width: breakpoints.$break-wide;
+
+	// Align the search field (and the filters row) with the first table
+	// column, whose text starts $grid-unit-15 from the container edge.
+	.dataviews__view-actions,
+	.dataviews-filters__container {
+		padding-left: variables.$grid-unit-15;
+	}
 
 	.dataviews-view-table {
 		width: 100%;
 		border-collapse: collapse;
+
+		thead th {
+			vertical-align: middle;
+		}
 
 		thead th:not(.dataviews-view-table__actions-column) {
 			text-align: left;
@@ -22,7 +106,6 @@
 		thead th.dataviews-view-table__actions-column,
 		thead th.dataviews-view-table__actions-column:last-child {
 			text-align: right;
-			padding-right: variables.$grid-unit-30;
 		}
 
 		tbody td.dataviews-view-table__actions-column:last-child {
@@ -37,6 +120,11 @@
 			}
 		}
 
+		thead td:last-child,
+		tbody td:last-child {
+			padding-right: variables.$grid-unit-30;
+		}
+
 		tbody .dataviews-view-table__row {
 			border-top: variables.$border-width solid colors.$gray-400;
 
@@ -44,11 +132,11 @@
 				cursor: grab;
 			}
 		}
-	}
-}
 
-.wc-subscriptions-lite-plans__header {
-	margin-bottom: variables.$grid-unit-15;
+		tbody tr.dataviews-view-table__row:last-child {
+			border-bottom: variables.$border-width solid colors.$gray-400;
+		}
+	}
 }
 
 .wc-subscriptions-lite-plans__notice {
@@ -60,6 +148,10 @@
 	align-items: center;
 	justify-content: center;
 	min-height: 220px;
+}
+
+.wc-subscriptions-lite-plans__add-plan-button {
+	margin-top: variables.$grid-unit-30;
 }
 
 // Form layout.

@@ -98,21 +98,34 @@ add_action(
 
 /*
  * Flush rewrite rules on activation/deactivation so the My Account customer
- * portal endpoints resolve on first visit. The endpoint slugs are registered by
- * the Portal feature module (a later phase); flushing here is harmless before
- * those endpoints exist and avoids a stale-rewrite gap once they do.
+ * portal endpoints resolve on first visit. The portal's Endpoints module also
+ * runs a version-gated boot-time flush on `init` (the authority - robust to
+ * wp-cli / partial-deploy activations where this hook is unreliable); the
+ * activation-hook flush here is a belt-and-suspenders companion. Register the
+ * endpoints first so their rewrite rules are present at flush time.
  */
 register_activation_hook(
 	__FILE__,
 	static function (): void {
-		// TODO: register the portal endpoints before flushing once the Portal
-		// module lands, so their rewrite rules are present at flush time.
+		if ( class_exists( CustomerPortal\Endpoints::class ) ) {
+			( new CustomerPortal\Endpoints() )->add_endpoints();
+		}
 		flush_rewrite_rules();
 	}
 );
 register_deactivation_hook(
 	__FILE__,
 	static function (): void {
+		// Deregister as an engine consumer and let the dispatcher re-evaluate its gates:
+		// with no consumer left it removes its recurring scan action. This must happen
+		// here because the engine only loads through its consumers - once Lite is
+		// inactive, no engine code runs to clean up after it. If another consumer is
+		// still registered, the dispatcher keeps the scan.
+		if ( class_exists( \Automattic\WooCommerce\SubscriptionsEngine\Integration\Ownership\ConsumerRegistry::class ) ) {
+			\Automattic\WooCommerce\SubscriptionsEngine\Integration\Ownership\ConsumerRegistry::unregister( 'woocommerce-subscriptions-lite' );
+			\Automattic\WooCommerce\SubscriptionsEngine\Integration\Renewal\RenewalDispatcher::ensure_scheduled();
+		}
+
 		flush_rewrite_rules();
 	}
 );

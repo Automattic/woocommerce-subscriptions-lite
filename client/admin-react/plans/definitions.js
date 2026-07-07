@@ -2,7 +2,7 @@
  * Engine-provided enum definitions, normalized for the UI.
  *
  * The engine supplies these via window.wcSubscriptionsLitePlans.definitions
- * (see src/Admin/PlansPage.php). The fallbacks keep the UI usable if the
+ * (see src/Admin/SettingsPage.php). The fallbacks keep the UI usable if the
  * bootstrap payload is ever missing a key.
  */
 

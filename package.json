@@ -1,37 +1,39 @@
 {
-  "name": "woocommerce-subscriptions-lite",
-  "version": "0.0.1-dev",
-  "private": true,
-  "scripts": {
-    "//": "Keep `postinstall` in sync with `build/`-enqueued bundles. Today only `build:scripts` is enqueued from PHP; if a blocks bundle gets enqueued, switch to `npm run build`.",
-    "postinstall": "npm run build:scripts",
-    "build": "npm run build:scripts && npm run build:blocks",
-    "build:scripts": "wp-scripts build --config webpack.scripts.config.js",
-    "build:blocks": "wp-scripts build --experimental-modules --blocks-manifest",
-    "start": "npm run start:scripts & npm run start:blocks",
-    "start:scripts": "wp-scripts start --config webpack.scripts.config.js",
-    "start:blocks": "wp-scripts start --experimental-modules --blocks-manifest",
-    "lint": "npm run lint:js && npm run lint:css && npm run lint:php",
-    "lint:js": "wp-scripts lint-js",
-    "lint:css": "wp-scripts lint-style",
-    "lint:php": "composer lint",
-    "lint:php:fix": "composer lint:fix",
-    "test:js": "wp-scripts test-unit-js"
-  },
-  "devDependencies": {
-    "@woocommerce/dependency-extraction-webpack-plugin": "^4.0.0",
-    "@wordpress/api-fetch": "^7.49.0",
-    "@wordpress/base-styles": "^10.1.0",
-    "@wordpress/components": "^36.0.0",
-    "@wordpress/dataviews": "^17.0.0",
-    "@wordpress/element": "^8.1.0",
-    "@wordpress/env": "^11.0.0",
-    "@wordpress/hooks": "^4.49.0",
-    "@wordpress/i18n": "^6.22.0",
-    "@wordpress/icons": "^15.0.0",
-    "@wordpress/scripts": "^32.0.0"
-  },
-  "engines": {
-    "node": "^24.15.0"
-  }
+	"name": "woocommerce-subscriptions-lite",
+	"version": "0.0.1-dev",
+	"private": true,
+	"scripts": {
+		"//": "Keep `postinstall` in sync with `build/`-enqueued bundles. `build:scripts` emits the enqueued PHP-side bundles: the admin script and the customer-portal Interactivity API store module (both under build/scripts). If a blocks bundle gets enqueued, switch to `npm run build`.",
+		"postinstall": "npm run build:scripts",
+		"build": "npm run build:scripts && npm run build:blocks",
+		"build:scripts": "wp-scripts build --config webpack.scripts.config.js",
+		"build:blocks": "wp-scripts build --experimental-modules --blocks-manifest",
+		"start": "npm run start:scripts & npm run start:blocks",
+		"start:scripts": "wp-scripts start --config webpack.scripts.config.js",
+		"start:blocks": "wp-scripts start --experimental-modules --blocks-manifest",
+		"env:start": "wp-env start",
+		"env:stop": "wp-env stop",
+		"lint": "npm run lint:js && npm run lint:css && npm run lint:php",
+		"lint:js": "wp-scripts lint-js",
+		"lint:css": "wp-scripts lint-style",
+		"lint:php": "composer lint",
+		"lint:php:fix": "composer lint:fix",
+		"test:js": "wp-scripts test-unit-js"
+	},
+	"devDependencies": {
+		"@woocommerce/dependency-extraction-webpack-plugin": "^4.0.0",
+		"@wordpress/api-fetch": "^7.49.0",
+		"@wordpress/base-styles": "^10.1.0",
+		"@wordpress/components": "^36.0.0",
+		"@wordpress/dataviews": "^17.0.0",
+		"@wordpress/element": "^8.1.0",
+		"@wordpress/env": "^11.0.0",
+		"@wordpress/hooks": "^4.49.0",
+		"@wordpress/i18n": "^6.22.0",
+		"@wordpress/icons": "^15.0.0",
+		"@wordpress/scripts": "^32.0.0"
+	},
+	"engines": {
+		"node": "^24.15.0"
+	}
 }

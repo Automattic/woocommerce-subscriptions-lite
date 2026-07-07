@@ -1,6 +1,6 @@
 <?php
 /**
- * Admin page for managing subscription plans.
+ * WooCommerce Settings > Subscriptions tab hosting the plans manager.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Admin
  */
@@ -15,22 +15,26 @@ use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Plan;
 defined( 'ABSPATH' ) || exit;
 
 /**
- * Dedicated WooCommerce submenu page for global subscription plans.
+ * Renders the global subscription plans manager inside the WooCommerce
+ * Settings > Subscriptions tab.
  */
-final class PlansPage {
+final class SettingsPage {
 
 	const CAPABILITY = 'manage_woocommerce';
 
-	const MENU_SLUG = 'wc-subscriptions-lite-plans';
+	/**
+	 * Slug of the WooCommerce settings tab that hosts the plans manager.
+	 *
+	 * Matches the premium plugin's tab slug so the URL and UX line up.
+	 */
+	const TAB_SLUG = 'subscriptions';
 
 	private const SCRIPT_HANDLE = 'wc-subscriptions-lite-admin-react';
 
 	/**
-	 * Hook suffix returned by add_submenu_page().
-	 *
-	 * @var string
+	 * Hook suffix of the WooCommerce settings screen.
 	 */
-	private $hook_suffix = '';
+	private const SETTINGS_HOOK_SUFFIX = 'woocommerce_page_wc-settings';
 
 	/**
 	 * Register WordPress hooks.
@@ -38,31 +42,36 @@ final class PlansPage {
 	public static function register(): void {
 		$instance = new self();
 
-		add_action( 'admin_menu', [ $instance, 'register_menu' ] );
+		add_filter( 'woocommerce_settings_tabs_array', [ $instance, 'add_settings_tab' ], 50 );
+		add_action( 'woocommerce_settings_' . self::TAB_SLUG, [ $instance, 'render' ] );
 		add_action( 'admin_enqueue_scripts', [ $instance, 'enqueue_assets' ] );
 	}
 
 	/**
-	 * Register the WooCommerce submenu item.
+	 * Add the Subscriptions tab to the WooCommerce settings tabs.
+	 *
+	 * @param array<string,string> $tabs Existing settings tabs.
+	 * @return array<string,string> Tabs including the Subscriptions tab.
 	 */
-	public function register_menu(): void {
-		$this->hook_suffix = (string) add_submenu_page(
-			'woocommerce',
-			__( 'Subscription Plans', 'woocommerce-subscriptions-lite' ),
-			__( 'Subscription Plans', 'woocommerce-subscriptions-lite' ),
-			self::CAPABILITY,
-			self::MENU_SLUG,
-			[ $this, 'render' ]
-		);
+	public function add_settings_tab( array $tabs ): array {
+		$tabs[ self::TAB_SLUG ] = __( 'Subscriptions', 'woocommerce-subscriptions-lite' );
+
+		return $tabs;
 	}
 
 	/**
-	 * Enqueue the React app only on the plan manager page.
+	 * Enqueue the React app only on the Subscriptions settings tab.
 	 *
 	 * @param string $hook_suffix Current admin hook suffix.
 	 */
 	public function enqueue_assets( string $hook_suffix ): void {
-		if ( $hook_suffix !== $this->hook_suffix ) {
+		if ( self::SETTINGS_HOOK_SUFFIX !== $hook_suffix ) {
+			return;
+		}
+
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Reading the tab only to gate asset loading; no state is changed.
+		$tab = isset( $_GET['tab'] ) ? sanitize_key( wp_unslash( $_GET['tab'] ) ) : '';
+		if ( self::TAB_SLUG !== $tab ) {
 			return;
 		}
 
@@ -71,16 +80,6 @@ final class PlansPage {
 			'dependencies' => [],
 			'version'      => Package::get_version(),
 		];
-
-		if ( file_exists( WP_CONTENT_DIR . '/plugins/woocommerce/assets/client/admin/settings-embed/style.asset.php' ) ) {
-			$style_asset = require WP_CONTENT_DIR . '/plugins/woocommerce/assets/client/admin/settings-embed/style.asset.php';
-			wp_register_style(
-				'wc-admin-settings-embed',
-				WP_CONTENT_URL . '/plugins/woocommerce/assets/client/admin/settings-embed/style.css',
-				array_merge( $style_asset['dependencies'] ?? [], [ 'wp-components' ] ),
-				$style_asset['version'] ?? WOOCOMMERCE_VERSION
-			);
-		}
 
 		wp_enqueue_script(
 			self::SCRIPT_HANDLE,
@@ -123,7 +122,7 @@ final class PlansPage {
 			wp_enqueue_style(
 				self::SCRIPT_HANDLE,
 				Package::get_url() . '/build/scripts/style-admin-react.css',
-				[ 'wp-components', 'woocommerce_admin_styles', 'wc-admin-settings-embed' ],
+				[ 'wp-components', 'woocommerce_admin_styles' ],
 				$asset['version'] ?? Package::get_version()
 			);
 			wp_style_add_data( self::SCRIPT_HANDLE, 'rtl', 'replace' );
@@ -131,16 +130,39 @@ final class PlansPage {
 	}
 
 	/**
-	 * Render the page shell.
+	 * Render the React mount point inside the Subscriptions settings tab.
 	 */
 	public function render(): void {
 		if ( ! current_user_can( self::CAPABILITY ) ) {
 			wp_die( esc_html__( 'You do not have permission to manage subscription plans.', 'woocommerce-subscriptions-lite' ) );
 		}
 
-		echo '<div class="wrap woocommerce wc-subscriptions-lite-plans-page">';
-		echo '<div id="wc-subscriptions-lite-plan-manager" class="wc-subscriptions-lite-plan-manager"></div>';
-		echo '</div>';
+		// The plans manager is REST-driven, so there are no form settings to
+		// persist. Suppress WooCommerce's default "Save changes" button.
+		// phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedVariableFound -- WooCommerce-owned global read by the settings template.
+		$GLOBALS['hide_save_button'] = true;
+
+		?>
+		<div class="wc-subscriptions-lite-settings-tab">
+			<table class="form-table">
+				<tbody>
+					<tr valign="top">
+						<th scope="row" class="titledesc">
+							<h2 class="wc-subscriptions-lite-plans-list-label">
+								<?php esc_html_e( 'Storewide subscription plans', 'woocommerce-subscriptions-lite' ); ?>
+							</h2>
+							<p class="wc-subscriptions-lite-plans-list-description">
+								<?php esc_html_e( 'Create a set of subscription plans that can be easily added to simple and variable products.', 'woocommerce-subscriptions-lite' ); ?>
+							</p>
+						</th>
+						<td class="item-description">
+							<div id="wc-subscriptions-lite-plan-manager" class="wc-subscriptions-lite-plan-manager"></div>
+						</td>
+					</tr>
+				</tbody>
+			</table>
+		</div>
+		<?php
 	}
 
 	/**
