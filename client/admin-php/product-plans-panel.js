@@ -4,8 +4,8 @@
  * Pure visibility toggling: the server-rendered markup carries the saved
  * state, and the PHP save handler is the source of truth. The purchase-mode
  * select shows or hides the plans section (help text follows the selected
- * option), and the scope radios flip the per-plan checkboxes between the
- * "everything applies" cue (checked + disabled) and an editable selection.
+ * option), and the scope radios flip the plans table between all-scope (the
+ * checkbox column hidden - every plan applies) and an editable selection.
  *
  * Self-gates on the panel's DOM marker so other admin-php screens do no work.
  */
@@ -19,6 +19,7 @@ function initPanel( panel ) {
 	const modeSelect = panel.querySelector( '[data-wcsl-mode-select]' );
 	const helpText = panel.querySelector( '[data-wcsl-mode-help]' );
 	const plansSection = panel.querySelector( '[data-wcsl-plans-section]' );
+	const plansTable = panel.querySelector( '[data-wcsl-plans-table]' );
 	const scopeRadios = Array.from(
 		panel.querySelectorAll( '[data-wcsl-scope-radio]' )
 	);
@@ -40,6 +41,9 @@ function initPanel( panel ) {
 		const isAll = ! scopeRadios.some(
 			( radio ) => 'select' === radio.value && radio.checked
 		);
+		if ( plansTable ) {
+			plansTable.classList.toggle( 'is-scope-all', isAll );
+		}
 		checkboxes.forEach( ( checkbox ) => {
 			checkbox.disabled = isAll;
 			checkbox.checked = isAll ? true : selection.get( checkbox );

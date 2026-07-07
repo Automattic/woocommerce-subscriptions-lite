@@ -3,16 +3,16 @@
  *
  * A thin layout layer over the WooCommerce product-data panel chrome: the
  * panel div reuses `.woocommerce_options_panel` and the plans table reuses
- * wp-admin's `.widefat`, so only subscription-specific spacing and the
- * help-text tone live here. Tokens come from @wordpress/base-styles (imported
- * by the entry stylesheet).
+ * wp-admin's `.widefat`, so only subscription-specific spacing, the section
+ * labels, and the help-text tone live here. Tokens come from
+ * @wordpress/base-styles (imported by the entry stylesheet).
  *
  * The `.woocommerce_options_panel` prefix keeps every rule more specific
  * than WooCommerce's own panel rules regardless of stylesheet load order.
  */
 
 .woocommerce_options_panel .wc-subscriptions-lite-product-plans {
-	padding: $grid-unit-15;
+	padding: $grid-unit-20;
 
 	// WooCommerce floats every panel label and legend into a 150px gutter
 	// column (float: left; width: 150px; margin-left: -150px) that only
@@ -27,41 +27,49 @@
 		width: auto;
 	}
 
-	.wc-subscriptions-lite-purchase-mode label {
+	// WooCommerce also floats the panel selects next to the label gutter;
+	// un-float so the mode help renders as a full-width block below.
+	select {
+		float: none;
+	}
+
+	// Small uppercase section labels, one per block (purchase options, plan
+	// selection, one-time purchases).
+	.wc-subscriptions-lite-section-label {
+		color: $gray-900;
 		display: block;
-		font-weight: 600;
-		margin-bottom: $grid-unit-05;
+		font-size: $font-size-x-small;
+		font-weight: 500;
+		margin: 0 0 $grid-unit-10;
+		text-transform: uppercase;
 	}
 
 	.wc-subscriptions-lite-purchase-mode-help {
 		color: $gray-700;
-		margin: $grid-unit-05 0 0;
+		font-size: $helptext-font-size;
+		margin: $grid-unit-10 0 0;
 	}
 
 	.wc-subscriptions-lite-plans-section {
-		margin-top: $grid-unit-20;
+		margin-top: $grid-unit-30;
 	}
 
 	.wc-subscriptions-lite-plans-scope {
 		border: 0;
-		margin: 0 0 $grid-unit-15;
+		margin: 0 0 $grid-unit-30;
 		padding: 0;
-
-		legend {
-			font-weight: 600;
-			margin-bottom: $grid-unit-05;
-		}
 
 		label {
 			display: block;
-			margin-bottom: $grid-unit-05;
+			margin-bottom: $grid-unit-10;
 		}
 	}
 
 	.wc-subscriptions-lite-plans-scope-help {
 		color: $gray-700;
 		display: block;
-		margin: 0 0 $grid-unit-10 $grid-unit-30;
+		font-size: $helptext-font-size;
+		margin: $grid-unit-05 0 0 $grid-unit-30;
 	}
 
 	.wc-subscriptions-lite-plans-table {
@@ -70,9 +78,15 @@
 		.wc-subscriptions-lite-plans-table-check {
 			width: $grid-unit-40;
 		}
+
+		// All-scope: every plan applies, so there is nothing to pick - the
+		// column stays in the markup for the live scope toggle but is hidden.
+		&.is-scope-all .wc-subscriptions-lite-plans-table-check {
+			display: none;
+		}
 	}
 
 	.wc-subscriptions-lite-one-time {
-		margin-top: $grid-unit-20;
+		margin-top: $grid-unit-30;
 	}
 }

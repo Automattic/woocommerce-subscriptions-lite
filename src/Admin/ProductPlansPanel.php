@@ -146,8 +146,8 @@ final class ProductPlansPanel {
 
 	/**
 	 * Render the panel. The server paints the state matching the saved
-	 * applicability (plans section hidden in one-time mode, checkboxes
-	 * checked + disabled in all-scope); the toggle script only mirrors these
+	 * applicability (plans section hidden in one-time mode, the checkbox
+	 * column hidden in all-scope); the toggle script only mirrors these
 	 * rules on input changes.
 	 */
 	public function render_panel(): void {
@@ -174,7 +174,7 @@ final class ProductPlansPanel {
 
 			<div class="wc-subscriptions-lite-product-plans" data-wcsl-product-plans-panel>
 				<div class="wc-subscriptions-lite-purchase-mode">
-					<label for="<?php echo esc_attr( self::POST_PURCHASE_MODE ); ?>">
+					<label class="wc-subscriptions-lite-section-label" for="<?php echo esc_attr( self::POST_PURCHASE_MODE ); ?>">
 						<?php esc_html_e( 'Purchase options', 'woocommerce-subscriptions-lite' ); ?>
 					</label>
 					<select
@@ -204,7 +204,7 @@ final class ProductPlansPanel {
 
 				<div class="wc-subscriptions-lite-plans-section" data-wcsl-plans-section<?php echo $is_plans_mode ? '' : ' hidden'; ?>>
 					<fieldset class="wc-subscriptions-lite-plans-scope">
-						<legend><?php esc_html_e( 'Plan selection', 'woocommerce-subscriptions-lite' ); ?></legend>
+						<legend class="wc-subscriptions-lite-section-label"><?php esc_html_e( 'Subscription plan selection', 'woocommerce-subscriptions-lite' ); ?></legend>
 						<label>
 							<input
 								type="radio"
@@ -215,13 +215,13 @@ final class ProductPlansPanel {
 								data-wcsl-scope-radio
 							/>
 							<?php esc_html_e( 'Use all storewide subscription plans', 'woocommerce-subscriptions-lite' ); ?>
+							<span
+								id="<?php echo esc_attr( self::POST_PLANS_SCOPE . '-all-help' ); ?>"
+								class="wc-subscriptions-lite-plans-scope-help"
+							>
+								<?php esc_html_e( 'New storewide subscription plans will be included automatically.', 'woocommerce-subscriptions-lite' ); ?>
+							</span>
 						</label>
-						<span
-							id="<?php echo esc_attr( self::POST_PLANS_SCOPE . '-all-help' ); ?>"
-							class="wc-subscriptions-lite-plans-scope-help"
-						>
-							<?php esc_html_e( 'New storewide plans are included automatically.', 'woocommerce-subscriptions-lite' ); ?>
-						</span>
 						<label>
 							<input
 								type="radio"
@@ -239,7 +239,13 @@ final class ProductPlansPanel {
 							<?php esc_html_e( 'No storewide subscription plans yet.', 'woocommerce-subscriptions-lite' ); ?>
 						</p>
 					<?php else : ?>
-						<table class="widefat wc-subscriptions-lite-plans-table" data-wcsl-plans-table>
+						<?php
+						// In all-scope the checkbox column stays in the markup for the
+						// live scope toggle but is hidden: every plan applies, so there
+						// is nothing to pick.
+						$table_classes = 'widefat wc-subscriptions-lite-plans-table' . ( $is_select ? '' : ' is-scope-all' );
+						?>
+						<table class="<?php echo esc_attr( $table_classes ); ?>" data-wcsl-plans-table>
 							<thead>
 								<tr>
 									<th scope="col" class="wc-subscriptions-lite-plans-table-check">
@@ -287,7 +293,8 @@ final class ProductPlansPanel {
 						</a>
 					</p>
 
-					<p class="wc-subscriptions-lite-one-time">
+					<div class="wc-subscriptions-lite-one-time">
+						<h4 class="wc-subscriptions-lite-section-label"><?php esc_html_e( 'One-time purchases', 'woocommerce-subscriptions-lite' ); ?></h4>
 						<label>
 							<input
 								type="checkbox"
@@ -295,9 +302,9 @@ final class ProductPlansPanel {
 								value="yes"
 								<?php checked( $applicability->allows_one_time() ); ?>
 							/>
-							<?php esc_html_e( 'Allow one-time purchase', 'woocommerce-subscriptions-lite' ); ?>
+							<?php esc_html_e( 'Customers can buy this product without subscribing', 'woocommerce-subscriptions-lite' ); ?>
 						</label>
-					</p>
+					</div>
 				</div>
 			</div>
 		</div>
@@ -435,7 +442,7 @@ final class ProductPlansPanel {
 			],
 			self::MODE_PLANS    => [
 				'label' => __( 'Use storewide subscription plans', 'woocommerce-subscriptions-lite' ),
-				'help'  => __( 'This product will be offered on your storewide subscription plans.', 'woocommerce-subscriptions-lite' ),
+				'help'  => __( 'This product will use the storewide subscription plans from your subscription settings.', 'woocommerce-subscriptions-lite' ),
 			],
 		];
 	}

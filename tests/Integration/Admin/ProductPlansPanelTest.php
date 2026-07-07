@@ -438,6 +438,62 @@ final class ProductPlansPanelTest extends LiteIntegrationTestCase {
 	}
 
 	/**
+	 * All-scope needs no picking: the checkbox column renders hidden (the
+	 * `is-scope-all` table class hides it; the cells stay in the markup for
+	 * the live scope toggle) and its checkboxes are disabled so they do not
+	 * submit.
+	 */
+	public function test_all_scope_renders_the_plans_table_without_a_visible_checkbox_column(): void {
+		$product = $this->simple_product();
+		$this->named_plan( 'Monthly' );
+		$this->preset_inherit_all( $product );
+
+		$html = $this->render_panel_for( $product );
+
+		$this->assertStringContainsString( 'wc-subscriptions-lite-plans-table is-scope-all', $html, 'The all-scope table carries the column-hiding class.' );
+		$this->assertStringContainsString( "disabled='disabled'", $html, 'All-scope checkboxes are disabled and never submit.' );
+	}
+
+	public function test_select_scope_renders_an_editable_checkbox_column_with_the_saved_selection(): void {
+		$product = $this->simple_product();
+		$monthly = $this->named_plan( 'Monthly' );
+		$this->named_plan( 'Yearly', 'year' );
+		( new ApplicabilityStore() )->set(
+			$product->get_id(),
+			new ProductApplicability( ProductApplicability::MODE_INHERIT_SELECT, [ (int) $monthly->get_id() ], false )
+		);
+
+		$html = $this->render_panel_for( $product );
+
+		$this->assertStringNotContainsString( 'is-scope-all', $html, 'Select-scope shows the checkbox column.' );
+		$this->assertStringNotContainsString( "disabled='disabled'", $html, 'Select-scope checkboxes are editable.' );
+		$this->assertMatchesRegularExpression(
+			'/id="' . preg_quote( ProductPlansPanel::POST_PLAN_IDS . '-' . (int) $monthly->get_id(), '/' ) . "\"[^>]*checked='checked'/s",
+			$html,
+			'The saved selection renders checked.'
+		);
+	}
+
+	/**
+	 * The panel copy mirrors the section structure: a help line under the
+	 * mode select, a note nested under the all-scope radio, and a one-time
+	 * purchases section heading over its checkbox.
+	 */
+	public function test_panel_renders_the_section_headings_and_help_copy(): void {
+		$product = $this->simple_product();
+		$this->named_plan( 'Monthly' );
+		$this->preset_inherit_all( $product );
+
+		$html = $this->render_panel_for( $product );
+
+		$this->assertStringContainsString( 'This product will use the storewide subscription plans from your subscription settings.', $html );
+		$this->assertStringContainsString( 'Subscription plan selection', $html );
+		$this->assertStringContainsString( 'New storewide subscription plans will be included automatically.', $html );
+		$this->assertStringContainsString( 'One-time purchases', $html );
+		$this->assertStringContainsString( 'Customers can buy this product without subscribing', $html );
+	}
+
+	/**
 	 * Screen readers announce the help text with its control only when the
 	 * markup links the two - the mode select to its (JS-swapped) help
 	 * paragraph, the all-scope radio to its always-included note.
