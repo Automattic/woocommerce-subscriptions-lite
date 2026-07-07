@@ -101,6 +101,12 @@ final class PlanPickerTest extends LiteIntegrationTestCase {
 		$this->assertStringContainsString( 'value="' . (int) $plan->get_id() . '"', $html, 'Each plan renders as a select option.' );
 		$this->assertStringContainsString( 'value="one-time"', $html );
 		$this->assertStringContainsString( 'checked="checked"', $html, 'One-time purchase is preselected when allowed.' );
+		$this->assertStringContainsString( 'value="subscribe"', $html, 'The subscribe mode radio renders alongside one-time.' );
+		$this->assertMatchesRegularExpression(
+			'/value="subscribe"\s+disabled="disabled"/',
+			$html,
+			'The subscribe radio is server-painted disabled: the no-JS fallback stays on one-time; the view module enables it on hydration.'
+		);
 		$this->assertMatchesRegularExpression( '/^\s*hidden\s*$/m', $html, 'The plans block starts server-painted hidden.' );
 		$this->assertStringContainsString(
 			'$24.00 every 1 month',

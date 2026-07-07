@@ -259,6 +259,9 @@ final class ApplicabilityStoreTest extends LiteIntegrationTestCase {
 			$this->fail( 'Expected InvalidArgumentException for an archived plan id.' );
 		} catch ( InvalidArgumentException $e ) {
 			$this->assertSame( ProductApplicability::MODE_DISABLE, $store->get( $product_id )->get_mode() );
+			// All-or-nothing at the DB level: no mode or plan-id rows behind the facade.
+			$this->assertSame( [], get_post_meta( $product_id, ApplicabilityStore::META_APPLY_MODE, false ) );
+			$this->assertSame( [], get_post_meta( $product_id, ApplicabilityStore::META_PLAN_IDS, false ) );
 		}
 	}
 }

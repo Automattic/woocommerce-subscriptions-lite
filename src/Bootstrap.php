@@ -91,7 +91,8 @@ final class Bootstrap {
 			Admin\SettingsPage::register();
 
 			// Product edit screen: the Subscriptions product-data tab writing
-			// plan applicability through the engine facade.
+			// Lite-owned plan applicability, validated against the engine's
+			// plans catalog.
 			Admin\ProductPlansPanel::register();
 		}
 

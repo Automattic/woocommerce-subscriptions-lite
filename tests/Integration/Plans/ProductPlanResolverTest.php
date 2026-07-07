@@ -109,18 +109,6 @@ final class ProductPlanResolverTest extends LiteIntegrationTestCase {
 		$this->assertSame( [ $attached_id ], self::plan_ids( $plans ) );
 	}
 
-	public function test_inherit_select_with_empty_selection_resolves_to_no_plans(): void {
-		$product_id = $this->make_product();
-		$this->make_plan();
-
-		( new ApplicabilityStore() )->set(
-			$product_id,
-			new ProductApplicability( ProductApplicability::MODE_INHERIT_SELECT, [] )
-		);
-
-		$this->assertSame( [], ( new ProductPlanResolver() )->for_product( $product_id ) );
-	}
-
 	public function test_empty_selection_short_circuits_without_running_the_filter(): void {
 		$product_id = $this->make_product();
 
@@ -256,9 +244,19 @@ final class ProductPlanResolverTest extends LiteIntegrationTestCase {
 	}
 
 	public function test_filter_receives_the_original_product_id(): void {
-		$product_id = $this->make_product();
+		// A variation: applicability is read from the parent, but the filter must
+		// see the variation id the caller asked about - not the parent id.
+		$parent = new WC_Product_Variable();
+		$parent->set_name( 'Coffee Box' );
+		$parent->save();
+		( new ApplicabilityStore() )->set( $parent->get_id(), new ProductApplicability( ProductApplicability::MODE_INHERIT_ALL ) );
 
-		( new ApplicabilityStore() )->set( $product_id, new ProductApplicability( ProductApplicability::MODE_INHERIT_ALL ) );
+		$this->make_plan();
+
+		$variation = new WC_Product_Variation();
+		$variation->set_parent_id( $parent->get_id() );
+		$variation->set_regular_price( '24.00' );
+		$variation_id = (int) $variation->save();
 
 		$seen = null;
 		add_filter(
@@ -272,9 +270,10 @@ final class ProductPlanResolverTest extends LiteIntegrationTestCase {
 			2
 		);
 
-		( new ProductPlanResolver() )->for_product( $product_id );
+		( new ProductPlanResolver() )->for_product( $variation_id );
 
-		$this->assertSame( $product_id, $seen );
+		$this->assertSame( $variation_id, $seen );
+		$this->assertNotSame( (int) $parent->get_id(), $seen, 'The filter must see the variation id, not the parent it resolved applicability from.' );
 	}
 
 	public function test_non_plan_filter_garbage_is_dropped(): void {
