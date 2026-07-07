@@ -39,7 +39,7 @@ final class VariationPlanDataTest extends LiteIntegrationTestCase {
 
 		// The per-request plans cache is per-suite-process here; reset it so a
 		// parent product id from one test can never satisfy another test's
-		// resolution (the registration guard stays - the bootstrap already ran).
+		// resolution.
 		$cache = new ReflectionProperty( VariationPlanData::class, 'plans_cache' );
 		$cache->setAccessible( true );
 		$cache->setValue( null, [] );
@@ -241,35 +241,5 @@ final class VariationPlanDataTest extends LiteIntegrationTestCase {
 		$option_html = implode( '', $result['subscriptions_lite']['option_html'] );
 		$this->assertStringNotContainsString( '<script', $option_html, 'Script tags never reach the innerHTML sink.' );
 		$this->assertStringContainsString( '<span class="amount">$30.00</span>', $option_html, 'The allowed price markup survives.' );
-	}
-
-	public function test_a_repeated_register_does_not_double_bind_the_filter(): void {
-		$before = $this->variation_filter_callback_count();
-
-		VariationPlanData::register();
-		VariationPlanData::register();
-
-		$this->assertSame( $before, $this->variation_filter_callback_count(), 'The bootstrap already registered the filter; re-registration is guarded.' );
-	}
-
-	/**
-	 * Count the VariationPlanData callbacks on the variation-payload filter.
-	 */
-	private function variation_filter_callback_count(): int {
-		global $wp_filter;
-
-		$count = 0;
-		if ( ! isset( $wp_filter['woocommerce_available_variation'] ) ) {
-			return $count;
-		}
-		foreach ( $wp_filter['woocommerce_available_variation']->callbacks as $callbacks ) {
-			foreach ( $callbacks as $callback ) {
-				if ( is_array( $callback['function'] ) && $callback['function'][0] instanceof VariationPlanData ) {
-					++$count;
-				}
-			}
-		}
-
-		return $count;
 	}
 }

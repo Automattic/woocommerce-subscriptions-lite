@@ -36,13 +36,6 @@ defined( 'ABSPATH' ) || exit;
 final class VariationPlanData {
 
 	/**
-	 * Guards against double registration; `register()` is idempotent.
-	 *
-	 * @var bool
-	 */
-	private static $registered = false;
-
-	/**
 	 * Per-request cache of resolved plans keyed by parent product id.
 	 * WooCommerce serializes every variation's payload in one request, and
 	 * the plans belong to the shared parent - without the cache each
@@ -53,15 +46,9 @@ final class VariationPlanData {
 	private static $plans_cache = [];
 
 	/**
-	 * Wire the payload filter. Called from the bootstrap; idempotent so a
-	 * repeated call cannot double-append the payload data.
+	 * Wire the payload filter. Called once from the bootstrap.
 	 */
 	public static function register(): void {
-		if ( self::$registered ) {
-			return;
-		}
-		self::$registered = true;
-
 		add_filter( 'woocommerce_available_variation', [ new self(), 'filter_available_variation' ], 10, 3 );
 	}
 

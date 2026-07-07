@@ -16,9 +16,9 @@ defined( 'ABSPATH' ) || exit;
  *
  * The wrapper plugin calls {@see self::init()} once the engine has resolved at
  * runtime. Each feature module is a small registration site that binds its own
- * hooks; this class only orchestrates which modules load. Feature logic is
- * intentionally absent at the scaffold stage - the modules below depend on the
- * engine's public surface, which lands in a later phase.
+ * hooks; this class only orchestrates which modules load. Its `$initialized`
+ * guard is the single idempotency gate: modules register unconditionally and
+ * rely on init() running once.
  */
 final class Bootstrap {
 
