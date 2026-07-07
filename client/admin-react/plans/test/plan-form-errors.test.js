@@ -139,7 +139,28 @@ describe( 'PlanForm validation errors', () => {
 				'.wc-subscriptions-lite-plans__error'
 			),
 		].map( ( el ) => el.textContent );
-		expect( errors ).toContain( 'Percentage cannot exceed 100.' );
+		expect( errors ).toContain( 'Percentage discount cannot exceed 100%.' );
+		expect( discountInput.getAttribute( 'aria-invalid' ) ).toBe( 'true' );
+	} );
+	it( 'renders the discount error on blur, before any submit', () => {
+		renderForm();
+
+		const discountInput = container.querySelector(
+			'input[aria-label^="Discount"]'
+		);
+		change( discountInput, '-12' );
+		act( () => {
+			discountInput.dispatchEvent(
+				new window.FocusEvent( 'focusout', { bubbles: true } )
+			);
+		} );
+
+		const errors = [
+			...container.querySelectorAll(
+				'.wc-subscriptions-lite-plans__error'
+			),
+		].map( ( el ) => el.textContent );
+		expect( errors ).toContain( 'Discount cannot be negative.' );
 		expect( discountInput.getAttribute( 'aria-invalid' ) ).toBe( 'true' );
 	} );
 } );

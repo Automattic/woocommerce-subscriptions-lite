@@ -2,16 +2,15 @@
  * PlanForm - registry-driven create/edit form.
  *
  * Iterates the field registry in order; each field renders via its own Edit
- * component (built-in or injected). Validation runs on submit; the Save
- * button is disabled while errors are present.
+ * component (built-in or injected). Field errors surface on blur, clear as
+ * the value changes, and the whole form re-validates on submit.
  */
 
-import { useMemo, useState } from '@wordpress/element';
+import { useMemo, useRef, useState } from '@wordpress/element';
 import { Button } from '@wordpress/components';
 import { __ } from '@wordpress/i18n';
 import {
 	formDataToPayload,
-	formErrors,
 	makeDefaultFormData,
 	planToFormData,
 } from '../transforms';
@@ -41,26 +40,73 @@ export function PlanForm( {
 			? planToFormData( registry, plan )
 			: makeDefaultFormData( registry )
 	);
-	const [ showErrors, setShowErrors ] = useState( false );
+
+	// Validation errors, bucketed per field descriptor so a blur re-validation
+	// replaces exactly the keys that descriptor owns.
+	const [ errorsByField, setErrorsByField ] = useState( {} );
+
+	// Blur handlers validate against the latest data even when the triggering
+	// commit lands in the same tick as the blur.
+	const formDataRef = useRef( formData );
+	formDataRef.current = formData;
 
 	const errors = useMemo(
-		() => formErrors( registry, formData ),
-		[ registry, formData ]
+		() => Object.assign( {}, ...Object.values( errorsByField ) ),
+		[ errorsByField ]
 	);
 	const hasErrors = Object.keys( errors ).length > 0;
-	const displayedErrors = showErrors ? errors : {};
 
 	const handleChange = ( patch ) => {
-		setFormData( ( current ) => ( { ...current, ...patch } ) );
+		setFormData( ( current ) => {
+			const next = { ...current, ...patch };
+			formDataRef.current = next;
+			return next;
+		} );
+
+		// A changed value clears its own error until the next blur or submit.
+		const patchKeys = Object.keys( patch );
+		setErrorsByField( ( current ) => {
+			const next = {};
+			Object.keys( current ).forEach( ( fieldId ) => {
+				const kept = { ...current[ fieldId ] };
+				patchKeys.forEach( ( key ) => delete kept[ key ] );
+				next[ fieldId ] = kept;
+			} );
+			return next;
+		} );
+
 		if ( onFieldChange ) {
 			onFieldChange();
 		}
 	};
 
+	const validateField = ( field ) => {
+		if ( ! field.validate ) {
+			return;
+		}
+		const fieldErrors = field.validate( formDataRef.current ) || {};
+		setErrorsByField( ( current ) => ( {
+			...current,
+			[ field.id ]: fieldErrors,
+		} ) );
+	};
+
 	const handleSubmit = ( event ) => {
 		event.preventDefault();
-		setShowErrors( true );
-		if ( hasErrors ) {
+
+		const allErrors = {};
+		registry.forEach( ( field ) => {
+			if ( field.validate ) {
+				allErrors[ field.id ] =
+					field.validate( formDataRef.current ) || {};
+			}
+		} );
+		setErrorsByField( allErrors );
+
+		const failing = Object.values( allErrors ).some(
+			( bucket ) => Object.keys( bucket ).length > 0
+		);
+		if ( failing ) {
 			return;
 		}
 		onSave( formDataToPayload( registry, formData, plan ), formData );
@@ -81,7 +127,8 @@ export function PlanForm( {
 						key={ field.id }
 						data={ formData }
 						onChange={ handleChange }
-						errors={ displayedErrors }
+						onBlur={ () => validateField( field ) }
+						errors={ errors }
 						definitions={ definitions }
 					/>
 				);
@@ -100,7 +147,7 @@ export function PlanForm( {
 					variant="primary"
 					type="submit"
 					isBusy={ isDisabled }
-					disabled={ isDisabled || ( showErrors && hasErrors ) }
+					disabled={ isDisabled || hasErrors }
 				>
 					{ __( 'Save', 'woocommerce-subscriptions-lite' ) }
 				</Button>

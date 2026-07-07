@@ -17,9 +17,10 @@ import { FormErrorMessage } from '../controls/form-error-message';
  * @param {Object}   props.data     Current form data.
  * @param {Function} props.onChange Change handler receiving a partial form-data patch.
  * @param {Object}   props.errors   Validation errors keyed by field id.
+ * @param {Function} props.onBlur   Blur handler; validates this field.
  * @return {Object} ExpirationEdit component.
  */
-export function ExpirationEdit( { data, onChange, errors } ) {
+export function ExpirationEdit( { data, onChange, onBlur, errors } ) {
 	const maxCyclesErrorId = `${ useId() }-max-cycles-error`;
 
 	return (
@@ -52,6 +53,7 @@ export function ExpirationEdit( { data, onChange, errors } ) {
 								maxCycles: parseInt( value, 10 ) || 0,
 							} )
 						}
+						onBlur={ onBlur }
 						min={ 1 }
 						step={ 1 }
 						help={ __(

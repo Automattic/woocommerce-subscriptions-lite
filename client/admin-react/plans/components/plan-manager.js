@@ -58,21 +58,16 @@ export function PlanManager() {
 		setStatus,
 		reorder,
 	} = usePlans( view );
-	const { notice, error, showSuccess, showError, clear } = useNotifications();
+	const { showSuccess, showError } = useNotifications();
 	const { findDuplicate } = useValidation( registry );
 
 	const openCreate = useCallback( () => {
-		clear();
 		setEditor( { ...CLOSED_EDITOR, isOpen: true } );
-	}, [ clear ] );
+	}, [] );
 
-	const openEdit = useCallback(
-		( plan ) => {
-			clear();
-			setEditor( { ...CLOSED_EDITOR, isOpen: true, plan } );
-		},
-		[ clear ]
-	);
+	const openEdit = useCallback( ( plan ) => {
+		setEditor( { ...CLOSED_EDITOR, isOpen: true, plan } );
+	}, [] );
 
 	const closeEditor = useCallback( () => setEditor( CLOSED_EDITOR ), [] );
 
@@ -169,6 +164,12 @@ export function PlanManager() {
 		async ( ids ) => {
 			try {
 				await reorder( ids );
+				showSuccess(
+					__(
+						'Plans reordered successfully.',
+						'woocommerce-subscriptions-lite'
+					)
+				);
 				await reload();
 			} catch ( reorderError ) {
 				showError(
@@ -180,30 +181,18 @@ export function PlanManager() {
 				);
 			}
 		},
-		[ reload, reorder, showError ]
+		[ reload, reorder, showError, showSuccess ]
 	);
 
 	return (
 		<div className="wc-subscriptions-lite-plans">
-			{ notice && (
-				<Notice
-					status="success"
-					onRemove={ clear }
-					className="wc-subscriptions-lite-plans__notice"
-				>
-					{ notice }
-				</Notice>
-			) }
-			{ ( error || loadError ) && (
+			{ loadError && (
 				<Notice
 					status="error"
-					onRemove={ () => {
-						clear();
-						setLoadError( '' );
-					} }
+					onRemove={ () => setLoadError( '' ) }
 					className="wc-subscriptions-lite-plans__notice"
 				>
-					{ error || loadError }
+					{ loadError }
 				</Notice>
 			) }
 
