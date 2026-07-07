@@ -9,11 +9,13 @@
  * vanilla script (client/admin-php/product-plans-panel.js) only toggles
  * section visibility.
  *
- * All reads and writes go through the engine's public
- * {@see \Automattic\WooCommerce\SubscriptionsEngine\Api\SellingPlans} facade -
- * Lite owns no applicability schema. The facade validates writes (product
- * type, plan ownership) and its rejection surfaces as a product-screen
- * admin error via WC_Admin_Meta_Boxes::add_error().
+ * Applicability is Lite-owned: reads and writes go through Lite's
+ * {@see \Automattic\WooCommerce\SubscriptionsLite\Plans\ApplicabilityStore},
+ * and the plans list comes from the engine's public
+ * {@see \Automattic\WooCommerce\SubscriptionsEngine\Api\SellingPlans} catalog
+ * read. The store validates writes (product type, plan ownership) and its
+ * rejection surfaces as a product-screen admin error via
+ * WC_Admin_Meta_Boxes::add_error().
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Admin
  */
@@ -26,19 +28,15 @@ use InvalidArgumentException;
 use WC_Admin_Meta_Boxes;
 use WC_Product;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\SellingPlans;
-use Automattic\WooCommerce\SubscriptionsEngine\Core\ValueObject\ProductApplicability;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
+use Automattic\WooCommerce\SubscriptionsLite\Plans\ApplicabilityStore;
+use Automattic\WooCommerce\SubscriptionsLite\Plans\ProductApplicability;
 use Automattic\WooCommerce\SubscriptionsLite\ProductPage\PlanOptionFormatter;
-use Automattic\WooCommerce\SubscriptionsLite\ProductPage\PlanPicker;
 
 defined( 'ABSPATH' ) || exit;
 
 /**
  * Product-data tab, panel render, and save for per-product plan applicability.
- *
- * Construct via the no-arg constructor in production (facade defaults); tests
- * inject fake reader / writer / lister seams to exercise the save mapping
- * without a database.
  */
 final class ProductPlansPanel {
 
@@ -86,7 +84,7 @@ final class ProductPlansPanel {
 
 	/**
 	 * Lite-internal purchase-mode values. The save handler maps them onto the
-	 * engine VO's modes; the engine vocabulary never reaches the form.
+	 * applicability VO's modes; the storage vocabulary never reaches the form.
 	 */
 	const MODE_ONE_TIME = 'one_time';
 	const MODE_PLANS    = 'plans';
@@ -96,50 +94,6 @@ final class ProductPlansPanel {
 	 */
 	const SCOPE_ALL    = 'all';
 	const SCOPE_SELECT = 'select';
-
-	/**
-	 * Applicability reader. Production: the facade read.
-	 *
-	 * @var callable(int): ProductApplicability
-	 */
-	private $applicability_reader;
-
-	/**
-	 * Applicability writer. Production: the facade write scoped to Lite's slug.
-	 *
-	 * @var callable(int, ProductApplicability): void
-	 */
-	private $applicability_writer;
-
-	/**
-	 * Active-plans lister for the selection table. Production: the facade list.
-	 *
-	 * @var callable(): array<int, \Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Plan>
-	 */
-	private $plans_lister;
-
-	/**
-	 * Construct the panel.
-	 *
-	 * @param (callable(int): ProductApplicability)|null       $applicability_reader Reader; defaults to the facade.
-	 * @param (callable(int, ProductApplicability): void)|null $applicability_writer Writer; defaults to the facade.
-	 * @param (callable(): array<int, mixed>)|null             $plans_lister         Plans lister; defaults to the facade.
-	 */
-	public function __construct(
-		?callable $applicability_reader = null,
-		?callable $applicability_writer = null,
-		?callable $plans_lister = null
-	) {
-		$this->applicability_reader = $applicability_reader ?? static function ( int $product_id ): ProductApplicability {
-			return SellingPlans::get_product_applicability( $product_id );
-		};
-		$this->applicability_writer = $applicability_writer ?? static function ( int $product_id, ProductApplicability $applicability ): void {
-			SellingPlans::set_product_applicability( $product_id, $applicability, Package::EXTENSION_SLUG );
-		};
-		$this->plans_lister         = $plans_lister ?? static function (): array {
-			return SellingPlans::list_plans( Package::EXTENSION_SLUG );
-		};
-	}
 
 	/**
 	 * Wire the tab, panel, save, and asset hooks. Called once from the
@@ -186,8 +140,8 @@ final class ProductPlansPanel {
 		global $post;
 
 		$product_id    = isset( $post->ID ) ? (int) $post->ID : 0;
-		$applicability = ( $this->applicability_reader )( $product_id );
-		$plans         = ( $this->plans_lister )();
+		$applicability = ( new ApplicabilityStore() )->get( $product_id );
+		$plans         = SellingPlans::list_plans( Package::EXTENSION_SLUG );
 
 		$is_plans_mode = ProductApplicability::MODE_DISABLE !== $applicability->get_mode();
 		$is_select     = ProductApplicability::MODE_INHERIT_SELECT === $applicability->get_mode();
@@ -337,7 +291,8 @@ final class ProductPlansPanel {
 	}
 
 	/**
-	 * Map the panel POST onto the engine VO and write through the facade.
+	 * Map the panel POST onto the applicability VO and write through the
+	 * Lite store.
 	 *
 	 * Runs only for saves that rendered the panel (the nonce marks them);
 	 * REST / CLI / programmatic saves skip, as do product types that cannot
@@ -346,7 +301,7 @@ final class ProductPlansPanel {
 	 * allow-list with tampered values falling back to the defaults
 	 * (one-time, all). Never throws: core fires
 	 * `woocommerce_admin_process_product_object` unwrapped, so an exception
-	 * here would fatal the whole product save - a facade rejection reports
+	 * here would fatal the whole product save - a store rejection reports
 	 * through the metabox error list instead.
 	 *
 	 * @param WC_Product $product The product being saved.
@@ -362,7 +317,7 @@ final class ProductPlansPanel {
 			return;
 		}
 
-		if ( ! in_array( $product->get_type(), PlanPicker::SUPPORTED_PRODUCT_TYPES, true ) ) {
+		if ( ! in_array( $product->get_type(), ApplicabilityStore::SUPPORTED_PRODUCT_TYPES, true ) ) {
 			return;
 		}
 
@@ -374,7 +329,7 @@ final class ProductPlansPanel {
 
 		$plan_ids = [];
 		if ( isset( $_POST[ self::POST_PLAN_IDS ] ) && is_array( $_POST[ self::POST_PLAN_IDS ] ) ) {
-			// Non-numeric entries absint to 0 and are dropped; the facade
+			// Non-numeric entries absint to 0 and are dropped; the store
 			// validates the surviving ids exist and belong to Lite.
 			$plan_ids = array_values( array_filter( array_map( 'absint', wp_unslash( $_POST[ self::POST_PLAN_IDS ] ) ) ) );
 		}
@@ -382,22 +337,22 @@ final class ProductPlansPanel {
 		$allow_one_time = ! empty( $_POST[ self::POST_ALLOW_ONE_TIME ] );
 
 		if ( self::MODE_ONE_TIME === $mode ) {
-			$engine_mode = ProductApplicability::MODE_DISABLE;
-			$plan_ids    = [];
+			$applicability_mode = ProductApplicability::MODE_DISABLE;
+			$plan_ids           = [];
 		} elseif ( self::SCOPE_ALL === $scope ) {
-			$engine_mode = ProductApplicability::MODE_INHERIT_ALL;
-			$plan_ids    = [];
+			$applicability_mode = ProductApplicability::MODE_INHERIT_ALL;
+			$plan_ids           = [];
 		} else {
-			$engine_mode = ProductApplicability::MODE_INHERIT_SELECT;
+			$applicability_mode = ProductApplicability::MODE_INHERIT_SELECT;
 		}
 
 		try {
-			( $this->applicability_writer )(
+			( new ApplicabilityStore() )->set(
 				$product->get_id(),
-				new ProductApplicability( $engine_mode, $plan_ids, $allow_one_time )
+				new ProductApplicability( $applicability_mode, $plan_ids, $allow_one_time )
 			);
 		} catch ( InvalidArgumentException $e ) {
-			// The facade refused the write. Report through the metabox error
+			// The store refused the write. Report through the metabox error
 			// list so the merchant sees a notice; the rest of the product save
 			// proceeds untouched.
 			WC_Admin_Meta_Boxes::add_error(

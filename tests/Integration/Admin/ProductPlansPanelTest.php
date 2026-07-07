@@ -3,9 +3,9 @@
  * Integration tests for the product plans panel.
  *
  * The save paths run END TO END: a real nonce for the real current user, a
- * real product, and the panel's default wiring into the engine's SellingPlans
- * facade - the mapped applicability is read back through the same facade. A
- * facade rejection surfaces through the real WC_Admin_Meta_Boxes error list.
+ * real product, and the panel's default wiring into Lite's applicability
+ * store - the mapped applicability is read back through the same store. A
+ * store rejection surfaces through the real WC_Admin_Meta_Boxes error list.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Tests
  */
@@ -14,13 +14,13 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Admin;
 
-use Automattic\WooCommerce\SubscriptionsEngine\Api\SellingPlans;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Plan;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\ValueObject\BillingPolicy;
-use Automattic\WooCommerce\SubscriptionsEngine\Core\ValueObject\ProductApplicability;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\PlanRepository;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\ProductPlansPanel;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
+use Automattic\WooCommerce\SubscriptionsLite\Plans\ApplicabilityStore;
+use Automattic\WooCommerce\SubscriptionsLite\Plans\ProductApplicability;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
 use WC_Admin_Meta_Boxes;
 use WC_Product;
@@ -105,10 +105,9 @@ final class ProductPlansPanelTest extends LiteIntegrationTestCase {
 	 * @param WC_Product $product Product to mark.
 	 */
 	private function preset_inherit_all( WC_Product $product ): void {
-		SellingPlans::set_product_applicability(
+		( new ApplicabilityStore() )->set(
 			$product->get_id(),
-			new ProductApplicability( ProductApplicability::MODE_INHERIT_ALL, [], true ),
-			Package::EXTENSION_SLUG
+			new ProductApplicability( ProductApplicability::MODE_INHERIT_ALL, [], true )
 		);
 	}
 
@@ -167,8 +166,8 @@ final class ProductPlansPanelTest extends LiteIntegrationTestCase {
 
 		$this->assertSame(
 			ProductApplicability::MODE_INHERIT_ALL,
-			SellingPlans::get_product_applicability( $product->get_id() )->get_mode(),
-			'No facade write without the panel nonce.'
+			( new ApplicabilityStore() )->get( $product->get_id() )->get_mode(),
+			'No store write without the panel nonce.'
 		);
 	}
 
@@ -181,8 +180,8 @@ final class ProductPlansPanelTest extends LiteIntegrationTestCase {
 
 		$this->assertSame(
 			ProductApplicability::MODE_INHERIT_ALL,
-			SellingPlans::get_product_applicability( $product->get_id() )->get_mode(),
-			'No facade write on a failed nonce check.'
+			( new ApplicabilityStore() )->get( $product->get_id() )->get_mode(),
+			'No store write on a failed nonce check.'
 		);
 	}
 
@@ -199,8 +198,8 @@ final class ProductPlansPanelTest extends LiteIntegrationTestCase {
 
 		$this->assertSame(
 			ProductApplicability::MODE_INHERIT_ALL,
-			SellingPlans::get_product_applicability( $product->get_id() )->get_mode(),
-			'No facade write without manage_woocommerce.'
+			( new ApplicabilityStore() )->get( $product->get_id() )->get_mode(),
+			'No store write without manage_woocommerce.'
 		);
 	}
 
@@ -216,7 +215,7 @@ final class ProductPlansPanelTest extends LiteIntegrationTestCase {
 
 		( new ProductPlansPanel() )->save( $product );
 
-		$applicability = SellingPlans::get_product_applicability( $product->get_id() );
+		$applicability = ( new ApplicabilityStore() )->get( $product->get_id() );
 		$this->assertSame( ProductApplicability::MODE_DISABLE, $applicability->get_mode() );
 		$this->assertSame( [], $applicability->get_plan_ids() );
 		$this->assertTrue( $applicability->allows_one_time() );
@@ -236,7 +235,7 @@ final class ProductPlansPanelTest extends LiteIntegrationTestCase {
 
 		( new ProductPlansPanel() )->save( $product );
 
-		$applicability = SellingPlans::get_product_applicability( $product->get_id() );
+		$applicability = ( new ApplicabilityStore() )->get( $product->get_id() );
 		$this->assertSame( ProductApplicability::MODE_INHERIT_ALL, $applicability->get_mode() );
 		$this->assertSame( [], $applicability->get_plan_ids(), 'All-mode is virtual; submitted checkboxes are ignored.' );
 	}
@@ -255,13 +254,13 @@ final class ProductPlansPanelTest extends LiteIntegrationTestCase {
 
 		( new ProductPlansPanel() )->save( $product );
 
-		$applicability = SellingPlans::get_product_applicability( $product->get_id() );
+		$applicability = ( new ApplicabilityStore() )->get( $product->get_id() );
 		$this->assertSame( ProductApplicability::MODE_INHERIT_SELECT, $applicability->get_mode() );
 		$this->assertSame( [ (int) $monthly->get_id(), (int) $yearly->get_id() ], $applicability->get_plan_ids() );
 		$this->assertFalse( $applicability->allows_one_time(), 'Unchecked one-time checkbox maps to false.' );
 	}
 
-	public function test_garbage_plan_ids_are_dropped_before_the_facade_call(): void {
+	public function test_garbage_plan_ids_are_dropped_before_the_store_write(): void {
 		$product = $this->simple_product();
 		$plan    = $this->named_plan( 'Monthly' );
 		$this->seed_post(
@@ -276,7 +275,7 @@ final class ProductPlansPanelTest extends LiteIntegrationTestCase {
 
 		$this->assertSame(
 			[ (int) $plan->get_id() ],
-			SellingPlans::get_product_applicability( $product->get_id() )->get_plan_ids()
+			( new ApplicabilityStore() )->get( $product->get_id() )->get_plan_ids()
 		);
 	}
 
@@ -289,7 +288,7 @@ final class ProductPlansPanelTest extends LiteIntegrationTestCase {
 
 		$this->assertSame(
 			ProductApplicability::MODE_DISABLE,
-			SellingPlans::get_product_applicability( $product->get_id() )->get_mode()
+			( new ApplicabilityStore() )->get( $product->get_id() )->get_mode()
 		);
 	}
 
@@ -308,13 +307,13 @@ final class ProductPlansPanelTest extends LiteIntegrationTestCase {
 
 		$this->assertSame(
 			ProductApplicability::MODE_INHERIT_ALL,
-			SellingPlans::get_product_applicability( $product->get_id() )->get_mode()
+			( new ApplicabilityStore() )->get( $product->get_id() )->get_mode()
 		);
 	}
 
 	/**
 	 * Core fires `woocommerce_admin_process_product_object` unwrapped, so a
-	 * throwing save handler would fatal the whole product save. The facade's
+	 * throwing save handler would fatal the whole product save. The store's
 	 * rejection of an unknown plan id must surface as a metabox error instead.
 	 */
 	public function test_a_tampered_plan_id_registers_an_admin_error_and_does_not_throw(): void {
@@ -335,7 +334,7 @@ final class ProductPlansPanelTest extends LiteIntegrationTestCase {
 		$this->assertStringContainsString( 'plan 999999', $errors[0] );
 		$this->assertSame(
 			ProductApplicability::MODE_INHERIT_ALL,
-			SellingPlans::get_product_applicability( $product->get_id() )->get_mode(),
+			( new ApplicabilityStore() )->get( $product->get_id() )->get_mode(),
 			'The rejected write leaves the stored applicability untouched.'
 		);
 	}
@@ -364,14 +363,14 @@ final class ProductPlansPanelTest extends LiteIntegrationTestCase {
 		$this->assertCount( 1, WC_Admin_Meta_Boxes::$meta_box_errors, 'Another extension\'s plan cannot be attached through Lite.' );
 		$this->assertSame(
 			ProductApplicability::MODE_DISABLE,
-			SellingPlans::get_product_applicability( $product->get_id() )->get_mode()
+			( new ApplicabilityStore() )->get( $product->get_id() )->get_mode()
 		);
 	}
 
 	/**
 	 * The panel markup renders (and posts) for every product type, but only
 	 * simple and variable products may carry applicability - other types must
-	 * never reach the facade, which would reject them with an error notice.
+	 * never reach the store, which would reject them with an error notice.
 	 *
 	 * @dataProvider unsupported_product_provider
 	 *
@@ -391,10 +390,10 @@ final class ProductPlansPanelTest extends LiteIntegrationTestCase {
 
 		( new ProductPlansPanel() )->save( $product );
 
-		$this->assertSame( [], WC_Admin_Meta_Boxes::$meta_box_errors, 'The skip is silent - the facade (which would reject) is never called.' );
+		$this->assertSame( [], WC_Admin_Meta_Boxes::$meta_box_errors, 'The skip is silent - the store (which would reject) is never called.' );
 		$this->assertSame(
 			ProductApplicability::MODE_DISABLE,
-			SellingPlans::get_product_applicability( $product->get_id() )->get_mode(),
+			( new ApplicabilityStore() )->get( $product->get_id() )->get_mode(),
 			'The product keeps the default applicability.'
 		);
 	}
@@ -458,7 +457,7 @@ final class ProductPlansPanelTest extends LiteIntegrationTestCase {
 	}
 
 	/**
-	 * Render the panel for a product through the default (facade) wiring.
+	 * Render the panel for a product through the production wiring.
 	 *
 	 * @param WC_Product $product Product whose edit screen is rendering.
 	 * @return string Panel markup.

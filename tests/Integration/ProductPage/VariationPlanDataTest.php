@@ -3,10 +3,10 @@
  * Integration tests for the variation-payload plan data filter.
  *
  * The payload paths run END TO END: real variable products and variations,
- * plans resolved through the engine's SellingPlans facade from real
- * applicability meta, and the bootstrap-registered filter dispatched through
- * the real hook table. The memoization and no-id edge cases inject a counting
- * resolver through the class's own constructor seam.
+ * plans resolved through Lite's plan resolver from real applicability meta,
+ * and the bootstrap-registered filter dispatched through the real hook table.
+ * The memoization and no-id edge cases observe and shape the resolution
+ * through Lite's product-plans filter.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Tests
  */
@@ -15,13 +15,14 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\ProductPage;
 
-use Automattic\WooCommerce\SubscriptionsEngine\Api\SellingPlans;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Plan;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\ValueObject\BillingPolicy;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\ValueObject\PricingPolicy;
-use Automattic\WooCommerce\SubscriptionsEngine\Core\ValueObject\ProductApplicability;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\PlanRepository;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
+use Automattic\WooCommerce\SubscriptionsLite\Plans\ApplicabilityStore;
+use Automattic\WooCommerce\SubscriptionsLite\Plans\ProductApplicability;
+use Automattic\WooCommerce\SubscriptionsLite\Plans\ProductPlanResolver;
 use Automattic\WooCommerce\SubscriptionsLite\ProductPage\VariationPlanData;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
 use ReflectionProperty;
@@ -42,6 +43,12 @@ final class VariationPlanDataTest extends LiteIntegrationTestCase {
 		$cache = new ReflectionProperty( VariationPlanData::class, 'plans_cache' );
 		$cache->setAccessible( true );
 		$cache->setValue( null, [] );
+	}
+
+	public function tear_down(): void {
+		remove_all_filters( ProductPlanResolver::PRODUCT_PLANS_FILTER );
+
+		parent::tear_down();
 	}
 
 	/**
@@ -80,10 +87,9 @@ final class VariationPlanDataTest extends LiteIntegrationTestCase {
 		$parent->set_name( 'Coffee Box' );
 		$parent->save();
 
-		SellingPlans::set_product_applicability(
+		( new ApplicabilityStore() )->set(
 			$parent->get_id(),
-			new ProductApplicability( ProductApplicability::MODE_INHERIT_ALL, [], true ),
-			Package::EXTENSION_SLUG
+			new ProductApplicability( ProductApplicability::MODE_INHERIT_ALL, [], true )
 		);
 
 		return $parent;
@@ -152,6 +158,10 @@ final class VariationPlanDataTest extends LiteIntegrationTestCase {
 		);
 	}
 
+	/**
+	 * A plan appended through the resolver's filter without a persisted id
+	 * cannot be keyed into the option map and is skipped.
+	 */
 	public function test_plans_without_an_id_are_skipped(): void {
 		$saved   = $this->discounted_plan();
 		$unsaved = Plan::create(
@@ -162,28 +172,40 @@ final class VariationPlanDataTest extends LiteIntegrationTestCase {
 			]
 		);
 
-		$filter = new VariationPlanData(
-			static function () use ( $saved, $unsaved ): array {
-				return [ $unsaved, $saved ];
+		add_filter(
+			ProductPlanResolver::PRODUCT_PLANS_FILTER,
+			static function ( array $plans ) use ( $unsaved ): array {
+				$plans[] = $unsaved;
+
+				return $plans;
 			}
 		);
 
 		$parent = $this->subscribable_parent();
-		$result = $filter->filter_available_variation( [], $parent, $this->variation_of( $parent, '10.00' ) );
+		$result = ( new VariationPlanData() )->filter_available_variation( [], $parent, $this->variation_of( $parent, '10.00' ) );
 
 		$this->assertSame( [ (int) $saved->get_id() ], array_keys( $result['subscriptions_lite']['option_html'] ) );
 	}
 
+	/**
+	 * The resolver's filter fires once per resolution, so counting its calls
+	 * observes the memoization: one resolution per parent product.
+	 */
 	public function test_plan_resolution_is_memoized_per_parent_product(): void {
-		$plan         = $this->discounted_plan();
+		$this->discounted_plan();
 		$resolved_ids = [];
-		$filter       = new VariationPlanData(
-			static function ( int $product_id ) use ( $plan, &$resolved_ids ): array {
+		add_filter(
+			ProductPlanResolver::PRODUCT_PLANS_FILTER,
+			static function ( array $plans, int $product_id ) use ( &$resolved_ids ): array {
 				$resolved_ids[] = $product_id;
-				return [ $plan ];
-			}
+
+				return $plans;
+			},
+			10,
+			2
 		);
 
+		$filter   = new VariationPlanData();
 		$parent_a = $this->subscribable_parent();
 		$parent_b = $this->subscribable_parent();
 		$filter->filter_available_variation( [], $parent_a, $this->variation_of( $parent_a, '30.00' ) );

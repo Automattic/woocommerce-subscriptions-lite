@@ -2,9 +2,9 @@
 /**
  * Integration tests for the PDP plan picker.
  *
- * The picker runs END TO END: real products, plans resolved through the
- * engine's SellingPlans facade from real applicability meta, and the packaged
- * template rendered through the real wc_get_template() - so the gating, the
+ * The picker runs END TO END: real products, plans resolved through Lite's
+ * plan resolver from real applicability meta, and the packaged template
+ * rendered through the real wc_get_template() - so the gating, the
  * server-painted picker states, and the theme-override seam are all exercised
  * as in production.
  *
@@ -15,9 +15,8 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\ProductPage;
 
-use Automattic\WooCommerce\SubscriptionsEngine\Api\SellingPlans;
-use Automattic\WooCommerce\SubscriptionsEngine\Core\ValueObject\ProductApplicability;
-use Automattic\WooCommerce\SubscriptionsLite\Package;
+use Automattic\WooCommerce\SubscriptionsLite\Plans\ApplicabilityStore;
+use Automattic\WooCommerce\SubscriptionsLite\Plans\ProductApplicability;
 use Automattic\WooCommerce\SubscriptionsLite\ProductPage\PlanPicker;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
 use WC_Product;
@@ -60,10 +59,9 @@ final class PlanPickerTest extends LiteIntegrationTestCase {
 		}
 		$product->save();
 
-		SellingPlans::set_product_applicability(
+		( new ApplicabilityStore() )->set(
 			$product->get_id(),
-			new ProductApplicability( ProductApplicability::MODE_INHERIT_ALL, [], $allow_one_time ),
-			Package::EXTENSION_SLUG
+			new ProductApplicability( ProductApplicability::MODE_INHERIT_ALL, [], $allow_one_time )
 		);
 
 		return $product;

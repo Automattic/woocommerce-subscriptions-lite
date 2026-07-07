@@ -26,17 +26,12 @@ namespace Automattic\WooCommerce\SubscriptionsLite\ProductPage;
 
 use WC_Product;
 use WC_Product_Variation;
-use Automattic\WooCommerce\SubscriptionsEngine\Api\SellingPlans;
-use Automattic\WooCommerce\SubscriptionsLite\Package;
+use Automattic\WooCommerce\SubscriptionsLite\Plans\ProductPlanResolver;
 
 defined( 'ABSPATH' ) || exit;
 
 /**
  * Variation-payload filter for the PDP picker.
- *
- * Construct via the no-arg constructor in production (facade default); tests
- * inject a fake resolver seam to exercise the payload shape without a
- * database.
  */
 final class VariationPlanData {
 
@@ -56,25 +51,6 @@ final class VariationPlanData {
 	 * @var array<int, array<int, \Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Plan>>
 	 */
 	private static $plans_cache = [];
-
-	/**
-	 * Plans resolver for the parent product. Production: the facade
-	 * resolution scoped to Lite's slug.
-	 *
-	 * @var callable(int): array<int, \Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Plan>
-	 */
-	private $plans_resolver;
-
-	/**
-	 * Construct the filter.
-	 *
-	 * @param (callable(int): array<int, mixed>)|null $plans_resolver Plans resolver; defaults to the facade.
-	 */
-	public function __construct( ?callable $plans_resolver = null ) {
-		$this->plans_resolver = $plans_resolver ?? static function ( int $product_id ): array {
-			return SellingPlans::for_product( $product_id, Package::EXTENSION_SLUG );
-		};
-	}
 
 	/**
 	 * Wire the payload filter. Called from the bootstrap; idempotent so a
@@ -104,7 +80,7 @@ final class VariationPlanData {
 	public function filter_available_variation( array $data, WC_Product $product, WC_Product_Variation $variation ): array {
 		$product_id = (int) $product->get_id();
 		if ( ! array_key_exists( $product_id, self::$plans_cache ) ) {
-			self::$plans_cache[ $product_id ] = ( $this->plans_resolver )( $product_id );
+			self::$plans_cache[ $product_id ] = ( new ProductPlanResolver() )->for_product( $product_id );
 		}
 
 		$plans = self::$plans_cache[ $product_id ];

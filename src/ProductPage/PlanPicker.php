@@ -10,9 +10,10 @@
  * Interactivity API store built to `build/modules/plan-picker-view.js`. The
  * chosen plan posts as `_selling_plan_id` - the key the checkout slice reads.
  *
- * Plans and applicability come from the engine's public
- * {@see \Automattic\WooCommerce\SubscriptionsEngine\Api\SellingPlans} facade;
- * Lite owns no applicability schema.
+ * Plans and applicability come from Lite's own applicability layer -
+ * {@see \Automattic\WooCommerce\SubscriptionsLite\Plans\ProductPlanResolver}
+ * and {@see \Automattic\WooCommerce\SubscriptionsLite\Plans\ApplicabilityStore}
+ * over the engine's plans catalog.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\ProductPage
  */
@@ -22,18 +23,14 @@ declare( strict_types=1 );
 namespace Automattic\WooCommerce\SubscriptionsLite\ProductPage;
 
 use WC_Product;
-use Automattic\WooCommerce\SubscriptionsEngine\Api\SellingPlans;
-use Automattic\WooCommerce\SubscriptionsEngine\Core\ValueObject\ProductApplicability;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
+use Automattic\WooCommerce\SubscriptionsLite\Plans\ApplicabilityStore;
+use Automattic\WooCommerce\SubscriptionsLite\Plans\ProductPlanResolver;
 
 defined( 'ABSPATH' ) || exit;
 
 /**
  * PDP plan picker renderer and asset wiring.
- *
- * Construct via the no-arg constructor in production (facade + template
- * defaults); tests inject fake resolver / reader / renderer seams to exercise
- * the gating and template args without a database.
  */
 final class PlanPicker {
 
@@ -51,61 +48,6 @@ final class PlanPicker {
 	 * Template rendered into the add-to-cart form.
 	 */
 	const TEMPLATE = 'single-product/plan-picker.php';
-
-	/**
-	 * Product types that may render the picker - the same two that may carry
-	 * applicability on the engine side. Shared with the admin panel's save
-	 * gate ({@see \Automattic\WooCommerce\SubscriptionsLite\Admin\ProductPlansPanel})
-	 * so the two lists cannot drift.
-	 *
-	 * @var array<int, string>
-	 */
-	const SUPPORTED_PRODUCT_TYPES = [ 'simple', 'variable' ];
-
-	/**
-	 * Plans resolver. Production: the facade resolution scoped to Lite's slug.
-	 *
-	 * @var callable(int): array<int, \Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Plan>
-	 */
-	private $plans_resolver;
-
-	/**
-	 * Applicability reader (for the allow-one-time flag). Production: the facade read.
-	 *
-	 * @var callable(int): ProductApplicability
-	 */
-	private $applicability_reader;
-
-	/**
-	 * Template renderer; echoes the template for the given args. Production:
-	 * wc_get_template() over the package's templates directory.
-	 *
-	 * @var callable(array<string, mixed>): void
-	 */
-	private $template_renderer;
-
-	/**
-	 * Construct the picker.
-	 *
-	 * @param (callable(int): array<int, mixed>)|null     $plans_resolver       Plans resolver; defaults to the facade.
-	 * @param (callable(int): ProductApplicability)|null  $applicability_reader Applicability reader; defaults to the facade.
-	 * @param (callable(array<string, mixed>): void)|null $template_renderer    Template renderer; defaults to wc_get_template().
-	 */
-	public function __construct(
-		?callable $plans_resolver = null,
-		?callable $applicability_reader = null,
-		?callable $template_renderer = null
-	) {
-		$this->plans_resolver       = $plans_resolver ?? static function ( int $product_id ): array {
-			return SellingPlans::for_product( $product_id, Package::EXTENSION_SLUG );
-		};
-		$this->applicability_reader = $applicability_reader ?? static function ( int $product_id ): ProductApplicability {
-			return SellingPlans::get_product_applicability( $product_id );
-		};
-		$this->template_renderer    = $template_renderer ?? static function ( array $args ): void {
-			wc_get_template( self::TEMPLATE, $args, '', Package::get_path() . '/templates/' );
-		};
-	}
 
 	/**
 	 * Wire the render and asset hooks. Called once from the bootstrap.
@@ -146,21 +88,22 @@ final class PlanPicker {
 	 * @return string Picker HTML, or '' when nothing should render.
 	 */
 	public function render( WC_Product $product ): string {
-		if ( ! in_array( $product->get_type(), self::SUPPORTED_PRODUCT_TYPES, true ) ) {
+		if ( ! in_array( $product->get_type(), ApplicabilityStore::SUPPORTED_PRODUCT_TYPES, true ) ) {
 			return '';
 		}
 
 		$product_id = (int) $product->get_id();
 
-		$plans = ( $this->plans_resolver )( $product_id );
+		$plans = ( new ProductPlanResolver() )->for_product( $product_id );
 		if ( empty( $plans ) ) {
 			return '';
 		}
 
-		$applicability = ( $this->applicability_reader )( $product_id );
+		$applicability = ( new ApplicabilityStore() )->get( $product_id );
 
 		ob_start();
-		( $this->template_renderer )(
+		wc_get_template(
+			self::TEMPLATE,
 			[
 				'product'          => $product,
 				'plans'            => $plans,
@@ -170,7 +113,9 @@ final class PlanPicker {
 				'base_price'       => (float) $product->get_price(),
 				'is_variable'      => 'variable' === $product->get_type(),
 				'one_time_allowed' => $applicability->allows_one_time(),
-			]
+			],
+			'',
+			Package::get_path() . '/templates/'
 		);
 
 		return (string) ob_get_clean();
