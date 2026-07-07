@@ -101,6 +101,16 @@ final class SettingsPage {
 				'extensionSlug' => 'woocommerce-subscriptions-lite',
 				'defaultStatus' => 'active',
 				'definitions'   => $this->get_plan_data_definitions(),
+				'currency'      => [
+					'code'              => get_woocommerce_currency(),
+					// The symbol getter returns HTML entities; decode server-side
+					// so JS can render it as plain text.
+					'symbol'            => html_entity_decode( get_woocommerce_currency_symbol() ),
+					'position'          => get_option( 'woocommerce_currency_pos', 'left' ),
+					'thousandSeparator' => wc_get_price_thousand_separator(),
+					'decimalSeparator'  => wc_get_price_decimal_separator(),
+					'decimals'          => wc_get_price_decimals(),
+				],
 			]
 		);
 

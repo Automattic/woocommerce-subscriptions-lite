@@ -6,6 +6,8 @@
  */
 
 import { config } from './config';
+import { normalizeDefinitions } from './definitions';
+import { formatFrequency } from './format';
 
 /**
  * Build the default form data by merging each descriptor's defaults.
@@ -49,13 +51,24 @@ export function formDataToPayload( registry, formData, plan = null ) {
 		base.status = config.defaultStatus;
 	}
 
-	return registry.reduce(
-		( payload, field ) =>
-			field.toPayload
-				? field.toPayload( formData, payload, plan )
-				: payload,
+	const payload = registry.reduce(
+		( acc, field ) =>
+			field.toPayload ? field.toPayload( formData, acc, plan ) : acc,
 		base
 	);
+
+	// There is no name input: the name is derived from the billing frequency
+	// with the same formatter as the Frequency list column, so REST keeps
+	// receiving a non-empty name. A registry field that sets a name (e.g. an
+	// injected extension field) wins over derivation.
+	if ( typeof payload.name !== 'string' || ! payload.name.trim() ) {
+		payload.name = formatFrequency(
+			payload,
+			normalizeDefinitions( config.definitions )
+		);
+	}
+
+	return payload;
 }
 
 /**
@@ -75,22 +88,16 @@ export function formErrors( registry, formData ) {
 /**
  * Translate a DataViews view into engine list query params.
  *
+ * The list has no search, filter, or pagination UI: every status comes back
+ * in one page ordered by manual sort_order.
+ *
  * @param {Object} view DataViews view state.
  * @return {Object} Query params for the engine plans endpoint.
  */
 export function viewToQuery( view ) {
-	const statusFilter = view.filters?.find(
-		( filter ) => filter.field === 'status'
-	);
-	const statusValue = Array.isArray( statusFilter?.value )
-		? statusFilter.value[ 0 ]
-		: statusFilter?.value;
-
 	return {
 		page: view.page || 1,
-		per_page: view.perPage || 20,
-		search: view.search || '',
-		status: statusValue || '',
+		per_page: view.perPage || 100,
 		orderby: view.sort?.field || 'sort_order',
 		order: view.sort?.direction || 'asc',
 	};

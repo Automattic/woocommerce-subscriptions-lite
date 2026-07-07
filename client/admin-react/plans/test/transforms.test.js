@@ -30,22 +30,21 @@ describe( 'registry transforms', () => {
 		const registry = buildFieldRegistry();
 		const defaults = makeDefaultFormData( registry );
 		expect( defaults ).toMatchObject( {
-			name: '',
-			description: '',
 			interval: 1,
 			period: 'month',
 			expires: false,
 			pricingType: 'percentage',
 			pricingScope: 'all',
 		} );
+		// There are no name/description fields; the name is derived at save.
+		expect( defaults ).not.toHaveProperty( 'name' );
+		expect( defaults ).not.toHaveProperty( 'description' );
 	} );
 
 	it( 'maps a plan to form data', () => {
 		const registry = buildFieldRegistry();
 		const formData = planToFormData( registry, samplePlan );
 		expect( formData ).toMatchObject( {
-			name: 'Monthly',
-			description: 'A monthly plan',
 			interval: 2,
 			period: 'month',
 			expires: true,
@@ -62,8 +61,10 @@ describe( 'registry transforms', () => {
 		const formData = planToFormData( registry, samplePlan );
 		const payload = formDataToPayload( registry, formData, samplePlan );
 
-		expect( payload.name ).toBe( 'Monthly' );
-		expect( payload.description ).toBe( 'A monthly plan' );
+		// The name is derived from the billing frequency (same formatter as
+		// the Frequency list column); there is no description field.
+		expect( payload.name ).toBe( '2 months' );
+		expect( payload ).not.toHaveProperty( 'description' );
 		expect( payload.billing_policy ).toMatchObject( {
 			period: 'month',
 			interval: 2,
@@ -96,14 +97,24 @@ describe( 'registry transforms', () => {
 		const registry = buildFieldRegistry();
 		const errors = formErrors( registry, {
 			...makeDefaultFormData( registry ),
-			name: '',
 			interval: 0,
 			pricingType: 'percentage',
 			pricingValue: 150,
 		} );
-		expect( errors.name ).toBeTruthy();
 		expect( errors.interval ).toBeTruthy();
 		expect( errors.pricingValue ).toBeTruthy();
+		// No name field, so nothing can report a name error.
+		expect( errors.name ).toBeUndefined();
+	} );
+
+	it( 'derives the name from the billing frequency when creating', () => {
+		const registry = buildFieldRegistry();
+		const payload = formDataToPayload(
+			registry,
+			makeDefaultFormData( registry ),
+			null
+		);
+		expect( payload.name ).toBe( 'month' );
 	} );
 
 	describe( 'injected fields', () => {
@@ -151,6 +162,37 @@ describe( 'registry transforms', () => {
 
 			const payload = formDataToPayload( registry, formData, plan );
 			expect( payload.billing_policy.min_cycles ).toBe( 2 );
+		} );
+	} );
+
+	describe( 'injected name field', () => {
+		const NAMESPACE = 'test/custom-name';
+
+		beforeEach( () => {
+			addFilter( PLAN_FIELDS_FILTER, NAMESPACE, ( fields ) => [
+				...fields,
+				{
+					id: 'customName',
+					toPayload: ( formData, payload ) => ( {
+						...payload,
+						name: 'Custom name',
+					} ),
+				},
+			] );
+		} );
+
+		afterEach( () => {
+			removeFilter( PLAN_FIELDS_FILTER, NAMESPACE );
+		} );
+
+		it( 'wins over the derived frequency name', () => {
+			const registry = buildFieldRegistry();
+			const payload = formDataToPayload(
+				registry,
+				makeDefaultFormData( registry ),
+				null
+			);
+			expect( payload.name ).toBe( 'Custom name' );
 		} );
 	} );
 } );

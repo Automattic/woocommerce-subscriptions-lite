@@ -81,6 +81,14 @@ final class SettingsPageTest extends LiteIntegrationTestCase {
 		$this->assertSame( '/wc/v3/subscriptions-engine/plans', $config['restBase'] );
 		$this->assertSame( 'woocommerce-subscriptions-lite', $config['extensionSlug'] );
 		$this->assertSame( 'day', $config['definitions']['billing_units'][0]['value'] );
+
+		// The store currency settings ride along for client-side formatting.
+		$this->assertSame( 'USD', $config['currency']['code'], 'Test environment stores default to USD.' );
+		$this->assertSame( '$', $config['currency']['symbol'], 'The currency symbol is entity-decoded server-side.' );
+		$this->assertIsInt( $config['currency']['decimals'] );
+		$this->assertNotEmpty( $config['currency']['position'] );
+		$this->assertNotEmpty( $config['currency']['thousandSeparator'] );
+		$this->assertNotEmpty( $config['currency']['decimalSeparator'] );
 	}
 
 	public function test_render_requires_manage_woocommerce(): void {

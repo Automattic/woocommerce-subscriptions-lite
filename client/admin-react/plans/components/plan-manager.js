@@ -24,10 +24,8 @@ import { PlanModal } from './plan-modal';
 
 const DEFAULT_VIEW = {
 	type: 'table',
-	perPage: 20,
+	perPage: 100,
 	page: 1,
-	search: '',
-	filters: [],
 	sort: { field: 'sort_order', direction: 'asc' },
 	layout: { density: 'comfortable' },
 };

@@ -78,13 +78,6 @@
 .wc-subscriptions-lite-plans {
 	max-width: breakpoints.$break-wide;
 
-	// Align the search field (and the filters row) with the first table
-	// column, whose text starts $grid-unit-15 from the container edge.
-	.dataviews__view-actions,
-	.dataviews-filters__container {
-		padding-left: variables.$grid-unit-15;
-	}
-
 	.dataviews-view-table {
 		width: 100%;
 		border-collapse: collapse;
@@ -136,6 +129,24 @@
 		tbody tr.dataviews-view-table__row:last-child {
 			border-bottom: variables.$border-width solid colors.$gray-400;
 		}
+
+		// DataViews hardcodes the sticky modifier on the actions column;
+		// keep it in normal flow so it never floats over row content.
+		.dataviews-view-table__actions-column--sticky {
+			position: static;
+			box-shadow: none;
+		}
+
+		// The grip column is always the first cell (no checkbox or primary
+		// column in this table); match the draggable row affordance.
+		tbody td:first-child {
+			cursor: grab;
+		}
+
+		.wc-subscriptions-lite-plans__grip-icon {
+			color: colors.$gray-600;
+			fill: currentcolor;
+		}
 	}
 }
 
@@ -155,20 +166,19 @@
 }
 
 // Form layout.
-.wc-subscriptions-lite-plans__form-section {
-	margin-bottom: variables.$grid-unit-30;
-
-	&:last-of-type {
-		margin-bottom: 0;
-	}
+.wc-subscriptions-lite-plans__modal-intro {
+	margin: 0 0 variables.$grid-unit-20;
+	color: colors.$gray-700;
 }
 
-.wc-subscriptions-lite-plans__form-section-title {
-	margin: 0 0 variables.$grid-unit-15;
-	font-size: variables.$font-size-medium;
-	font-weight: 600;
-	text-transform: uppercase;
-	color: colors.$gray-700;
+// Canonical per-field labels are uppercase; checkbox labels stay
+// sentence case (they carry their own class, so they are not matched).
+.wc-subscriptions-lite-plans__form {
+
+	.components-input-control__label,
+	.components-base-control__label {
+		text-transform: uppercase;
+	}
 }
 
 .wc-subscriptions-lite-plans__field {
@@ -189,7 +199,12 @@
 	}
 }
 
-.wc-subscriptions-lite-plans__total-payments {
+.wc-subscriptions-lite-plans__applies-to {
+	margin-top: variables.$grid-unit-15;
+}
+
+.wc-subscriptions-lite-plans__total-payments,
+.wc-subscriptions-lite-plans__cycle-count {
 	margin-top: variables.$grid-unit-15;
 }
 

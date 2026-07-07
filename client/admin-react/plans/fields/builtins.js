@@ -7,7 +7,6 @@
  *
  *   {
  *     id,          // unique field id
- *     group,       // form section id (undefined = ungrouped, rendered first)
  *     default,     // partial form-data defaults this field contributes
  *     Edit,        // React component ({ data, onChange, errors, definitions })
  *     fromPlan,    // (plan) => partial form data
@@ -16,20 +15,18 @@
  *     listColumn,  // optional { id, label, render(item, definitions) }
  *   }
  *
- * Extensions add their own fields via the field-registry filter (see
- * ./index.js) using this same shape, so injected fields render and round-trip
- * without any change to Lite core.
+ * Form fields and list columns render in registry order. Extensions add
+ * their own fields via the field-registry filter (see ./index.js) using this
+ * same shape, positioning themselves by where they insert in the filtered
+ * array, so injected fields render and round-trip without any change to
+ * Lite core.
  */
 
 import { __ } from '@wordpress/i18n';
-import { NameEdit, DescriptionEdit } from '../components/fields/text-fields';
 import { FrequencyEdit } from '../components/fields/frequency-field';
 import { ExpirationEdit } from '../components/fields/expiration-field';
 import { DiscountEdit } from '../components/fields/discount-field';
-import { formatFrequency, formatDiscount } from '../format';
-
-export const GROUP_BILLING = 'billing';
-export const GROUP_PRICING = 'pricing';
+import { formatFrequency, formatDiscount, formatExpiration } from '../format';
 
 /**
  * The built-in field descriptors, in render order.
@@ -39,43 +36,7 @@ export const GROUP_PRICING = 'pricing';
 export function builtInFields() {
 	return [
 		{
-			id: 'name',
-			default: { name: '' },
-			Edit: NameEdit,
-			fromPlan: ( plan ) => ( { name: plan.name || '' } ),
-			toPayload: ( formData, payload ) => ( {
-				...payload,
-				name: ( formData.name || '' ).trim(),
-			} ),
-			validate: ( formData ) =>
-				( formData.name || '' ).trim()
-					? null
-					: {
-							name: __(
-								'Name is required.',
-								'woocommerce-subscriptions-lite'
-							),
-					  },
-			listColumn: {
-				id: 'name',
-				label: __( 'Name', 'woocommerce-subscriptions-lite' ),
-				isTitle: true,
-				render: ( item ) => item.name,
-			},
-		},
-		{
-			id: 'description',
-			default: { description: '' },
-			Edit: DescriptionEdit,
-			fromPlan: ( plan ) => ( { description: plan.description || '' } ),
-			toPayload: ( formData, payload ) => ( {
-				...payload,
-				description: ( formData.description || '' ).trim() || null,
-			} ),
-		},
-		{
 			id: 'frequency',
-			group: GROUP_BILLING,
 			default: { interval: 1, period: 'month' },
 			Edit: FrequencyEdit,
 			fromPlan: ( plan ) => ( {
@@ -107,39 +68,7 @@ export function builtInFields() {
 			},
 		},
 		{
-			id: 'expiration',
-			group: GROUP_BILLING,
-			default: { expires: false, maxCycles: '' },
-			Edit: ExpirationEdit,
-			fromPlan: ( plan ) => {
-				const maxCycles = plan.billing_policy?.max_cycles || '';
-				return {
-					expires: Number( maxCycles ) > 0,
-					maxCycles,
-				};
-			},
-			toPayload: ( formData, payload ) => ( {
-				...payload,
-				billing_policy: {
-					...( payload.billing_policy || {} ),
-					max_cycles: formData.expires
-						? Number( formData.maxCycles )
-						: null,
-				},
-			} ),
-			validate: ( formData ) =>
-				formData.expires && Number( formData.maxCycles ) < 1
-					? {
-							maxCycles: __(
-								'Total payments must be at least 1.',
-								'woocommerce-subscriptions-lite'
-							),
-					  }
-					: null,
-		},
-		{
 			id: 'discount',
-			group: GROUP_PRICING,
 			default: {
 				pricingType: 'percentage',
 				pricingValue: '',
@@ -234,6 +163,41 @@ export function builtInFields() {
 				id: 'discount',
 				label: __( 'Discount', 'woocommerce-subscriptions-lite' ),
 				render: ( item ) => formatDiscount( item ),
+			},
+		},
+		{
+			id: 'expiration',
+			default: { expires: false, maxCycles: '' },
+			Edit: ExpirationEdit,
+			fromPlan: ( plan ) => {
+				const maxCycles = plan.billing_policy?.max_cycles || '';
+				return {
+					expires: Number( maxCycles ) > 0,
+					maxCycles,
+				};
+			},
+			toPayload: ( formData, payload ) => ( {
+				...payload,
+				billing_policy: {
+					...( payload.billing_policy || {} ),
+					max_cycles: formData.expires
+						? Number( formData.maxCycles )
+						: null,
+				},
+			} ),
+			validate: ( formData ) =>
+				formData.expires && Number( formData.maxCycles ) < 1
+					? {
+							maxCycles: __(
+								'Total payments must be at least 1.',
+								'woocommerce-subscriptions-lite'
+							),
+					  }
+					: null,
+			listColumn: {
+				id: 'expiration',
+				label: __( 'Expiration', 'woocommerce-subscriptions-lite' ),
+				render: ( item ) => formatExpiration( item ),
 			},
 		},
 	];
