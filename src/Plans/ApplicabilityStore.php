@@ -48,6 +48,20 @@ final class ApplicabilityStore {
 	public const SUPPORTED_PRODUCT_TYPES = [ 'simple', 'variable' ];
 
 	/**
+	 * Engine catalog read facade, scoped to Lite's slug.
+	 *
+	 * @var SellingPlans
+	 */
+	private $catalog;
+
+	/**
+	 * Construct the store.
+	 */
+	public function __construct() {
+		$this->catalog = new SellingPlans( [ Package::EXTENSION_SLUG ] );
+	}
+
+	/**
 	 * Read a product's applicability. Absent meta yields the defaults
 	 * (disable, one-time allowed).
 	 *
@@ -153,7 +167,7 @@ final class ApplicabilityStore {
 		}
 
 		$found = [];
-		foreach ( SellingPlans::get_plans( $plan_ids, Package::EXTENSION_SLUG ) as $plan ) {
+		foreach ( $this->catalog->get_plans( $plan_ids ) as $plan ) {
 			$found[] = (int) $plan->get_id();
 		}
 

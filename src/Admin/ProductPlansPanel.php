@@ -96,6 +96,20 @@ final class ProductPlansPanel {
 	const SCOPE_SELECT = 'select';
 
 	/**
+	 * Engine catalog read facade, scoped to Lite's slug.
+	 *
+	 * @var SellingPlans
+	 */
+	private $catalog;
+
+	/**
+	 * Construct the panel.
+	 */
+	public function __construct() {
+		$this->catalog = new SellingPlans( [ Package::EXTENSION_SLUG ] );
+	}
+
+	/**
 	 * Wire the tab, panel, save, and asset hooks. Called once from the
 	 * bootstrap in an admin context.
 	 *
@@ -141,7 +155,7 @@ final class ProductPlansPanel {
 
 		$product_id    = isset( $post->ID ) ? (int) $post->ID : 0;
 		$applicability = ( new ApplicabilityStore() )->get( $product_id );
-		$plans         = SellingPlans::list_plans( Package::EXTENSION_SLUG );
+		$plans         = $this->catalog->list_plans();
 
 		$is_plans_mode = ProductApplicability::MODE_DISABLE !== $applicability->get_mode();
 		$is_select     = ProductApplicability::MODE_INHERIT_SELECT === $applicability->get_mode();

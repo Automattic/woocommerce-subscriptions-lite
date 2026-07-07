@@ -44,12 +44,20 @@ final class ProductPlanResolver {
 	private $store;
 
 	/**
+	 * Engine catalog read facade, scoped to Lite's slug.
+	 *
+	 * @var SellingPlans
+	 */
+	private $catalog;
+
+	/**
 	 * Construct the resolver.
 	 *
 	 * @param ApplicabilityStore|null $store Applicability meta store.
 	 */
 	public function __construct( ?ApplicabilityStore $store = null ) {
-		$this->store = $store ?? new ApplicabilityStore();
+		$this->store   = $store ?? new ApplicabilityStore();
+		$this->catalog = new SellingPlans( [ Package::EXTENSION_SLUG ] );
 	}
 
 	/**
@@ -73,14 +81,14 @@ final class ProductPlanResolver {
 
 		$plans = [];
 		if ( ProductApplicability::MODE_INHERIT_ALL === $applicability->get_mode() ) {
-			$plans = SellingPlans::list_plans( Package::EXTENSION_SLUG );
+			$plans = $this->catalog->list_plans();
 		} elseif ( ProductApplicability::MODE_INHERIT_SELECT === $applicability->get_mode() ) {
 			$plan_ids = $applicability->get_plan_ids();
 			if ( [] === $plan_ids ) {
 				return [];
 			}
 
-			$plans = SellingPlans::get_plans( $plan_ids, Package::EXTENSION_SLUG );
+			$plans = $this->catalog->get_plans( $plan_ids );
 		}
 
 		/**
