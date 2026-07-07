@@ -84,8 +84,8 @@ final class Bootstrap {
 			Admin\PageController::register();
 			Admin\RowActionController::register();
 
-			// Register the plans page.
-			Admin\PlansPage::register();
+			// Register the WooCommerce Settings > Subscriptions tab (plans manager).
+			Admin\SettingsPage::register();
 		}
 
 		// Email: contract and renewal notifications.
