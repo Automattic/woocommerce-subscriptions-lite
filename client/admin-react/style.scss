@@ -108,6 +108,10 @@
 			text-align: right;
 		}
 
+		tbody td.dataviews-view-table__actions-column:last-child {
+			padding-right: variables.$grid-unit-15;
+		}
+
 		.dataviews-view-table__cell-content-wrapper {
 			text-align: left;
 
