@@ -29,7 +29,7 @@ Tests run against a real WordPress + WooCommerce inside
 [wp-env](https://www.npmjs.com/package/@wordpress/env) (Docker required):
 
 ```sh
-composer env:start       # once: boots the WordPress test environment
+npm run env:start        # once: boots the WordPress test environment
 composer test            # the integration suite inside the tests environment
 composer lint            # PHP coding standards
 npm run lint:js          # JS
