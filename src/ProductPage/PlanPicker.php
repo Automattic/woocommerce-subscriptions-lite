@@ -180,9 +180,8 @@ final class PlanPicker {
 	 * Enqueue the picker view module and stylesheet on product singulars only.
 	 *
 	 * The module build externalizes `@wordpress/interactivity` as an
-	 * import-mapped dependency (listed in the generated asset file). The
-	 * modules build emits no RTL stylesheet; the picker's rules are purely
-	 * structural and direction-neutral.
+	 * import-mapped dependency (listed in the generated asset file) and emits
+	 * the RTL stylesheet variant, registered via the `rtl` style data.
 	 */
 	public function enqueue_assets(): void {
 		if ( ! is_product() ) {
@@ -206,5 +205,6 @@ final class PlanPicker {
 			[],
 			$version
 		);
+		wp_style_add_data( self::STYLE_HANDLE, 'rtl', 'replace' );
 	}
 }

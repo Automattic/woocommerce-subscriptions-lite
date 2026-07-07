@@ -1,22 +1,16 @@
 /**
- * Build config for the Lite frontend/admin bundles.
+ * Classic-scripts build (admin bundles).
  *
- * Two webpack configurations are exported:
+ * Builds the classic admin script bundles - `admin-react.*` and `admin-php.*`
+ * plus their extracted `style-admin-*.css` (and RTL variants) - into
+ * `build/scripts/`.
  *
- *  - `scriptConfig`  builds the classic admin script bundle (`admin.*` +
- *    `style-admin*.css`).
- *  - `moduleConfig`  builds the customer-portal Interactivity API store as an
- *    ESM script module, so `@wordpress/interactivity` externalizes as a real
- *    module import (`import ... from '@wordpress/interactivity'`) and the asset
- *    file records `@wordpress/interactivity` as the module dependency, plus the
- *    portal stylesheet (`style-customer-portal*.css`) extracted from the SCSS
- *    the store entry imports. The portal asset loader enqueues the module via
- *    `wp_enqueue_script_module` and the stylesheet via `wp_enqueue_style`.
- *
- * Both configs emit into the same `build/scripts/` directory, so each one's
- * output-clean is scoped with `keep` to preserve the other's bundle (and the
- * default fonts/images). Without this the two compilations clean each other's
- * output and a single build non-deterministically drops one bundle.
+ * This config owns `build/scripts/` outright: Interactivity API view modules
+ * (ESM script modules) are NOT built here - ALL of them live in
+ * `webpack.modules.config.js` and emit into `build/modules/`. With one
+ * compilation per output directory, the default output-clean semantics apply
+ * as-is (wp-scripts keeps `fonts/` and `images/`), with no cross-bundle
+ * `keep` carve-outs.
  */
 
 const defaultConfig = require( '@wordpress/scripts/config/webpack.config' );
@@ -29,15 +23,7 @@ const sharedPlugins = defaultConfig.plugins.filter(
 		plugin.constructor.name !== 'CopyPlugin'
 );
 
-const outputPath = path.resolve( process.cwd(), 'build', 'scripts' );
-
-// Clean the shared output dir on emit, but keep fonts/images (the wp-scripts
-// default) and the sibling bundle's files so the two configs do not wipe each
-// other out.
-const keepAdminBundle = /(?:^fonts\/|^images\/|admin)/;
-const keepPortalBundle = /(?:^fonts\/|^images\/|customer-portal)/;
-
-const scriptConfig = {
+module.exports = {
 	...defaultConfig,
 	entry: {
 		'admin-react': path.resolve(
@@ -55,49 +41,10 @@ const scriptConfig = {
 	},
 	output: {
 		...defaultConfig.output,
-		path: outputPath,
-		clean: { keep: keepPortalBundle },
+		path: path.resolve( process.cwd(), 'build', 'scripts' ),
 	},
 	plugins: [
 		...sharedPlugins,
 		new WooCommerceDependencyExtractionWebpackPlugin(),
 	],
 };
-
-const moduleConfig = {
-	...defaultConfig,
-	entry: {
-		'customer-portal': path.resolve(
-			process.cwd(),
-			'src',
-			'js',
-			'frontend',
-			'customer-portal-store.js'
-		),
-	},
-	experiments: {
-		...defaultConfig.experiments,
-		outputModule: true,
-	},
-	output: {
-		...defaultConfig.output,
-		path: outputPath,
-		clean: { keep: keepAdminBundle },
-		module: true,
-		chunkFormat: 'module',
-		environment: {
-			...( defaultConfig.output && defaultConfig.output.environment ),
-			module: true,
-		},
-		library: {
-			...( defaultConfig.output && defaultConfig.output.library ),
-			type: 'module',
-		},
-	},
-	plugins: [
-		...sharedPlugins,
-		new WooCommerceDependencyExtractionWebpackPlugin(),
-	],
-};
-
-module.exports = [ scriptConfig, moduleConfig ];
