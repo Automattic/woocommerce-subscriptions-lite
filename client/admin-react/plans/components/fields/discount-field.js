@@ -67,9 +67,16 @@ function discountAffixes( pricingType, currency ) {
  * @param {Function} props.onChange    Change handler receiving a partial form-data patch.
  * @param {Object}   props.errors      Validation errors keyed by field id.
  * @param {Object}   props.definitions Normalized engine definitions.
+ * @param {Function} props.onBlur      Blur handler; validates this field.
  * @return {Object} DiscountEdit component.
  */
-export function DiscountEdit( { data, onChange, errors, definitions } ) {
+export function DiscountEdit( {
+	data,
+	onChange,
+	onBlur,
+	errors,
+	definitions,
+} ) {
 	const errorIdBase = useId();
 	const valueErrorId = `${ errorIdBase }-value-error`;
 	const cyclesErrorId = `${ errorIdBase }-cycles-error`;
@@ -100,6 +107,7 @@ export function DiscountEdit( { data, onChange, errors, definitions } ) {
 					onChange={ ( value ) =>
 						onChange( { pricingValue: value ?? '' } )
 					}
+					onBlur={ onBlur }
 					min={ 0 }
 					max={ data.pricingType === 'percentage' ? 100 : undefined }
 					step={ 0.01 }
@@ -150,6 +158,7 @@ export function DiscountEdit( { data, onChange, errors, definitions } ) {
 									durationCycles: parseInt( value, 10 ) || 0,
 								} )
 							}
+							onBlur={ onBlur }
 							min={ 2 }
 							step={ 1 }
 							help={ __(

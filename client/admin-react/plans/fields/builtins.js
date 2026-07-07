@@ -134,7 +134,7 @@ export function builtInFields() {
 					Number( formData.pricingValue ) < 0
 				) {
 					errors.pricingValue = __(
-						'Discount value cannot be negative.',
+						'Discount cannot be negative.',
 						'woocommerce-subscriptions-lite'
 					);
 				}
@@ -144,7 +144,7 @@ export function builtInFields() {
 					Number( formData.pricingValue ) > 100
 				) {
 					errors.pricingValue = __(
-						'Percentage cannot exceed 100.',
+						'Percentage discount cannot exceed 100%.',
 						'woocommerce-subscriptions-lite'
 					);
 				}
