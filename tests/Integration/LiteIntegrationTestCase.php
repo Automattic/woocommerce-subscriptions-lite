@@ -22,11 +22,9 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration;
 
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Subscriptions;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Plan;
-use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\PlanGroup;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\ValueObject\BillingPolicy;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Checkout\ContractFactory;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Checkout\OrderLinkage;
-use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\PlanGroupRepository;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\PlanRepository;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\SchemaInstaller;
 use WC_Order;
@@ -87,17 +85,14 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 	}
 
 	/**
-	 * Persist a plan (and its group) and return the entity.
+	 * Persist a plan and return the entity (with its id stamped by the insert).
 	 *
 	 * @param string   $period     Billing period (day / week / month / year).
 	 * @param int      $interval   Billing interval.
 	 * @param int|null $max_cycles Maximum billing cycles, or null for open-ended.
 	 */
 	protected function make_plan( string $period = 'month', int $interval = 1, ?int $max_cycles = null ): Plan {
-		$group_id = ( new PlanGroupRepository() )->insert( PlanGroup::create( [ 'name' => 'Lite Tests' ] ) );
-
 		$plan = Plan::create(
-			$group_id,
 			[
 				'name'           => ucfirst( $period ) . 'ly plan',
 				'billing_policy' => new BillingPolicy( $period, $interval, null, $max_cycles, null ),

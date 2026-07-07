@@ -76,7 +76,7 @@
             "dist": {
                 "type": "path",
                 "url": "../woocommerce/packages/php/woocommerce-subscriptions-engine",
-                "reference": "6bda44e40c80b5d2462f806cf32f8bbe9b001c17"
+                "reference": "71469fe637ae2648bf8fb3e9a2912c8b4c62a2bf"
             },
             "require": {
                 "php": ">=7.4"
