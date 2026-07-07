@@ -78,6 +78,13 @@
 .wc-subscriptions-lite-plans {
 	max-width: breakpoints.$break-wide;
 
+	// Align the search field (and the filters row) with the first table
+	// column, whose text starts $grid-unit-15 from the container edge.
+	.dataviews__view-actions,
+	.dataviews-filters__container {
+		padding-left: variables.$grid-unit-15;
+	}
+
 	.dataviews-view-table {
 		width: 100%;
 		border-collapse: collapse;
