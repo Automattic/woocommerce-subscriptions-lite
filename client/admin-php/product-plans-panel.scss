@@ -28,9 +28,19 @@
 	}
 
 	// WooCommerce also floats the panel selects next to the label gutter;
-	// un-float so the mode help renders as a full-width block below.
+	// un-float so the mode help renders as a full-width block below. The
+	// reference control renders 13px text; wp-admin selects default to 14px.
 	select {
 		float: none;
+		font-size: $default-font-size;
+	}
+
+	// WooCommerce's `.woocommerce_options_panel p` rule indents every
+	// free-standing paragraph 9px; the reference keeps this copy flush with
+	// the section content edge.
+	p {
+		padding-left: 0;
+		padding-right: 0;
 	}
 
 	// Small uppercase section labels, one per block (purchase options, plan
@@ -47,6 +57,10 @@
 	.wc-subscriptions-lite-purchase-mode-help {
 		color: $gray-700;
 		font-size: $helptext-font-size;
+		// The reference help renders 18px leading on 12px type; no
+		// base-styles token corresponds, and WooCommerce's panel `p` rule
+		// would otherwise open it to 24px.
+		line-height: 1.5;
 		margin: $grid-unit-10 0 0;
 	}
 
@@ -69,7 +83,10 @@
 		color: $gray-700;
 		display: block;
 		font-size: $helptext-font-size;
-		margin: $grid-unit-05 0 0 $grid-unit-30;
+		// Left offset lines the helper up with the radio's label text: the
+		// 16px wp-admin radio control plus its 4px gap. The 2px top margin
+		// matches the reference, which hardcodes it; no token corresponds.
+		margin: 2px 0 0 ($grid-unit-20 + $grid-unit-05);
 	}
 
 	.wc-subscriptions-lite-plans-table {
@@ -84,6 +101,13 @@
 		&.is-scope-all .wc-subscriptions-lite-plans-table-check {
 			display: none;
 		}
+	}
+
+	// WooCommerce's panel `p` rule shrinks this to 12px/24px; restore the
+	// wp-admin base type the reference inherits for links.
+	.wc-subscriptions-lite-manage-plans {
+		font-size: $default-font-size;
+		line-height: $default-line-height;
 	}
 
 	.wc-subscriptions-lite-one-time {
