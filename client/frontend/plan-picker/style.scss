@@ -27,12 +27,16 @@
 		margin: 0 0 $grid-unit-10;
 	}
 
-	&__plans-label {
+	// Ancestor-qualified (`& &__`) so the tight gap outranks WooCommerce's
+	// block-theme `.woocommerce-page label { margin-bottom: 0.7em; }`.
+	& &__plans-label {
 		display: block;
-		margin-bottom: $grid-unit-05;
+		margin: 0 0 $grid-unit-05;
 	}
 
 	&__select {
+		// Block-level, so no inline line-box leading pads the gap above.
+		display: block;
 		max-width: 100%;
 	}
 

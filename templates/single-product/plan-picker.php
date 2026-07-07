@@ -13,11 +13,12 @@
  * `woocommerce-subscriptions-lite/plan-picker` Interactivity API module
  * loading.
  *
- * @var WC_Product $product          Product being rendered (simple or variable).
+ * @var WC_Product $product           Product being rendered (simple or variable).
  * @var array<int, \Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Plan> $plans Resolved plans in display order (never empty).
- * @var float      $base_price       Price seeding the option strings (minimum variation price on variables).
- * @var bool       $is_variable      Whether the product is variable.
- * @var bool       $one_time_allowed Whether one-time purchase is offered alongside the plans.
+ * @var float      $base_price        Price seeding the option strings (minimum variation price on variables).
+ * @var bool       $is_variable       Whether the product is variable.
+ * @var bool       $one_time_allowed  Whether one-time purchase is offered alongside the plans.
+ * @var string     $plan_select_label Translated plan-select label text ("Deliver:" / "Renew:" by fulfillment type).
  *
  * @package Automattic\WooCommerce\SubscriptionsLite
  * @version 0.1.0
@@ -106,7 +107,7 @@ $wcsl_picker_classes = 'wc-subscriptions-lite-plan-picker'
 		<?php endif; ?>
 	>
 		<label class="wc-subscriptions-lite-plan-picker__plans-label" for="<?php echo esc_attr( $wcsl_select_id ); ?>">
-			<?php esc_html_e( 'Choose a plan', 'woocommerce-subscriptions-lite' ); ?>
+			<?php echo esc_html( $plan_select_label ); ?>
 		</label>
 		<select
 			id="<?php echo esc_attr( $wcsl_select_id ); ?>"

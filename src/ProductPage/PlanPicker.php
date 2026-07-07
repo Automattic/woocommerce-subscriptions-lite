@@ -105,20 +105,40 @@ final class PlanPicker {
 		wc_get_template(
 			self::TEMPLATE,
 			[
-				'product'          => $product,
-				'plans'            => $plans,
+				'product'           => $product,
+				'plans'             => $plans,
 				// A variable product reports its minimum variation price - the
 				// seed for the first paint; variation selection swaps in the
 				// per-variation strings from the variation payload.
-				'base_price'       => (float) $product->get_price(),
-				'is_variable'      => 'variable' === $product->get_type(),
-				'one_time_allowed' => $applicability->allows_one_time(),
+				'base_price'        => (float) $product->get_price(),
+				'is_variable'       => 'variable' === $product->get_type(),
+				'one_time_allowed'  => $applicability->allows_one_time(),
+				'plan_select_label' => $this->plan_select_label( $product ),
 			],
 			'',
 			Package::get_path() . '/templates/'
 		);
 
 		return (string) ob_get_clean();
+	}
+
+	/**
+	 * The plan select's label, by fulfillment type.
+	 *
+	 * Physical products read "Deliver:" - the plan sets how often the product
+	 * ships. Virtual products read "Renew:" - nothing ships, access renews.
+	 * Variable products always read "Deliver:": WooCommerce hardcodes
+	 * `WC_Product_Variable::get_virtual()` to false (virtual-ness lives on the
+	 * variations), and the label paints once at render - it is not re-resolved
+	 * per selected variation.
+	 *
+	 * @param WC_Product $product Product the picker is rendering.
+	 * @return string Translated, colon-terminated label text.
+	 */
+	private function plan_select_label( WC_Product $product ): string {
+		return $product->is_virtual()
+			? __( 'Renew:', 'woocommerce-subscriptions-lite' )
+			: __( 'Deliver:', 'woocommerce-subscriptions-lite' );
 	}
 
 	/**

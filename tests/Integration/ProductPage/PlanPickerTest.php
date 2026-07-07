@@ -23,6 +23,7 @@ use WC_Product;
 use WC_Product_External;
 use WC_Product_Simple;
 use WC_Product_Variable;
+use WC_Product_Variation;
 
 /**
  * @covers \Automattic\WooCommerce\SubscriptionsLite\ProductPage\PlanPicker
@@ -129,6 +130,63 @@ final class PlanPickerTest extends LiteIntegrationTestCase {
 
 		$this->assertStringContainsString( 'wc-subscriptions-lite-plan-picker--variable', $html );
 		$this->assertStringContainsString( 'data-wp-init="callbacks.initVariationBridge"', $html );
+	}
+
+	public function test_render_labels_the_plan_select_deliver_for_physical_products(): void {
+		$this->make_plan();
+		$product = $this->subscribable_product();
+
+		$html = ( new PlanPicker() )->render( $product );
+
+		$this->assertStringContainsString( 'Deliver:', $html, 'Physical products ship, so the plan cadence reads as delivery.' );
+		$this->assertStringNotContainsString( 'Renew:', $html );
+	}
+
+	public function test_render_labels_the_plan_select_renew_for_virtual_products(): void {
+		$this->make_plan();
+		$product = $this->subscribable_product();
+		$product->set_virtual( true );
+		$product->save();
+
+		$html = ( new PlanPicker() )->render( $product );
+
+		$this->assertStringContainsString( 'Renew:', $html, 'Nothing ships on a virtual product - access renews.' );
+		$this->assertStringNotContainsString( 'Deliver:', $html );
+	}
+
+	/**
+	 * A variable parent is never virtual in WooCommerce (virtual-ness lives on
+	 * the variations), so the picker reads "Deliver:" even before a variation
+	 * is chosen - the label is painted once at render.
+	 */
+	public function test_render_labels_the_plan_select_deliver_for_variable_products_with_physical_variations(): void {
+		$this->make_plan();
+		$product = $this->subscribable_product( WC_Product_Variable::class );
+
+		$variation = new WC_Product_Variation();
+		$variation->set_parent_id( $product->get_id() );
+		$variation->set_regular_price( '24.00' );
+		$variation->save();
+
+		$html = ( new PlanPicker() )->render( $product );
+
+		$this->assertStringContainsString( 'Deliver:', $html );
+		$this->assertStringNotContainsString( 'Renew:', $html );
+	}
+
+	public function test_the_label_stays_associated_with_the_plan_select(): void {
+		$this->make_plan();
+		$product = $this->subscribable_product();
+
+		$html = ( new PlanPicker() )->render( $product );
+
+		$this->assertSame(
+			1,
+			preg_match( '/<label class="wc-subscriptions-lite-plan-picker__plans-label" for="([^"]+)">/', $html, $label ),
+			'The label keeps an explicit for association.'
+		);
+		$this->assertSame( 1, preg_match( '/<select\s+id="([^"]+)"/', $html, $select ) );
+		$this->assertSame( $select[1], $label[1], 'The label points at the plan select.' );
 	}
 
 	/**
