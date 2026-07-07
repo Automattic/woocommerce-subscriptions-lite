@@ -1,0 +1,78 @@
+/**
+ * Product-edit "Subscriptions" panel.
+ *
+ * A thin layout layer over the WooCommerce product-data panel chrome: the
+ * panel div reuses `.woocommerce_options_panel` and the plans table reuses
+ * wp-admin's `.widefat`, so only subscription-specific spacing and the
+ * help-text tone live here. Tokens come from @wordpress/base-styles (imported
+ * by the entry stylesheet).
+ *
+ * The `.woocommerce_options_panel` prefix keeps every rule more specific
+ * than WooCommerce's own panel rules regardless of stylesheet load order.
+ */
+
+.woocommerce_options_panel .wc-subscriptions-lite-product-plans {
+	padding: $grid-unit-15;
+
+	// WooCommerce floats every panel label and legend into a 150px gutter
+	// column (float: left; width: 150px; margin-left: -150px) that only
+	// `.form-field` rows compensate for with a matching left padding. This
+	// panel lays out as one stacked column without that gutter, so pull the
+	// labels and legends back into the content pane - otherwise they land
+	// under the product-data tab list, invisible and unclickable.
+	label,
+	legend {
+		float: none;
+		margin-left: 0;
+		width: auto;
+	}
+
+	.wc-subscriptions-lite-purchase-mode label {
+		display: block;
+		font-weight: 600;
+		margin-bottom: $grid-unit-05;
+	}
+
+	.wc-subscriptions-lite-purchase-mode-help {
+		color: $gray-700;
+		margin: $grid-unit-05 0 0;
+	}
+
+	.wc-subscriptions-lite-plans-section {
+		margin-top: $grid-unit-20;
+	}
+
+	.wc-subscriptions-lite-plans-scope {
+		border: 0;
+		margin: 0 0 $grid-unit-15;
+		padding: 0;
+
+		legend {
+			font-weight: 600;
+			margin-bottom: $grid-unit-05;
+		}
+
+		label {
+			display: block;
+			margin-bottom: $grid-unit-05;
+		}
+	}
+
+	.wc-subscriptions-lite-plans-scope-help {
+		color: $gray-700;
+		display: block;
+		margin: 0 0 $grid-unit-10 $grid-unit-30;
+	}
+
+	.wc-subscriptions-lite-plans-table {
+		margin-bottom: $grid-unit-10;
+
+		.wc-subscriptions-lite-plans-table-check {
+			width: $grid-unit-40;
+		}
+	}
+
+	.wc-subscriptions-lite-one-time {
+		margin-top: $grid-unit-20;
+	}
+}

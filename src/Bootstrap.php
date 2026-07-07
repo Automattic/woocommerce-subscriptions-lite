@@ -54,13 +54,16 @@ final class Bootstrap {
 			// work on Lite's behalf. Registered on every load so it is present for the
 			// dispatcher's own scheduled request, not just interactive ones.
 			\Automattic\WooCommerce\SubscriptionsEngine\Integration\Ownership\ConsumerRegistry::register(
-				'woocommerce-subscriptions-lite'
+				Package::EXTENSION_SLUG
 			);
 		}
 
-		// Product detail page: render the subscription plan picker and feed the
-		// chosen plan into the add-to-cart flow.
-		// TODO: PDP module - register once the PDP widening slice lands.
+		// Product detail page: the plan picker on the add-to-cart form and the
+		// per-variation option HTML in variation payloads. Both register
+		// unconditionally - variation payloads are also assembled in admin
+		// contexts (product previews).
+		ProductPage\PlanPicker::register();
+		ProductPage\VariationPlanData::register();
 
 		// Cart: carry the chosen plan through cart item data and totals.
 		// TODO: Cart module - register once the PDP widening slice lands.
@@ -86,6 +89,10 @@ final class Bootstrap {
 
 			// Register the WooCommerce Settings > Subscriptions tab (plans manager).
 			Admin\SettingsPage::register();
+
+			// Product edit screen: the Subscriptions product-data tab writing
+			// plan applicability through the engine facade.
+			Admin\ProductPlansPanel::register();
 		}
 
 		// Email: contract and renewal notifications.
