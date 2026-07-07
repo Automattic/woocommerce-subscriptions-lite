@@ -260,6 +260,66 @@ final class ProductPlansPanelTest extends LiteIntegrationTestCase {
 		$this->assertFalse( $applicability->allows_one_time(), 'Unchecked one-time checkbox maps to false.' );
 	}
 
+	/**
+	 * Clearing every checkbox and saving must not detach the plans: an empty
+	 * select-scope submission keeps the previously stored selection while the
+	 * rest of the panel (mode, allow-one-time) still saves.
+	 */
+	public function test_an_empty_select_submission_retains_the_previously_stored_plan_ids(): void {
+		$product = $this->simple_product();
+		$monthly = $this->named_plan( 'Monthly' );
+		$yearly  = $this->named_plan( 'Yearly', 'year' );
+		( new ApplicabilityStore() )->set(
+			$product->get_id(),
+			new ProductApplicability( ProductApplicability::MODE_INHERIT_SELECT, [ (int) $monthly->get_id(), (int) $yearly->get_id() ], false )
+		);
+
+		// No POST_PLAN_IDS key at all - an all-unchecked table submits nothing.
+		$this->seed_post(
+			[
+				ProductPlansPanel::POST_PURCHASE_MODE  => ProductPlansPanel::MODE_PLANS,
+				ProductPlansPanel::POST_PLANS_SCOPE    => ProductPlansPanel::SCOPE_SELECT,
+				ProductPlansPanel::POST_ALLOW_ONE_TIME => 'yes',
+			]
+		);
+
+		( new ProductPlansPanel() )->save( $product );
+
+		$applicability = ( new ApplicabilityStore() )->get( $product->get_id() );
+		$this->assertSame( ProductApplicability::MODE_INHERIT_SELECT, $applicability->get_mode() );
+		$this->assertSame(
+			[ (int) $monthly->get_id(), (int) $yearly->get_id() ],
+			$applicability->get_plan_ids(),
+			'The empty submission leaves the stored selection untouched.'
+		);
+		$this->assertTrue( $applicability->allows_one_time(), 'The allow-one-time change still saves.' );
+		$this->assertSame( [], WC_Admin_Meta_Boxes::$meta_box_errors, 'Retaining the selection is not an error.' );
+	}
+
+	/**
+	 * With no previously stored selection there is nothing to retain: an empty
+	 * select submission persists select mode with an empty selection (allowed
+	 * by the store; it resolves to no plans).
+	 */
+	public function test_an_empty_select_submission_with_no_prior_selection_persists_empty(): void {
+		$product = $this->simple_product();
+		$this->named_plan( 'Monthly' );
+		$this->preset_inherit_all( $product );
+
+		$this->seed_post(
+			[
+				ProductPlansPanel::POST_PURCHASE_MODE => ProductPlansPanel::MODE_PLANS,
+				ProductPlansPanel::POST_PLANS_SCOPE   => ProductPlansPanel::SCOPE_SELECT,
+			]
+		);
+
+		( new ProductPlansPanel() )->save( $product );
+
+		$applicability = ( new ApplicabilityStore() )->get( $product->get_id() );
+		$this->assertSame( ProductApplicability::MODE_INHERIT_SELECT, $applicability->get_mode() );
+		$this->assertSame( [], $applicability->get_plan_ids(), 'All-mode stores no ids, so there is nothing to retain.' );
+	}
+
 	public function test_garbage_plan_ids_are_dropped_before_the_store_write(): void {
 		$product = $this->simple_product();
 		$plan    = $this->named_plan( 'Monthly' );
@@ -471,6 +531,121 @@ final class ProductPlansPanelTest extends LiteIntegrationTestCase {
 			'/id="' . preg_quote( ProductPlansPanel::POST_PLAN_IDS . '-' . (int) $monthly->get_id(), '/' ) . "\"[^>]*checked='checked'/s",
 			$html,
 			'The saved selection renders checked.'
+		);
+	}
+
+	/**
+	 * The checkbox column header carries a select-all control with an
+	 * accessible name. It has no name attribute, so it never posts - only the
+	 * row checkboxes carry plan ids.
+	 */
+	public function test_selection_table_header_renders_a_select_all_checkbox_with_an_accessible_name(): void {
+		$product = $this->simple_product();
+		$monthly = $this->named_plan( 'Monthly' );
+		$this->named_plan( 'Yearly', 'year' );
+		( new ApplicabilityStore() )->set(
+			$product->get_id(),
+			new ProductApplicability( ProductApplicability::MODE_INHERIT_SELECT, [ (int) $monthly->get_id() ], false )
+		);
+
+		$html = $this->render_panel_for( $product );
+
+		$this->assertSame( 1, substr_count( $html, 'data-wcsl-select-all' ), 'Exactly one select-all control.' );
+		$this->assertMatchesRegularExpression(
+			'/<input[^>]*aria-label="Select all plans"[^>]*data-wcsl-select-all/s',
+			$html,
+			'The select-all checkbox carries an accessible name.'
+		);
+		$this->assertDoesNotMatchRegularExpression(
+			'/<input[^>]*aria-label="Select all plans"[^>]*name=/s',
+			$html,
+			'The select-all checkbox has no name attribute and never posts.'
+		);
+	}
+
+	/**
+	 * A partial saved selection renders the header unchecked (the script adds
+	 * the indeterminate DOM state); a full one renders it checked.
+	 */
+	public function test_select_all_header_checkbox_renders_the_saved_selection_state(): void {
+		$product = $this->simple_product();
+		$monthly = $this->named_plan( 'Monthly' );
+		$yearly  = $this->named_plan( 'Yearly', 'year' );
+		$store   = new ApplicabilityStore();
+
+		$store->set(
+			$product->get_id(),
+			new ProductApplicability( ProductApplicability::MODE_INHERIT_SELECT, [ (int) $monthly->get_id() ], false )
+		);
+		$this->assertDoesNotMatchRegularExpression(
+			'/<input[^>]*aria-label="Select all plans"[^>]*checked=/s',
+			$this->render_panel_for( $product ),
+			'A partial selection renders the header unchecked.'
+		);
+
+		$store->set(
+			$product->get_id(),
+			new ProductApplicability( ProductApplicability::MODE_INHERIT_SELECT, [ (int) $monthly->get_id(), (int) $yearly->get_id() ], false )
+		);
+		$this->assertMatchesRegularExpression(
+			'/<input[^>]*aria-label="Select all plans"[^>]*checked=/s',
+			$this->render_panel_for( $product ),
+			'A full selection renders the header checked.'
+		);
+	}
+
+	/**
+	 * The empty-selection warning renders with the table and is visible only
+	 * for a saved select-scope empty selection; role="alert" announces it.
+	 */
+	public function test_empty_selection_warning_renders_visible_for_a_saved_empty_select_scope(): void {
+		$product = $this->simple_product();
+		$this->named_plan( 'Monthly' );
+		( new ApplicabilityStore() )->set(
+			$product->get_id(),
+			new ProductApplicability( ProductApplicability::MODE_INHERIT_SELECT, [], true )
+		);
+
+		$html = $this->render_panel_for( $product );
+
+		// esc_html renders the quotes around the mode name as &quot; entities.
+		$this->assertStringContainsString( 'Please select at least one plan, or switch to &quot;Use all storewide subscription plans&quot; mode.', $html );
+		$this->assertMatchesRegularExpression(
+			'/<div[^>]*data-wcsl-empty-warning[^>]*>/s',
+			$html
+		);
+		$this->assertDoesNotMatchRegularExpression(
+			'/<div[^>]*data-wcsl-empty-warning[^>]*hidden[^>]*>/s',
+			$html,
+			'A saved empty selection shows the warning.'
+		);
+		$this->assertMatchesRegularExpression(
+			'/<div[^>]*role="alert"[^>]*data-wcsl-empty-warning/s',
+			$html,
+			'The warning announces via role="alert".'
+		);
+	}
+
+	public function test_empty_selection_warning_renders_hidden_when_plans_are_selected_or_scope_is_all(): void {
+		$product = $this->simple_product();
+		$monthly = $this->named_plan( 'Monthly' );
+		$store   = new ApplicabilityStore();
+
+		$store->set(
+			$product->get_id(),
+			new ProductApplicability( ProductApplicability::MODE_INHERIT_SELECT, [ (int) $monthly->get_id() ], false )
+		);
+		$this->assertMatchesRegularExpression(
+			'/<div[^>]*data-wcsl-empty-warning[^>]*hidden[^>]*>/s',
+			$this->render_panel_for( $product ),
+			'A non-empty selection hides the warning.'
+		);
+
+		$this->preset_inherit_all( $product );
+		$this->assertMatchesRegularExpression(
+			'/<div[^>]*data-wcsl-empty-warning[^>]*hidden[^>]*>/s',
+			$this->render_panel_for( $product ),
+			'All-scope hides the warning.'
 		);
 	}
 

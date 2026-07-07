@@ -6,8 +6,9 @@
  * default) or on the storewide selling plans - all of them, or a selected
  * subset - with one-time purchase optionally allowed alongside. The panel is
  * PHP-rendered in the standard WooCommerce product-data metabox; a small
- * vanilla script (client/admin-php/product-plans-panel.js) only toggles
- * section visibility.
+ * vanilla script (client/admin-php/product-plans-panel.js) toggles section
+ * visibility and keeps the select-all header checkbox and the
+ * empty-selection warning in sync with the row checkboxes.
  *
  * Applicability is Lite-owned: reads and writes go through Lite's
  * {@see \Automattic\WooCommerce\SubscriptionsLite\Plans\ApplicabilityStore},
@@ -244,12 +245,29 @@ final class ProductPlansPanel {
 						// live scope toggle but is hidden: every plan applies, so there
 						// is nothing to pick.
 						$table_classes = 'widefat wc-subscriptions-lite-plans-table' . ( $is_select ? '' : ' is-scope-all' );
+
+						// Header select-all state: checked when every row renders
+						// checked (all-scope checks everything; select-scope only when
+						// the saved selection covers all plans). The partial
+						// (indeterminate) state is a DOM property the script sets.
+						$all_plan_ids = [];
+						foreach ( $plans as $plan ) {
+							$all_plan_ids[] = (int) $plan->get_id();
+						}
+						$all_checked = ! $is_select || [] === array_diff( $all_plan_ids, $selected_ids );
 						?>
 						<table class="<?php echo esc_attr( $table_classes ); ?>" data-wcsl-plans-table>
 							<thead>
 								<tr>
 									<th scope="col" class="wc-subscriptions-lite-plans-table-check">
-										<span class="screen-reader-text"><?php esc_html_e( 'Selected', 'woocommerce-subscriptions-lite' ); ?></span>
+										<?php // No name attribute: the select-all control never posts; only the row checkboxes carry plan ids. ?>
+										<input
+											type="checkbox"
+											aria-label="<?php esc_attr_e( 'Select all plans', 'woocommerce-subscriptions-lite' ); ?>"
+											<?php checked( $all_checked ); ?>
+											<?php disabled( ! $is_select ); ?>
+											data-wcsl-select-all
+										/>
 									</th>
 									<th scope="col"><?php esc_html_e( 'Plan', 'woocommerce-subscriptions-lite' ); ?></th>
 									<th scope="col"><?php esc_html_e( 'Frequency', 'woocommerce-subscriptions-lite' ); ?></th>
@@ -285,6 +303,21 @@ final class ProductPlansPanel {
 								<?php endforeach; ?>
 							</tbody>
 						</table>
+
+						<?php
+						// Rendered whenever the table is, visible only for a saved
+						// empty selection in select-scope; the script live-toggles the
+						// hidden attribute as checkboxes change. role="alert" makes the
+						// warning announce when it appears.
+						?>
+						<div
+							class="notice notice-warning inline wc-subscriptions-lite-plans-empty-warning"
+							role="alert"
+							data-wcsl-empty-warning
+							<?php echo ( $is_select && [] === $selected_ids ) ? '' : 'hidden'; ?>
+						>
+							<p><?php esc_html_e( 'Please select at least one plan, or switch to "Use all storewide subscription plans" mode.', 'woocommerce-subscriptions-lite' ); ?></p>
+						</div>
 					<?php endif; ?>
 
 					<p class="wc-subscriptions-lite-manage-plans">
@@ -320,7 +353,10 @@ final class ProductPlansPanel {
 	 * carry applicability (the panel markup renders for every type, so its
 	 * fields post even when the tab is hidden). Mode and scope pass an
 	 * allow-list with tampered values falling back to the defaults
-	 * (one-time, all). Never throws: core fires
+	 * (one-time, all). An empty select-scope submission keeps the previously
+	 * stored plan ids (mode and allow-one-time still save): clearing every
+	 * checkbox is treated as "nothing chosen yet", not as detaching all
+	 * plans. Never throws: core fires
 	 * `woocommerce_admin_process_product_object` unwrapped, so an exception
 	 * here would fatal the whole product save - a store rejection reports
 	 * through the metabox error list instead.
@@ -357,6 +393,8 @@ final class ProductPlansPanel {
 
 		$allow_one_time = ! empty( $_POST[ self::POST_ALLOW_ONE_TIME ] );
 
+		$store = new ApplicabilityStore();
+
 		if ( self::MODE_ONE_TIME === $mode ) {
 			$applicability_mode = ProductApplicability::MODE_DISABLE;
 			$plan_ids           = [];
@@ -365,10 +403,16 @@ final class ProductPlansPanel {
 			$plan_ids           = [];
 		} else {
 			$applicability_mode = ProductApplicability::MODE_INHERIT_SELECT;
+			if ( [] === $plan_ids ) {
+				// Empty select submission: reuse the stored selection instead of
+				// detaching every plan. The store's set() contract stays honest -
+				// the retain decision is this panel's save mapping.
+				$plan_ids = $store->get( $product->get_id() )->get_plan_ids();
+			}
 		}
 
 		try {
-			( new ApplicabilityStore() )->set(
+			$store->set(
 				$product->get_id(),
 				new ProductApplicability( $applicability_mode, $plan_ids, $allow_one_time )
 			);

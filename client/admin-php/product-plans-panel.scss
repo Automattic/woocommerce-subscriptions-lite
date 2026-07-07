@@ -101,6 +101,52 @@
 		&.is-scope-all .wc-subscriptions-lite-plans-table-check {
 			display: none;
 		}
+
+		// wp-admin styles checked checkboxes (accent fill + check glyph) but
+		// has no indeterminate state; give the select-all header checkbox the
+		// same accent fill with a mixed-state dash for a partial selection.
+		.wc-subscriptions-lite-plans-table-check input:indeterminate {
+			background: var(--wp-admin-theme-color);
+			border-color: var(--wp-admin-theme-color);
+			position: relative;
+
+			&::before {
+				background-color: $white;
+				content: "";
+				// The 2px dash matches @wordpress/components' mixed state; no
+				// base-styles token corresponds.
+				height: 2px;
+				left: 50%;
+				position: absolute;
+				top: 50%;
+				transform: translate(-50%, -50%);
+				width: $grid-unit-10;
+			}
+		}
+	}
+
+	// Empty-selection warning under the plans table. Reuses the wp-admin
+	// notice chrome; the flat pale-yellow fill and $alert-yellow bar match
+	// the reference's warning notice (core notices are white with a shadow).
+	.wc-subscriptions-lite-plans-empty-warning {
+		background-color: rgba($alert-yellow, 0.1);
+		border: 0;
+		border-left: $grid-unit-05 solid $alert-yellow;
+		box-shadow: none;
+		margin: $grid-unit-15 0 $grid-unit-20;
+
+		// The script toggles the hidden attribute; make sure no notice rule
+		// with a display value can override it.
+		&[hidden] {
+			display: none;
+		}
+
+		p {
+			font-size: $default-font-size;
+			line-height: $default-line-height;
+			margin: $grid-unit-15 0;
+			padding: 0 $grid-unit-05;
+		}
 	}
 
 	// WooCommerce's panel `p` rule shrinks this to 12px/24px; restore the
