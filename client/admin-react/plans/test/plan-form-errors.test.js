@@ -6,6 +6,9 @@
  * aria-describedby / aria-invalid.
  */
 
+// React.act is test-only and not re-exported by @wordpress/element; react
+// itself is provided by the @wordpress/scripts jest environment.
+// eslint-disable-next-line import/no-extraneous-dependencies
 import { act } from 'react';
 import { createRoot } from '@wordpress/element';
 
