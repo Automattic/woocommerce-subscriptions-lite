@@ -1,27 +1,28 @@
 <?php
 /**
- * Unit tests for the customer-portal view-model builder.
+ * Integration tests for the customer-portal view-model builder.
  *
  * Covers the per-status presentation logic the templates and the iAPI seed
- * rely on: status labels, the dynamic detail date-row, the recurring summary,
- * the next-payment dash rule, and the action-visibility flags - across all five
- * statuses plus the on-hold-needs-payment variant.
+ * rely on - status labels, the dynamic detail date-row, the recurring summary,
+ * the next-payment dash rule, and the action-visibility flags - with REAL
+ * WooCommerce formatting (wc_price, the per-country address formatter,
+ * date_i18n), not stub approximations.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Tests
  */
 
 declare( strict_types=1 );
 
-namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Unit\CustomerPortal;
+namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\CustomerPortal;
 
-use PHPUnit\Framework\TestCase;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
 use Automattic\WooCommerce\SubscriptionsLite\CustomerPortal\ViewModel;
+use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
 
 /**
  * @covers \Automattic\WooCommerce\SubscriptionsLite\CustomerPortal\ViewModel
  */
-final class ViewModelTest extends TestCase {
+final class ViewModelTest extends LiteIntegrationTestCase {
 
 	/**
 	 * A base contract array, overridable per test.
@@ -50,6 +51,24 @@ final class ViewModelTest extends TestCase {
 			],
 			$overrides
 		);
+	}
+
+	/**
+	 * Format an amount the way the view-model's money formatter does.
+	 *
+	 * @param float $amount Amount.
+	 */
+	private function money( float $amount ): string {
+		return wp_strip_all_tags( wc_price( $amount, [ 'currency' => 'USD' ] ) );
+	}
+
+	/**
+	 * Format a Y-m-d H:i:s GMT stamp the way the view-model does.
+	 *
+	 * @param string $gmt GMT date stamp.
+	 */
+	private function date( string $gmt ): string {
+		return date_i18n( get_option( 'date_format' ), strtotime( $gmt . ' UTC' ) );
 	}
 
 	public function test_detail_items_and_totals_rows(): void {
@@ -82,12 +101,12 @@ final class ViewModelTest extends TestCase {
 				[
 					'name'     => 'Monthly coffee box',
 					'quantity' => '1',
-					'subtotal' => 'USD12.49',
+					'subtotal' => $this->money( 12.49 ),
 				],
 				[
 					'name'     => 'Espresso beans top-up',
 					'quantity' => '2',
-					'subtotal' => 'USD5.00',
+					'subtotal' => $this->money( 5.00 ),
 				],
 			],
 			$detail['items'],
@@ -98,23 +117,23 @@ final class ViewModelTest extends TestCase {
 			[
 				[
 					'label' => 'Subtotal',
-					'value' => 'USD17.49',
+					'value' => $this->money( 17.49 ),
 				],
 				[
 					'label' => 'Discount',
-					'value' => '-USD2.00',
+					'value' => '-' . $this->money( 2.00 ),
 				],
 				[
 					'label' => 'Shipping',
-					'value' => 'USD3.00',
+					'value' => $this->money( 3.00 ),
 				],
 				[
 					'label' => 'Tax',
-					'value' => 'USD1.50',
+					'value' => $this->money( 1.50 ),
 				],
 				[
 					'label' => 'Total',
-					'value' => 'USD19.99 / month',
+					'value' => $this->money( 19.99 ) . ' / month',
 				],
 			],
 			$detail['totals_rows'],
@@ -178,8 +197,10 @@ final class ViewModelTest extends TestCase {
 			)
 		);
 
-		$this->assertSame( 'Ada Lovelace<br/>10 Analytical Way<br/>London SW1A 1AA<br/>GB', $detail['billing_address'] );
-		$this->assertSame( 'Ada Lovelace<br/>1 Engine House<br/>Manchester M1 1AE<br/>GB', $detail['shipping_address'] );
+		// The REAL WooCommerce GB address format: city, postcode, and full
+		// country name on their own lines.
+		$this->assertSame( 'Ada Lovelace<br/>10 Analytical Way<br/>London<br/>SW1A 1AA<br/>United Kingdom (UK)', $detail['billing_address'] );
+		$this->assertSame( 'Ada Lovelace<br/>1 Engine House<br/>Manchester<br/>M1 1AE<br/>United Kingdom (UK)', $detail['shipping_address'] );
 		$this->assertSame( '+44 20 7946 0000', $detail['billing_phone'] );
 		$this->assertSame( 'ada@example.com', $detail['billing_email'] );
 	}
@@ -198,7 +219,7 @@ final class ViewModelTest extends TestCase {
 
 		$this->assertSame( 'Active', $detail['status_label'] );
 		$this->assertSame( 'Next payment date', $detail['date_row_label'] );
-		$this->assertSame( '2099-01-15', $detail['date_row_value'] );
+		$this->assertSame( $this->date( '2099-01-15 00:00:00' ), $detail['date_row_value'] );
 		$this->assertTrue( $detail['cancel_visible'] );
 		$this->assertTrue( $detail['hold_visible'] );
 		$this->assertFalse( $detail['reactivate_visible'] );
@@ -219,7 +240,7 @@ final class ViewModelTest extends TestCase {
 
 		$this->assertSame( 'Cancels soon', $detail['status_label'] );
 		$this->assertSame( 'Cancels on', $detail['date_row_label'] );
-		$this->assertSame( '2099-02-01', $detail['date_row_value'] );
+		$this->assertSame( $this->date( '2099-02-01 00:00:00' ), $detail['date_row_value'] );
 		$this->assertFalse( $detail['cancel_visible'], 'Pending-cancellation hides cancel.' );
 		$this->assertFalse( $detail['hold_visible'] );
 		$this->assertFalse( $detail['reactivate_visible'] );
@@ -238,7 +259,7 @@ final class ViewModelTest extends TestCase {
 
 		$this->assertSame( 'Cancelled', $detail['status_label'] );
 		$this->assertSame( 'End date', $detail['date_row_label'] );
-		$this->assertSame( '2098-11-01', $detail['date_row_value'] );
+		$this->assertSame( $this->date( '2098-11-01 00:00:00' ), $detail['date_row_value'] );
 		$this->assertFalse( $detail['cancel_visible'] );
 	}
 
@@ -255,7 +276,7 @@ final class ViewModelTest extends TestCase {
 
 		$this->assertSame( 'Expired', $detail['status_label'] );
 		$this->assertSame( 'End date', $detail['date_row_label'] );
-		$this->assertSame( '2098-10-01', $detail['date_row_value'] );
+		$this->assertSame( $this->date( '2098-10-01 00:00:00' ), $detail['date_row_value'] );
 	}
 
 	public function test_on_hold_admin_action_path_allows_reactivate(): void {
@@ -273,7 +294,7 @@ final class ViewModelTest extends TestCase {
 
 		$this->assertSame( 'On hold', $detail['status_label'] );
 		$this->assertSame( 'On-hold since', $detail['date_row_label'] );
-		$this->assertSame( '2098-12-20', $detail['date_row_value'] );
+		$this->assertSame( $this->date( '2098-12-20 00:00:00' ), $detail['date_row_value'] );
 		$this->assertTrue( $detail['cancel_visible'] );
 		$this->assertFalse( $detail['hold_visible'], 'On-hold does not show pause.' );
 		$this->assertTrue( $detail['reactivate_visible'] );
@@ -296,12 +317,12 @@ final class ViewModelTest extends TestCase {
 		$this->assertTrue( $detail['needs_payment_notice'] );
 		$this->assertFalse( $detail['reactivate_visible'] );
 		$this->assertSame( 'Next payment date', $detail['date_row_label'] );
-		$this->assertSame( '2099-03-01', $detail['date_row_value'] );
+		$this->assertSame( $this->date( '2099-03-01 00:00:00' ), $detail['date_row_value'] );
 	}
 
 	public function test_recurring_summary_interval_one_and_many(): void {
 		$one = ( new ViewModel() )->build_detail( $this->contract() );
-		$this->assertSame( 'USD19.99 / month', $one['recurring_summary'] );
+		$this->assertSame( $this->money( 19.99 ) . ' / month', $one['recurring_summary'] );
 
 		$many = ( new ViewModel() )->build_detail(
 			$this->contract(
@@ -311,7 +332,7 @@ final class ViewModelTest extends TestCase {
 				]
 			)
 		);
-		$this->assertSame( 'USD19.99 every 2 weeks', $many['recurring_summary'] );
+		$this->assertSame( $this->money( 19.99 ) . ' every 2 weeks', $many['recurring_summary'] );
 	}
 
 	public function test_list_row_dashes_next_payment_for_terminal_status(): void {
@@ -351,7 +372,7 @@ final class ViewModelTest extends TestCase {
 
 		$active = $view->build_detail( $this->contract( [ 'next_payment_gmt' => '2099-01-15 00:00:00' ] ) );
 		$this->assertStringContainsString( 'end of your current billing cycle', $active['cancel_modal_copy'] );
-		$this->assertStringContainsString( '2099-01-15', $active['cancel_modal_copy'] );
+		$this->assertStringContainsString( $this->date( '2099-01-15 00:00:00' ), $active['cancel_modal_copy'] );
 
 		$on_hold = $view->build_detail(
 			$this->contract(
