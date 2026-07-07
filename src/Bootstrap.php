@@ -47,6 +47,15 @@ final class Bootstrap {
 		// Guarded so Lite degrades gracefully if the engine class is unavailable.
 		if ( class_exists( \Automattic\WooCommerce\SubscriptionsEngine\Package::class ) ) {
 			\Automattic\WooCommerce\SubscriptionsEngine\Package::init();
+
+			// Declare Lite as a consumer of the engine. The engine stays inert until a
+			// consumer registers - its batch renewal dispatcher charges nothing while the
+			// consumer registry is empty - so this registration is what puts the engine to
+			// work on Lite's behalf. Registered on every load so it is present for the
+			// dispatcher's own scheduled request, not just interactive ones.
+			\Automattic\WooCommerce\SubscriptionsEngine\Integration\Ownership\ConsumerRegistry::register(
+				'woocommerce-subscriptions-lite'
+			);
 		}
 
 		// Product detail page: render the subscription plan picker and feed the
@@ -60,11 +69,13 @@ final class Bootstrap {
 		// engine factory, then schedule its first renewal.
 		Checkout\ContractCreationHandler::register();
 
-		// Customer portal (My Account): list the customer's subscriptions and
-		// cancel an owned one through the engine. Detail / reactivate land in a
-		// later widening slice.
-		Portal\SubscriptionsEndpoint::register();
-		Portal\CancelHandler::register();
+		// Customer portal (My Account): the subscriptions list + single
+		// subscription detail, with the lifecycle actions (cancel / hold /
+		// reactivate) over the namespaced Interactivity API store. Endpoints
+		// register the My Account surfaces; Assets loads the iAPI store + styles
+		// on those endpoints.
+		CustomerPortal\Endpoints::register();
+		CustomerPortal\Assets::register();
 
 		// Admin (back office only): the WooCommerce > Subscriptions list + detail
 		// page and its Renew now / Cancel handlers, driven through the engine's

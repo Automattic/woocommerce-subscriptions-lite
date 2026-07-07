@@ -45,9 +45,14 @@
 	<!--
 		Test doubles deliberately mirror real WordPress/WooCommerce method
 		signatures (e.g. WC_Order_Item_Product::get_meta()'s $single flag),
-		including parameters the double itself does not consume.
+		including parameters the double itself does not consume - and the
+		reserved-keyword parameter names WordPress core itself uses (e.g.
+		get_option()'s $default, wp_interactivity_state()'s $namespace).
 	-->
 	<rule ref="Generic.CodeAnalysis.UnusedFunctionParameter">
+		<exclude-pattern>tests/*</exclude-pattern>
+	</rule>
+	<rule ref="Universal.NamingConventions.NoReservedKeywordParameterNames">
 		<exclude-pattern>tests/*</exclude-pattern>
 	</rule>
 
