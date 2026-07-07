@@ -89,13 +89,13 @@
 		width: 100%;
 		border-collapse: collapse;
 
+		thead th {
+			vertical-align: middle;
+		}
+
 		thead th:not(.dataviews-view-table__actions-column) {
 			text-align: left;
 			padding-left: variables.$grid-unit-15;
-		}
-
-		thead th {
-			vertical-align: middle;
 		}
 
 		thead th:first-child,
