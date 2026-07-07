@@ -1,6 +1,6 @@
 <?php
 /**
- * Admin page for managing subscription plans.
+ * WooCommerce Settings > Subscriptions tab hosting the plans manager.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Admin
  */
@@ -18,7 +18,7 @@ defined( 'ABSPATH' ) || exit;
  * Renders the global subscription plans manager inside the WooCommerce
  * Settings > Subscriptions tab.
  */
-final class PlansPage {
+final class SettingsPage {
 
 	const CAPABILITY = 'manage_woocommerce';
 
@@ -143,7 +143,7 @@ final class PlansPage {
 		$GLOBALS['hide_save_button'] = true;
 
 		?>
-		<div class="wc-subscriptions-lite-settings-tab wc-subscriptions-lite-plans-page">
+		<div class="wc-subscriptions-lite-settings-tab">
 			<table class="form-table">
 				<tbody>
 					<tr valign="top">

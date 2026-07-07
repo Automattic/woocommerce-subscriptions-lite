@@ -13,13 +13,13 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Admin;
 
-use Automattic\WooCommerce\SubscriptionsLite\Admin\PlansPage;
+use Automattic\WooCommerce\SubscriptionsLite\Admin\SettingsPage;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
 
 /**
- * @covers \Automattic\WooCommerce\SubscriptionsLite\Admin\PlansPage
+ * @covers \Automattic\WooCommerce\SubscriptionsLite\Admin\SettingsPage
  */
-final class PlansPageTest extends LiteIntegrationTestCase {
+final class SettingsPageTest extends LiteIntegrationTestCase {
 
 	private const SCRIPT_HANDLE = 'wc-subscriptions-lite-admin-react';
 
@@ -34,25 +34,25 @@ final class PlansPageTest extends LiteIntegrationTestCase {
 	}
 
 	public function test_register_adds_subscriptions_settings_tab(): void {
-		PlansPage::register();
+		SettingsPage::register();
 
 		$tabs = apply_filters( 'woocommerce_settings_tabs_array', [ 'general' => 'General' ] );
 
-		$this->assertArrayHasKey( PlansPage::TAB_SLUG, $tabs, 'The Subscriptions tab registers among the WooCommerce settings tabs.' );
-		$this->assertSame( 'subscriptions', PlansPage::TAB_SLUG );
+		$this->assertArrayHasKey( SettingsPage::TAB_SLUG, $tabs, 'The Subscriptions tab registers among the WooCommerce settings tabs.' );
+		$this->assertSame( 'subscriptions', SettingsPage::TAB_SLUG );
 		$this->assertArrayHasKey( 'general', $tabs, 'Existing tabs survive the filter.' );
 
 		$this->assertNotFalse(
-			has_action( 'woocommerce_settings_' . PlansPage::TAB_SLUG ),
+			has_action( 'woocommerce_settings_' . SettingsPage::TAB_SLUG ),
 			'The tab body renders through the WooCommerce settings action.'
 		);
 	}
 
 	public function test_enqueue_assets_only_runs_on_the_subscriptions_settings_tab(): void {
-		$page = new PlansPage();
+		$page = new SettingsPage();
 
 		// Wrong screen entirely.
-		$_GET['tab'] = PlansPage::TAB_SLUG;
+		$_GET['tab'] = SettingsPage::TAB_SLUG;
 		$page->enqueue_assets( 'dashboard_page_elsewhere' );
 		$this->assertFalse( wp_script_is( self::SCRIPT_HANDLE, 'enqueued' ), 'Foreign screens get no plans assets.' );
 
@@ -62,7 +62,7 @@ final class PlansPageTest extends LiteIntegrationTestCase {
 		$this->assertFalse( wp_script_is( self::SCRIPT_HANDLE, 'enqueued' ), 'Other settings tabs get no plans assets.' );
 
 		// Right screen, right tab.
-		$_GET['tab'] = PlansPage::TAB_SLUG;
+		$_GET['tab'] = SettingsPage::TAB_SLUG;
 		$page->enqueue_assets( 'woocommerce_page_wc-settings' );
 
 		$this->assertTrue( wp_script_is( self::SCRIPT_HANDLE, 'enqueued' ) );
@@ -88,12 +88,12 @@ final class PlansPageTest extends LiteIntegrationTestCase {
 
 		$this->expectException( \WPDieException::class );
 
-		( new PlansPage() )->render();
+		( new SettingsPage() )->render();
 	}
 
 	public function test_render_outputs_react_mount_for_capable_user(): void {
 		ob_start();
-		( new PlansPage() )->render();
+		( new SettingsPage() )->render();
 		$output = ob_get_clean();
 
 		$this->assertStringContainsString( 'wc-subscriptions-lite-plan-manager', $output );
