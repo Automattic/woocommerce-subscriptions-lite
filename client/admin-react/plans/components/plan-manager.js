@@ -3,14 +3,7 @@
  */
 
 import { useCallback, useMemo, useState } from '@wordpress/element';
-import {
-	Button,
-	Card,
-	CardBody,
-	Flex,
-	FlexItem,
-	Notice,
-} from '@wordpress/components';
+import { Button, Flex, FlexItem, Notice } from '@wordpress/components';
 import { __ } from '@wordpress/i18n';
 import { plus } from '@wordpress/icons';
 import { config } from '../config';
@@ -27,7 +20,7 @@ const DEFAULT_VIEW = {
 	perPage: 100,
 	page: 1,
 	sort: { field: 'sort_order', direction: 'asc' },
-	layout: { density: 'comfortable' },
+	layout: {},
 };
 
 const CLOSED_EDITOR = {
@@ -214,40 +207,31 @@ export function PlanManager() {
 				</Notice>
 			) }
 
-			<Card>
-				<CardBody>
-					<PlansTable
-						plans={ plans }
-						registry={ registry }
-						definitions={ definitions }
-						view={ view }
-						onChangeView={ setView }
-						paginationInfo={ paginationInfo }
-						isLoading={ isLoading }
-						onEdit={ openEdit }
-						onArchive={ ( plan ) =>
-							changeStatus( plan, 'archived' )
-						}
-						onRestore={ ( plan ) => changeStatus( plan, 'active' ) }
-						onReorder={ handleReorder }
-					/>
+			<PlansTable
+				plans={ plans }
+				registry={ registry }
+				definitions={ definitions }
+				view={ view }
+				onChangeView={ setView }
+				paginationInfo={ paginationInfo }
+				isLoading={ isLoading }
+				onEdit={ openEdit }
+				onArchive={ ( plan ) => changeStatus( plan, 'archived' ) }
+				onRestore={ ( plan ) => changeStatus( plan, 'active' ) }
+				onReorder={ handleReorder }
+			/>
 
-					<Flex className="wc-subscriptions-lite-plans__add-plan-button">
-						<FlexItem>
-							<Button
-								variant="secondary"
-								icon={ plus }
-								onClick={ openCreate }
-							>
-								{ __(
-									'Add plan',
-									'woocommerce-subscriptions-lite'
-								) }
-							</Button>
-						</FlexItem>
-					</Flex>
-				</CardBody>
-			</Card>
+			<Flex className="wc-subscriptions-lite-plans__add-plan-button">
+				<FlexItem>
+					<Button
+						variant="secondary"
+						icon={ plus }
+						onClick={ openCreate }
+					>
+						{ __( 'Add plan', 'woocommerce-subscriptions-lite' ) }
+					</Button>
+				</FlexItem>
+			</Flex>
 
 			{ editor.isOpen && (
 				<PlanModal

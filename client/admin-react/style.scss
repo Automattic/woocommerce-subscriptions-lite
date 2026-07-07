@@ -88,12 +88,12 @@
 
 		thead th:not(.dataviews-view-table__actions-column) {
 			text-align: left;
-			padding-left: variables.$grid-unit-15;
 		}
 
 		thead th:first-child,
 		tbody td:first-child {
-			padding-left: variables.$grid-unit-15;
+			padding-left: variables.$grid-unit-30;
+			padding-right: 0;
 		}
 
 		thead th.dataviews-view-table__actions-column,
@@ -101,25 +101,12 @@
 			text-align: right;
 		}
 
-		tbody td.dataviews-view-table__actions-column:last-child {
-			padding-right: variables.$grid-unit-15;
-		}
-
 		.dataviews-view-table__cell-content-wrapper {
 			text-align: left;
-
-			&:not(.dataviews-title-field) {
-				padding-left: variables.$grid-unit-15;
-			}
-		}
-
-		thead td:last-child,
-		tbody td:last-child {
-			padding-right: variables.$grid-unit-30;
 		}
 
 		tbody .dataviews-view-table__row {
-			border-top: variables.$border-width solid colors.$gray-400;
+			border-top: variables.$border-width solid colors.$gray-100;
 
 			&.is-draggable {
 				cursor: grab;
@@ -127,7 +114,7 @@
 		}
 
 		tbody tr.dataviews-view-table__row:last-child {
-			border-bottom: variables.$border-width solid colors.$gray-400;
+			border-bottom: variables.$border-width solid colors.$gray-100;
 		}
 
 		// DataViews hardcodes the sticky modifier on the actions column;
