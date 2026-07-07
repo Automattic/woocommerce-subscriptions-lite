@@ -78,6 +78,12 @@
 .wc-subscriptions-lite-plans {
 	max-width: breakpoints.$break-wide;
 
+	// The released global-plans UI paints its table wrapper white; without
+	// this the transparent DataViews table sits on the gray admin background.
+	.wc-subscriptions-lite-plans__table {
+		background: colors.$white;
+	}
+
 	.dataviews-view-table {
 		width: 100%;
 		border-collapse: collapse;
