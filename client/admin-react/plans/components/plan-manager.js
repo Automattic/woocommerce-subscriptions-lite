@@ -207,34 +207,36 @@ export function PlanManager() {
 				</Notice>
 			) }
 
-			<PlansTable
-				plans={ plans }
-				registry={ registry }
-				definitions={ definitions }
-				view={ view }
-				onChangeView={ setView }
-				paginationInfo={ paginationInfo }
-				isLoading={ isLoading }
-				onEdit={ openEdit }
-				onArchive={ ( plan ) => changeStatus( plan, 'archived' ) }
-				onRestore={ ( plan ) => changeStatus( plan, 'active' ) }
-				onReorder={ handleReorder }
-			/>
+			<div className="wc-subscriptions-lite-plans__panel">
+				<PlansTable
+					plans={ plans }
+					registry={ registry }
+					definitions={ definitions }
+					view={ view }
+					onChangeView={ setView }
+					paginationInfo={ paginationInfo }
+					isLoading={ isLoading }
+					onEdit={ openEdit }
+					onArchive={ ( plan ) => changeStatus( plan, 'archived' ) }
+					onRestore={ ( plan ) => changeStatus( plan, 'active' ) }
+					onReorder={ handleReorder }
+				/>
 
-			<Flex className="wc-subscriptions-lite-plans__add-plan-button">
-				<FlexItem>
-					<Button
-						variant="secondary"
-						icon={ plus }
-						onClick={ openCreate }
-					>
-						{ __(
-							'Add subscription plan',
-							'woocommerce-subscriptions-lite'
-						) }
-					</Button>
-				</FlexItem>
-			</Flex>
+				<Flex className="wc-subscriptions-lite-plans__add-plan-button">
+					<FlexItem>
+						<Button
+							variant="secondary"
+							icon={ plus }
+							onClick={ openCreate }
+						>
+							{ __(
+								'Add subscription plan',
+								'woocommerce-subscriptions-lite'
+							) }
+						</Button>
+					</FlexItem>
+				</Flex>
+			</div>
 
 			{ editor.isOpen && (
 				<PlanModal

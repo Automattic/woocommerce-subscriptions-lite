@@ -78,9 +78,10 @@
 .wc-subscriptions-lite-plans {
 	max-width: breakpoints.$break-wide;
 
-	// The released global-plans UI paints its table wrapper white; without
-	// this the transparent DataViews table sits on the gray admin background.
-	.wc-subscriptions-lite-plans__table {
+	// The released global-plans UI paints one white panel around the table
+	// and the footer button; without it the transparent DataViews table
+	// sits on the gray admin background.
+	.wc-subscriptions-lite-plans__panel {
 		background: colors.$white;
 	}
 
@@ -133,10 +134,13 @@
 		}
 
 		// DataViews hardcodes the sticky modifier on the actions column;
-		// keep it in normal flow so it never floats over row content.
+		// keep it in normal flow so it never floats over row content, and
+		// drop its own background so the cell follows the row tint while
+		// dragging.
 		.dataviews-view-table__actions-column--sticky {
 			position: static;
 			box-shadow: none;
+			background-color: transparent;
 		}
 
 		// The grip column is always the first cell (no checkbox or primary
@@ -163,8 +167,10 @@
 	min-height: 220px;
 }
 
+// Footer inside the white panel, below the table (16px 24px like the
+// released UI's table footer).
 .wc-subscriptions-lite-plans__add-plan-button {
-	margin-top: variables.$grid-unit-30;
+	padding: variables.$grid-unit-20 variables.$grid-unit-30;
 }
 
 // Form layout.
