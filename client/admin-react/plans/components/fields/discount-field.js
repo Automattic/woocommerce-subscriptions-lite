@@ -3,7 +3,9 @@
  *
  * Maps to the engine's pricing_policy.policies[0]. The value input carries a
  * type-driven affix: "%" for percentage discounts, the store currency symbol
- * (on its configured side) for monetary ones.
+ * (on its configured side) for monetary ones. The unit is also reflected in
+ * the input's accessible name ("Discount (%)" / "Discount (USD)"), since the
+ * visual affix is not part of the label.
  */
 
 import {
@@ -15,7 +17,8 @@ import {
 	// eslint-disable-next-line @wordpress/no-unsafe-wp-apis
 	__experimentalInputControlSuffixWrapper as InputControlSuffixWrapper,
 } from '@wordpress/components';
-import { __ } from '@wordpress/i18n';
+import { useId } from '@wordpress/element';
+import { __, sprintf } from '@wordpress/i18n';
 import { config } from '../../config';
 import { NumberControl } from '../controls/number-control';
 import { FormErrorMessage } from '../controls/form-error-message';
@@ -67,6 +70,9 @@ function discountAffixes( pricingType, currency ) {
  * @return {Object} DiscountEdit component.
  */
 export function DiscountEdit( { data, onChange, errors, definitions } ) {
+	const errorIdBase = useId();
+	const valueErrorId = `${ errorIdBase }-value-error`;
+	const cyclesErrorId = `${ errorIdBase }-cycles-error`;
 	const typeOptions = definitions.pricingTypes.map( ( type ) => ( {
 		label: type.label,
 		value: type.value,
@@ -83,6 +89,13 @@ export function DiscountEdit( { data, onChange, errors, definitions } ) {
 					__next40pxDefaultSize
 					type="number"
 					label={ __( 'Discount', 'woocommerce-subscriptions-lite' ) }
+					aria-label={ sprintf(
+						/* translators: %s: discount unit - "%" for percentage discounts, the store currency code (e.g. "USD") otherwise. */
+						__( 'Discount (%s)', 'woocommerce-subscriptions-lite' ),
+						data.pricingType === 'percentage'
+							? '%'
+							: config.currency.code
+					) }
 					value={ String( data.pricingValue ) }
 					onChange={ ( value ) =>
 						onChange( { pricingValue: value ?? '' } )
@@ -90,6 +103,10 @@ export function DiscountEdit( { data, onChange, errors, definitions } ) {
 					min={ 0 }
 					max={ data.pricingType === 'percentage' ? 100 : undefined }
 					step={ 0.01 }
+					aria-describedby={
+						errors.pricingValue ? valueErrorId : undefined
+					}
+					aria-invalid={ errors.pricingValue ? 'true' : undefined }
 					{ ...discountAffixes( data.pricingType, config.currency ) }
 				/>
 				<SelectControl
@@ -103,7 +120,10 @@ export function DiscountEdit( { data, onChange, errors, definitions } ) {
 					onChange={ ( value ) => onChange( { pricingType: value } ) }
 				/>
 			</div>
-			<FormErrorMessage message={ errors.pricingValue } />
+			<FormErrorMessage
+				id={ valueErrorId }
+				message={ errors.pricingValue }
+			/>
 			<div className="wc-subscriptions-lite-plans__applies-to">
 				<SelectControl
 					__next40pxDefaultSize
@@ -136,8 +156,19 @@ export function DiscountEdit( { data, onChange, errors, definitions } ) {
 								'How many payments the discount applies to, starting with the first payment.',
 								'woocommerce-subscriptions-lite'
 							) }
+							aria-describedby={
+								errors.durationCycles
+									? cyclesErrorId
+									: undefined
+							}
+							aria-invalid={
+								errors.durationCycles ? 'true' : undefined
+							}
 						/>
-						<FormErrorMessage message={ errors.durationCycles } />
+						<FormErrorMessage
+							id={ cyclesErrorId }
+							message={ errors.durationCycles }
+						/>
 					</div>
 				) }
 			</div>

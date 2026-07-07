@@ -34,20 +34,29 @@ import {
  */
 function useTableFields( registry, definitions ) {
 	return useMemo( () => {
-		const gripLabel = __(
-			'Drag to reorder',
-			'woocommerce-subscriptions-lite'
-		);
+		const gripLabel = __( 'Reorder', 'woocommerce-subscriptions-lite' );
 		const fields = [
 			{
 				id: 'grip',
 				label: gripLabel,
 				header: <VisuallyHidden>{ gripLabel }</VisuallyHidden>,
+				// The drag icon is pointer-only, so it is hidden from
+				// assistive technology; the hidden per-row hint points at
+				// the keyboard-accessible path (row actions menu).
 				render: () => (
-					<Icon
-						className="wc-subscriptions-lite-plans__grip-icon"
-						icon={ dragHandle }
-					/>
+					<>
+						<Icon
+							className="wc-subscriptions-lite-plans__grip-icon"
+							icon={ dragHandle }
+							aria-hidden="true"
+						/>
+						<VisuallyHidden>
+							{ __(
+								'Reorder with the Move up and Move down row actions.',
+								'woocommerce-subscriptions-lite'
+							) }
+						</VisuallyHidden>
+					</>
 				),
 				enableSorting: false,
 				enableHiding: false,

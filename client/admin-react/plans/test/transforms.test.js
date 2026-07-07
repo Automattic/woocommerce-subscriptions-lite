@@ -114,7 +114,7 @@ describe( 'registry transforms', () => {
 			makeDefaultFormData( registry ),
 			null
 		);
-		expect( payload.name ).toBe( 'month' );
+		expect( payload.name ).toBe( '1 month' );
 	} );
 
 	describe( 'injected fields', () => {
@@ -168,31 +168,46 @@ describe( 'registry transforms', () => {
 	describe( 'injected name field', () => {
 		const NAMESPACE = 'test/custom-name';
 
-		beforeEach( () => {
+		const injectName = ( name ) => {
 			addFilter( PLAN_FIELDS_FILTER, NAMESPACE, ( fields ) => [
 				...fields,
 				{
 					id: 'customName',
 					toPayload: ( formData, payload ) => ( {
 						...payload,
-						name: 'Custom name',
+						name,
 					} ),
 				},
 			] );
-		} );
+		};
+
+		const buildPayload = () => {
+			const registry = buildFieldRegistry();
+			return formDataToPayload(
+				registry,
+				makeDefaultFormData( registry ),
+				null
+			);
+		};
 
 		afterEach( () => {
 			removeFilter( PLAN_FIELDS_FILTER, NAMESPACE );
 		} );
 
 		it( 'wins over the derived frequency name', () => {
-			const registry = buildFieldRegistry();
-			const payload = formDataToPayload(
-				registry,
-				makeDefaultFormData( registry ),
-				null
-			);
-			expect( payload.name ).toBe( 'Custom name' );
+			injectName( 'Custom name' );
+			expect( buildPayload().name ).toBe( 'Custom name' );
 		} );
+
+		it.each( [
+			[ 'an empty string', '' ],
+			[ 'whitespace only', '   ' ],
+		] )(
+			'falls back to the derived name when the injected name is %s',
+			( _description, name ) => {
+				injectName( name );
+				expect( buildPayload().name ).toBe( '1 month' );
+			}
+		);
 	} );
 } );
