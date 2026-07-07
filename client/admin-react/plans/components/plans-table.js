@@ -46,23 +46,18 @@ function useTableFields( registry, definitions ) {
 				id: 'grip',
 				label: gripLabel,
 				header: <VisuallyHidden>{ gripLabel }</VisuallyHidden>,
-				// The drag icon is pointer-only, so it is hidden from
-				// assistive technology; the hidden per-row hint points at
-				// the keyboard-accessible path (row actions menu).
+				// role="img" activates the aria-label without rendering any
+				// text node - hidden text inside the row would render
+				// unclipped in the browser's drag ghost. The keyboard path
+				// stays the Move up / Move down row actions.
 				render: () => (
-					<>
-						<Icon
-							className="wc-subscriptions-lite-plans__grip-icon"
-							icon={ dragHandle }
-							aria-hidden="true"
-						/>
-						<VisuallyHidden>
-							{ __(
-								'Reorder with the Move up and Move down row actions.',
-								'woocommerce-subscriptions-lite'
-							) }
-						</VisuallyHidden>
-					</>
+					<span
+						className="wc-subscriptions-lite-plans__grip-icon"
+						role="img"
+						aria-label={ gripLabel }
+					>
+						<Icon icon={ dragHandle } />
+					</span>
 				),
 				enableSorting: false,
 				enableHiding: false,
@@ -204,9 +199,7 @@ export function PlansTable( {
 				// reference changes when the order does - DataViews caches
 				// eligibility per actions reference.
 				isEligible: ( item ) =>
-					localPlans.findIndex(
-						( plan ) => plan.id === item.id
-					) > 0,
+					localPlans.findIndex( ( plan ) => plan.id === item.id ) > 0,
 				callback: ( items ) => move( items[ 0 ], 'up' ),
 			},
 			{
@@ -305,7 +298,7 @@ export function PlansTable( {
 
 		stampRows();
 		// childList only: re-stamping attributes must not retrigger it.
-		const observer = new MutationObserver( stampRows );
+		const observer = new window.MutationObserver( stampRows );
 		observer.observe( wrapper, { childList: true, subtree: true } );
 
 		wrapper.addEventListener( 'dragstart', handleDragStart );

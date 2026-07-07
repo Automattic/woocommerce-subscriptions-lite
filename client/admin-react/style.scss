@@ -102,15 +102,9 @@
 			padding-right: 0;
 		}
 
-		// DataViews gives every cell content wrapper a 15ch minimum;
-		// the grip column is icon-only, so let it collapse.
-		thead th:first-child .dataviews-view-table__cell-content-wrapper,
-		tbody td:first-child .dataviews-view-table__cell-content-wrapper {
-			min-width: 0;
-		}
-
 		tbody tr.is-dragging {
-			opacity: 0.6;
+			background: colors.$gray-100;
+			opacity: 0.5;
 		}
 
 		thead th.dataviews-view-table__actions-column,
@@ -118,7 +112,11 @@
 			text-align: right;
 		}
 
+		// min-width 0 lifts DataViews' 15ch per-cell minimum, which forces
+		// horizontal overflow on narrower screens; let the columns share
+		// the available width instead.
 		.dataviews-view-table__cell-content-wrapper {
+			min-width: 0;
 			text-align: left;
 		}
 

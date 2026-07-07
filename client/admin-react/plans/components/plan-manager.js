@@ -228,7 +228,10 @@ export function PlanManager() {
 						icon={ plus }
 						onClick={ openCreate }
 					>
-						{ __( 'Add plan', 'woocommerce-subscriptions-lite' ) }
+						{ __(
+							'Add subscription plan',
+							'woocommerce-subscriptions-lite'
+						) }
 					</Button>
 				</FlexItem>
 			</Flex>
