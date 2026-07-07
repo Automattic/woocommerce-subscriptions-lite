@@ -5,6 +5,7 @@
  */
 
 import { CheckboxControl } from '@wordpress/components';
+import { useId } from '@wordpress/element';
 import { __ } from '@wordpress/i18n';
 import { NumberControl } from '../controls/number-control';
 import { FormErrorMessage } from '../controls/form-error-message';
@@ -19,6 +20,8 @@ import { FormErrorMessage } from '../controls/form-error-message';
  * @return {Object} ExpirationEdit component.
  */
 export function ExpirationEdit( { data, onChange, errors } ) {
+	const maxCyclesErrorId = `${ useId() }-max-cycles-error`;
+
 	return (
 		<div className="wc-subscriptions-lite-plans__field">
 			<CheckboxControl
@@ -55,8 +58,15 @@ export function ExpirationEdit( { data, onChange, errors } ) {
 							'The number of payments, including the initial purchase, before the subscription automatically expires.',
 							'woocommerce-subscriptions-lite'
 						) }
+						aria-describedby={
+							errors.maxCycles ? maxCyclesErrorId : undefined
+						}
+						aria-invalid={ errors.maxCycles ? 'true' : undefined }
 					/>
-					<FormErrorMessage message={ errors.maxCycles } />
+					<FormErrorMessage
+						id={ maxCyclesErrorId }
+						message={ errors.maxCycles }
+					/>
 				</div>
 			) }
 		</div>

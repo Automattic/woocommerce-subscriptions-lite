@@ -208,6 +208,15 @@
 	margin-top: variables.$grid-unit-15;
 }
 
+// Help text rendered by NumberControl (outside InputControl, so validation
+// error ids can join the input's aria-describedby); mirrors the
+// components-base-control__help typography.
+.wc-subscriptions-lite-plans__help {
+	margin: variables.$grid-unit-10 0 0;
+	color: colors.$gray-700;
+	font-size: variables.$helptext-font-size;
+}
+
 .wc-subscriptions-lite-plans__error {
 	margin: variables.$grid-unit-05 0 0;
 	color: colors.$alert-red;

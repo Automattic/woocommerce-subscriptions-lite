@@ -3,6 +3,7 @@
  */
 
 import { SelectControl } from '@wordpress/components';
+import { useId } from '@wordpress/element';
 import { __ } from '@wordpress/i18n';
 import { NumberControl } from '../controls/number-control';
 import { FormErrorMessage } from '../controls/form-error-message';
@@ -18,6 +19,7 @@ import { FormErrorMessage } from '../controls/form-error-message';
  * @return {Object} FrequencyEdit component.
  */
 export function FrequencyEdit( { data, onChange, errors, definitions } ) {
+	const intervalErrorId = `${ useId() }-interval-error`;
 	const periodOptions = definitions.billingUnits.map( ( unit ) => ( {
 		label: unit.label,
 		value: unit.value,
@@ -37,6 +39,10 @@ export function FrequencyEdit( { data, onChange, errors, definitions } ) {
 					}
 					min={ 1 }
 					max={ 365 }
+					aria-describedby={
+						errors.interval ? intervalErrorId : undefined
+					}
+					aria-invalid={ errors.interval ? 'true' : undefined }
 				/>
 				<SelectControl
 					__next40pxDefaultSize
@@ -49,7 +55,10 @@ export function FrequencyEdit( { data, onChange, errors, definitions } ) {
 					onChange={ ( value ) => onChange( { period: value } ) }
 				/>
 			</div>
-			<FormErrorMessage message={ errors.interval } />
+			<FormErrorMessage
+				id={ intervalErrorId }
+				message={ errors.interval }
+			/>
 		</div>
 	);
 }

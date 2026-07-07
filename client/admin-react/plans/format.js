@@ -13,7 +13,8 @@ import { config } from './config';
 export const EMPTY_VALUE = '\u2014';
 
 /**
- * Format a plan's billing cadence, e.g. "month" or "3 weeks".
+ * Format a plan's billing cadence, e.g. "1 month" or "3 weeks". The interval
+ * is always included, matching the canonical list rendering.
  *
  * @param {Object} plan        Engine plan object.
  * @param {Object} definitions Normalized engine definitions.
@@ -27,16 +28,18 @@ export function formatFrequency( plan, definitions = {} ) {
 	const unitDefinition = units.find(
 		( billingUnit ) => billingUnit.value === unit
 	);
-
-	if ( interval === 1 ) {
-		return unitDefinition?.singular || unitDefinition?.label || unit;
-	}
+	const unitLabel =
+		( interval === 1
+			? unitDefinition?.singular
+			: unitDefinition?.plural ) ||
+		unitDefinition?.label ||
+		unit;
 
 	return sprintf(
 		/* translators: 1: billing interval, 2: billing period unit. */
 		__( '%1$d %2$s', 'woocommerce-subscriptions-lite' ),
 		interval,
-		unitDefinition?.plural || unitDefinition?.label || unit
+		unitLabel
 	);
 }
 

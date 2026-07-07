@@ -129,13 +129,13 @@ describe( 'formatExpiration', () => {
 describe( 'formatFrequency', () => {
 	const definitions = normalizeDefinitions( {} );
 
-	it( 'renders the bare unit for a single-interval cadence', () => {
+	it( 'includes the interval for a single-interval cadence', () => {
 		expect(
 			formatFrequency(
 				{ billing_policy: { interval: 1, period: 'month' } },
 				definitions
 			)
-		).toBe( 'month' );
+		).toBe( '1 month' );
 	} );
 
 	it( 'renders interval and plural unit for multi-interval cadences', () => {
