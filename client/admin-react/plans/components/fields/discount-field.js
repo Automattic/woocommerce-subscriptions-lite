@@ -1,16 +1,63 @@
 /**
- * DiscountField - pricing type + value + scope editor.
+ * DiscountField - pricing value + type + scope editor.
  *
- * Maps to the engine's pricing_policy.policies[0].
+ * Maps to the engine's pricing_policy.policies[0]. The value input carries a
+ * type-driven affix: "%" for percentage discounts, the store currency symbol
+ * (on its configured side) for monetary ones.
  */
 
-import { SelectControl } from '@wordpress/components';
+import {
+	SelectControl,
+	// eslint-disable-next-line @wordpress/no-unsafe-wp-apis
+	__experimentalInputControl as InputControl,
+	// eslint-disable-next-line @wordpress/no-unsafe-wp-apis
+	__experimentalInputControlPrefixWrapper as InputControlPrefixWrapper,
+	// eslint-disable-next-line @wordpress/no-unsafe-wp-apis
+	__experimentalInputControlSuffixWrapper as InputControlSuffixWrapper,
+} from '@wordpress/components';
 import { __ } from '@wordpress/i18n';
+import { config } from '../../config';
 import { NumberControl } from '../controls/number-control';
 import { FormErrorMessage } from '../controls/form-error-message';
 
 /**
- * Discount editor (type + value + scope + duration).
+ * Build the value input's affix props for the selected pricing type.
+ *
+ * @param {string} pricingType Selected pricing type.
+ * @param {Object} currency    Store currency settings.
+ * @return {Object} prefix/suffix props for InputControl.
+ */
+function discountAffixes( pricingType, currency ) {
+	if ( pricingType === 'percentage' ) {
+		return {
+			suffix: <InputControlSuffixWrapper>%</InputControlSuffixWrapper>,
+		};
+	}
+
+	if (
+		currency.position === 'right' ||
+		currency.position === 'right_space'
+	) {
+		return {
+			suffix: (
+				<InputControlSuffixWrapper>
+					{ currency.symbol }
+				</InputControlSuffixWrapper>
+			),
+		};
+	}
+
+	return {
+		prefix: (
+			<InputControlPrefixWrapper>
+				{ currency.symbol }
+			</InputControlPrefixWrapper>
+		),
+	};
+}
+
+/**
+ * Discount editor (value + type + scope + duration).
  *
  * @param {Object}   props             Component props.
  * @param {Object}   props.data        Current form data.
@@ -32,15 +79,18 @@ export function DiscountEdit( { data, onChange, errors, definitions } ) {
 	return (
 		<div className="wc-subscriptions-lite-plans__field">
 			<div className="wc-subscriptions-lite-plans__field-row">
-				<NumberControl
-					label={ __( 'Value', 'woocommerce-subscriptions-lite' ) }
+				<InputControl
+					__next40pxDefaultSize
+					type="number"
+					label={ __( 'Discount', 'woocommerce-subscriptions-lite' ) }
 					value={ String( data.pricingValue ) }
 					onChange={ ( value ) =>
-						onChange( { pricingValue: value } )
+						onChange( { pricingValue: value ?? '' } )
 					}
 					min={ 0 }
-					max={ data.pricingType === 'percentage' ? 100 : Infinity }
+					max={ data.pricingType === 'percentage' ? 100 : undefined }
 					step={ 0.01 }
+					{ ...discountAffixes( data.pricingType, config.currency ) }
 				/>
 				<SelectControl
 					__next40pxDefaultSize
@@ -53,7 +103,8 @@ export function DiscountEdit( { data, onChange, errors, definitions } ) {
 					onChange={ ( value ) => onChange( { pricingType: value } ) }
 				/>
 			</div>
-			<div className="wc-subscriptions-lite-plans__field-row">
+			<FormErrorMessage message={ errors.pricingValue } />
+			<div className="wc-subscriptions-lite-plans__applies-to">
 				<SelectControl
 					__next40pxDefaultSize
 					label={ __(
@@ -67,24 +118,29 @@ export function DiscountEdit( { data, onChange, errors, definitions } ) {
 					}
 				/>
 				{ data.pricingScope === 'n_cycles' && (
-					<NumberControl
-						label={ __(
-							'Cycle count',
-							'woocommerce-subscriptions-lite'
-						) }
-						value={ String( data.durationCycles ) }
-						onChange={ ( value ) =>
-							onChange( {
-								durationCycles: parseInt( value, 10 ) || 0,
-							} )
-						}
-						min={ 2 }
-						step={ 1 }
-					/>
+					<div className="wc-subscriptions-lite-plans__cycle-count">
+						<NumberControl
+							label={ __(
+								'Number of discounted payments',
+								'woocommerce-subscriptions-lite'
+							) }
+							value={ String( data.durationCycles ) }
+							onChange={ ( value ) =>
+								onChange( {
+									durationCycles: parseInt( value, 10 ) || 0,
+								} )
+							}
+							min={ 2 }
+							step={ 1 }
+							help={ __(
+								'How many payments the discount applies to, starting with the first payment.',
+								'woocommerce-subscriptions-lite'
+							) }
+						/>
+						<FormErrorMessage message={ errors.durationCycles } />
+					</div>
 				) }
 			</div>
-			<FormErrorMessage message={ errors.pricingValue } />
-			<FormErrorMessage message={ errors.durationCycles } />
 		</div>
 	);
 }

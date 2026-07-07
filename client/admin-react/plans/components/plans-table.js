@@ -1,49 +1,74 @@
 /**
  * PlansTable - DataViews list with drag-to-reorder and row actions.
  *
- * Keeps Lite's server-driven list behaviour (search, status filter, sort,
- * pagination via the view/onChangeView props) and layers HTML5 drag-reorder
- * onto the rendered rows, plus keyboard-accessible move up/down actions.
+ * Renders a plain table (no search, filters, view configuration, or
+ * pagination chrome) via the DataViews composition API, and layers HTML5
+ * drag-reorder onto the rendered rows, plus keyboard-accessible move
+ * up/down actions. Manual sort_order is the only ordering.
  */
 
 import { DataViews } from '@wordpress/dataviews/wp';
+import { VisuallyHidden } from '@wordpress/components';
 import { useCallback, useEffect, useMemo, useRef } from '@wordpress/element';
 import { __ } from '@wordpress/i18n';
 import {
 	Icon,
 	chevronDown,
 	chevronUp,
+	dragHandle,
 	pencil,
 	trash,
 	undo,
 } from '@wordpress/icons';
 
 /**
- * Build DataViews fields from the registry's list columns plus status.
+ * Build DataViews fields from the registry's list columns plus status,
+ * prefixed with a synthetic drag-handle (grip) column.
+ *
+ * All columns are plain: no sorting, hiding, or filtering affordances -
+ * manual sort_order is the only ordering.
  *
  * @param {Array<Object>} registry    Field descriptors.
  * @param {Object}        definitions Normalized engine definitions.
- * @return {{ fields: Array, titleField: string, columnIds: Array }} Field config.
+ * @return {{ fields: Array, columnIds: Array }} Field config.
  */
 function useTableFields( registry, definitions ) {
 	return useMemo( () => {
-		const listDescriptors = registry.filter( ( f ) => f.listColumn );
-		const titleDescriptor =
-			listDescriptors.find( ( f ) => f.listColumn.isTitle ) ||
-			listDescriptors[ 0 ];
-		const titleField = titleDescriptor?.listColumn.id;
-
-		const fields = listDescriptors.map( ( descriptor ) => {
-			const column = descriptor.listColumn;
-			return {
-				id: column.id,
-				label: column.label,
-				enableHiding: ! column.isTitle,
-				enableGlobalSearch: Boolean( column.isTitle ),
+		const gripLabel = __(
+			'Drag to reorder',
+			'woocommerce-subscriptions-lite'
+		);
+		const fields = [
+			{
+				id: 'grip',
+				label: gripLabel,
+				header: <VisuallyHidden>{ gripLabel }</VisuallyHidden>,
+				render: () => (
+					<Icon
+						className="wc-subscriptions-lite-plans__grip-icon"
+						icon={ dragHandle }
+					/>
+				),
 				enableSorting: false,
-				getValue: ( { item } ) => column.render( item, definitions ),
-			};
-		} );
+				enableHiding: false,
+				filterBy: false,
+			},
+		];
+
+		registry
+			.filter( ( descriptor ) => descriptor.listColumn )
+			.forEach( ( descriptor ) => {
+				const column = descriptor.listColumn;
+				fields.push( {
+					id: column.id,
+					label: column.label,
+					enableSorting: false,
+					enableHiding: false,
+					filterBy: false,
+					getValue: ( { item } ) =>
+						column.render( item, definitions ),
+				} );
+			} );
 
 		fields.push( {
 			id: 'status',
@@ -52,16 +77,14 @@ function useTableFields( registry, definitions ) {
 				definitions.statuses.find(
 					( status ) => status.value === item.status
 				)?.label || item.status,
-			elements: definitions.statuses,
-			filterBy: { operators: [ 'isAny' ] },
-			enableSorting: true,
+			enableSorting: false,
+			enableHiding: false,
+			filterBy: false,
 		} );
 
-		const columnIds = fields
-			.map( ( field ) => field.id )
-			.filter( ( id ) => id !== titleField );
+		const columnIds = fields.map( ( field ) => field.id );
 
-		return { fields, titleField, columnIds };
+		return { fields, columnIds };
 	}, [ registry, definitions ] );
 }
 
@@ -93,10 +116,7 @@ export function PlansTable( {
 	onRestore,
 	onReorder,
 } ) {
-	const { fields, titleField, columnIds } = useTableFields(
-		registry,
-		definitions
-	);
+	const { fields, columnIds } = useTableFields( registry, definitions );
 
 	const wrapperRef = useRef( null );
 	const draggedIndexRef = useRef( null );
@@ -133,7 +153,6 @@ export function PlansTable( {
 				id: 'edit',
 				label: __( 'Edit', 'woocommerce-subscriptions-lite' ),
 				icon: <Icon icon={ pencil } />,
-				isPrimary: true,
 				callback: ( items ) => onEdit( items[ 0 ] ),
 			},
 			{
@@ -227,8 +246,16 @@ export function PlansTable( {
 	}, [ plans ] );
 
 	const tableView = useMemo(
-		() => ( { ...view, titleField, fields: columnIds } ),
-		[ view, titleField, columnIds ]
+		() => ( {
+			...view,
+			fields: columnIds,
+			layout: {
+				...( view.layout || {} ),
+				enableMoving: false,
+				styles: { grip: { width: '48px' } },
+			},
+		} ),
+		[ view, columnIds ]
 	);
 
 	return (
@@ -241,18 +268,17 @@ export function PlansTable( {
 				actions={ actions }
 				paginationInfo={ paginationInfo }
 				isLoading={ isLoading }
-				search
-				searchLabel={ __(
-					'Search plans',
-					'woocommerce-subscriptions-lite'
-				) }
 				defaultLayouts={ { table: {} } }
 				empty={ __(
 					'No subscription plans found.',
 					'woocommerce-subscriptions-lite'
 				) }
 				type="table"
-			/>
+			>
+				{ /* Layout only: replaces DataViews' default chrome (search,
+				     filters, view config, pagination) with just the table. */ }
+				<DataViews.Layout />
+			</DataViews>
 		</div>
 	);
 }

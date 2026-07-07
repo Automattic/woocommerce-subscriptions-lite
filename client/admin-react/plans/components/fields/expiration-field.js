@@ -24,7 +24,7 @@ export function ExpirationEdit( { data, onChange, errors } ) {
 			<CheckboxControl
 				__nextHasNoMarginBottom
 				label={ __(
-					'Expire after a set number of payments',
+					'Expire subscription after a set number of payments',
 					'woocommerce-subscriptions-lite'
 				) }
 				checked={ Boolean( data.expires ) }
@@ -40,7 +40,7 @@ export function ExpirationEdit( { data, onChange, errors } ) {
 				<div className="wc-subscriptions-lite-plans__total-payments">
 					<NumberControl
 						label={ __(
-							'Total payments',
+							'Total number of payments',
 							'woocommerce-subscriptions-lite'
 						) }
 						value={ String( data.maxCycles ) }

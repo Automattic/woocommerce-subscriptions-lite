@@ -7,4 +7,12 @@ export const config = {
 	extensionSlug:
 		window.wcSubscriptionsLitePlans?.extensionSlug ||
 		'woocommerce-subscriptions-lite',
+	currency: window.wcSubscriptionsLitePlans?.currency || {
+		code: 'USD',
+		symbol: '$',
+		position: 'left',
+		thousandSeparator: ',',
+		decimalSeparator: '.',
+		decimals: 2,
+	},
 };
