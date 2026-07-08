@@ -81,10 +81,14 @@ final class SettingsPage {
 			'version'      => Package::get_version(),
 		];
 
+		// Depend on `wc-settings` so WooCommerce prints window.wcSettings (store
+		// currency, locale, etc.); the client reads currency from there instead
+		// of a duplicated payload. If the handle is unavailable the client falls
+		// back to sane defaults.
 		wp_enqueue_script(
 			self::SCRIPT_HANDLE,
 			Package::get_url() . '/build/scripts/admin-react.js',
-			$asset['dependencies'] ?? [],
+			array_merge( $asset['dependencies'] ?? [], [ 'wc-settings' ] ),
 			$asset['version'] ?? Package::get_version(),
 			true
 		);
@@ -95,22 +99,16 @@ final class SettingsPage {
 			Package::get_path() . '/languages'
 		);
 
+		// Currency formatting reads WooCommerce's own client-side currency
+		// settings (window.wcSettings) instead of duplicating them here; the
+		// bundle depends on the `wc-settings` script (added by the WooCommerce
+		// dependency-extraction plugin at build time), so the global is present.
 		$config_json = wp_json_encode(
 			[
 				'restBase'      => '/wc/v3/subscriptions-engine/plans',
 				'extensionSlug' => 'woocommerce-subscriptions-lite',
 				'defaultStatus' => 'active',
 				'definitions'   => $this->get_plan_data_definitions(),
-				'currency'      => [
-					'code'              => get_woocommerce_currency(),
-					// The symbol getter returns HTML entities; decode server-side
-					// so JS can render it as plain text.
-					'symbol'            => html_entity_decode( get_woocommerce_currency_symbol() ),
-					'position'          => get_option( 'woocommerce_currency_pos', 'left' ),
-					'thousandSeparator' => wc_get_price_thousand_separator(),
-					'decimalSeparator'  => wc_get_price_decimal_separator(),
-					'decimals'          => wc_get_price_decimals(),
-				],
 			]
 		);
 
@@ -230,6 +228,10 @@ final class SettingsPage {
 				[
 					'value' => 'price',
 					'label' => __( 'Fixed price', 'woocommerce-subscriptions-lite' ),
+				],
+				[
+					'value' => 'bogo',
+					'label' => __( 'Buy one, get one', 'woocommerce-subscriptions-lite' ),
 				],
 			],
 			'pricing_scopes' => [
