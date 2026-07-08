@@ -49,18 +49,18 @@ final class ProductPlansPanel {
 	/**
 	 * Product-data tab id.
 	 */
-	const TAB_ID = 'wc_subscriptions_lite';
+	const TAB_ID = 'woocommerce_subscriptions_lite';
 
 	/**
 	 * Panel `<div>` id; the tab's `target` so WooCommerce's product-data JS
 	 * shows and hides the right panel.
 	 */
-	const PANEL_ID = 'wc_subscriptions_lite_product_data';
+	const PANEL_ID = 'woocommerce_subscriptions_lite_product_data';
 
 	/**
 	 * Nonce action + field for the panel save.
 	 */
-	const NONCE_ACTION = 'wc_subscriptions_lite_product_plans';
+	const NONCE_ACTION = 'woocommerce_subscriptions_lite_save_product_plans';
 	const NONCE_FIELD  = '_wcsl_product_plans_nonce';
 
 	/**

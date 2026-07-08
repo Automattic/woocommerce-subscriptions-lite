@@ -38,7 +38,7 @@ final class BootstrapTest extends LiteIntegrationTestCase {
 	public function test_the_admin_module_stays_out_of_a_front_end_request(): void {
 		$this->assertFalse( is_admin(), 'The suite runs as a front-end request.' );
 		$this->assertFalse(
-			has_action( 'admin_post_wc_subscriptions_lite_renew_now' ),
+			has_action( 'admin_post_woocommerce_subscriptions_lite_renew_now' ),
 			'The admin action handlers are not registered outside wp-admin.'
 		);
 	}
