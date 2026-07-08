@@ -14,8 +14,10 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Cart;
 
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Plan;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\ValueObject\PricingPolicy;
+use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\PlanRepository;
 use Automattic\WooCommerce\SubscriptionsLite\Cart\Blocks\StoreApiExtension;
 use Automattic\WooCommerce\SubscriptionsLite\Cart\CartPlanHooks;
+use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ApplicabilityStore;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ProductApplicability;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
@@ -68,7 +70,7 @@ final class StoreApiExtensionTest extends LiteIntegrationTestCase {
 		$product = new WC_Product_Simple();
 		$product->set_regular_price( '20.00' );
 
-		$data = ( new StoreApiExtension() )->cart_item_data(
+		$data = ( new StoreApiExtension() )->get_item_data(
 			[
 				CartPlanHooks::CART_ITEM_KEY => (int) $plan->get_id(),
 				'data'                       => $product,
@@ -84,7 +86,7 @@ final class StoreApiExtensionTest extends LiteIntegrationTestCase {
 	}
 
 	public function test_per_item_payload_is_empty_for_a_one_time_line(): void {
-		$data = ( new StoreApiExtension() )->cart_item_data( [ 'data' => new WC_Product_Simple() ] );
+		$data = ( new StoreApiExtension() )->get_item_data( [ 'data' => new WC_Product_Simple() ] );
 
 		$this->assertSame( [], $data );
 	}
@@ -99,7 +101,7 @@ final class StoreApiExtensionTest extends LiteIntegrationTestCase {
 		$_POST[ CartPlanHooks::CART_ITEM_KEY ] = (string) $plan_id;
 		WC()->cart->add_to_cart( $product_id );
 
-		$this->assertTrue( ( new StoreApiExtension() )->cart_data()['has_subscriptions'] );
+		$this->assertTrue( ( new StoreApiExtension() )->get_cart_data()['has_subscriptions'] );
 	}
 
 	public function test_cart_flag_is_false_for_a_one_time_cart(): void {
@@ -109,12 +111,14 @@ final class StoreApiExtensionTest extends LiteIntegrationTestCase {
 
 		WC()->cart->add_to_cart( $product_id );
 
-		$this->assertFalse( ( new StoreApiExtension() )->cart_data()['has_subscriptions'] );
+		$this->assertFalse( ( new StoreApiExtension() )->get_cart_data()['has_subscriptions'] );
 	}
 
 	public function test_cart_flag_is_false_when_the_plan_no_longer_resolves(): void {
 		// A plan line whose plan can no longer be found is priced as one-time,
 		// so the flag must agree - resolution, not the raw meta, drives it.
+		// Delete the plan after add-to-cart to drive the real find()-returns-null
+		// path rather than a stubbed finder.
 		$product = new WC_Product_Simple();
 		$product->set_regular_price( '20.00' );
 		$product_id = (int) $product->save();
@@ -123,8 +127,8 @@ final class StoreApiExtensionTest extends LiteIntegrationTestCase {
 
 		$_POST[ CartPlanHooks::CART_ITEM_KEY ] = (string) $plan_id;
 		WC()->cart->add_to_cart( $product_id );
+		( new PlanRepository() )->delete( $plan_id, Package::EXTENSION_SLUG );
 
-		$unresolvable = new StoreApiExtension( static fn ( int $id ) => null );
-		$this->assertFalse( $unresolvable->cart_data()['has_subscriptions'] );
+		$this->assertFalse( ( new StoreApiExtension() )->get_cart_data()['has_subscriptions'] );
 	}
 }

@@ -38,39 +38,36 @@ final class StoreApiExtension {
 	private const DATA_NAMESPACE = Package::EXTENSION_SLUG;
 
 	/**
-	 * Plan finder by id, scoped to Lite.
+	 * Reads Lite's selling plans by id.
 	 *
-	 * @var callable(int): ?Plan
+	 * @var PlanRepository
 	 */
-	private $plan_finder;
+	private PlanRepository $plans;
 
 	/**
-	 * Construct the extension with its plan-finder seam.
+	 * Build the extension over the plan store it reads.
 	 *
-	 * @param (callable(int): ?Plan)|null $plan_finder Plan-by-id finder; defaults to `PlanRepository::find()` scoped to Lite.
+	 * @param PlanRepository|null $plans Plan store; defaults to a new repository.
 	 */
-	public function __construct( ?callable $plan_finder = null ) {
-		$this->plan_finder = $plan_finder ?? static function ( int $plan_id ): ?Plan {
-			return ( new PlanRepository() )->find( $plan_id, Package::EXTENSION_SLUG );
-		};
+	public function __construct( ?PlanRepository $plans = null ) {
+		$this->plans = $plans ?? new PlanRepository();
 	}
 
 	/**
-	 * Register the endpoint data, if core's Store API is present.
+	 * Register the per-item and cart-level endpoint data, if core's Store API is
+	 * present.
 	 */
-	public static function register(): void {
+	public function register(): void {
 		if ( ! function_exists( 'woocommerce_store_api_register_endpoint_data' ) ) {
 			return;
 		}
-
-		$instance = new self();
 
 		woocommerce_store_api_register_endpoint_data(
 			[
 				'endpoint'        => \Automattic\WooCommerce\StoreApi\Schemas\V1\CartItemSchema::IDENTIFIER,
 				'namespace'       => self::DATA_NAMESPACE,
-				'data_callback'   => [ $instance, 'cart_item_data' ],
-				'schema_callback' => [ $instance, 'cart_item_schema' ],
+				'data_callback'   => [ $this, 'get_item_data' ],
+				'schema_callback' => [ $this, 'get_item_schema' ],
 				'schema_type'     => ARRAY_A,
 			]
 		);
@@ -79,21 +76,21 @@ final class StoreApiExtension {
 			[
 				'endpoint'        => \Automattic\WooCommerce\StoreApi\Schemas\V1\CartSchema::IDENTIFIER,
 				'namespace'       => self::DATA_NAMESPACE,
-				'data_callback'   => [ $instance, 'cart_data' ],
-				'schema_callback' => [ $instance, 'cart_schema' ],
+				'data_callback'   => [ $this, 'get_cart_data' ],
+				'schema_callback' => [ $this, 'get_cart_schema' ],
 				'schema_type'     => ARRAY_A,
 			]
 		);
 	}
 
 	/**
-	 * Per-item payload for a plan line; `[]` for one-time lines.
+	 * Build the per-item payload for a plan line; `[]` for one-time lines.
 	 *
 	 * @param array<string, mixed> $cart_item Cart item row.
 	 * @return array<string, mixed>
 	 */
-	public function cart_item_data( array $cart_item ): array {
-		$plan = $this->line_plan( $cart_item );
+	public function get_item_data( array $cart_item ): array {
+		$plan = $this->resolve_line_plan( $cart_item );
 		if ( ! $plan instanceof Plan ) {
 			return [];
 		}
@@ -113,11 +110,11 @@ final class StoreApiExtension {
 	}
 
 	/**
-	 * Schema for the per-item payload.
+	 * Describe the per-item payload for the Store API schema.
 	 *
 	 * @return array<string, mixed>
 	 */
-	public function cart_item_schema(): array {
+	public function get_item_schema(): array {
 		return [
 			'plan_id'          => [
 				'description' => __( 'Selling plan id applied to this line.', 'woocommerce-subscriptions-lite' ),
@@ -159,19 +156,19 @@ final class StoreApiExtension {
 	}
 
 	/**
-	 * Cart-level flag: whether any line is a subscription. The "Total due today"
-	 * relabel trigger. Not a recurring-totals array.
+	 * Build the cart-level payload: whether any line is a subscription. The
+	 * "Total due today" relabel trigger. Not a recurring-totals array.
 	 *
 	 * @return array<string, mixed>
 	 */
-	public function cart_data(): array {
+	public function get_cart_data(): array {
 		$has  = false;
 		$cart = function_exists( 'WC' ) && WC()->cart ? WC()->cart->get_cart() : [];
 		foreach ( $cart as $cart_item ) {
 			// Resolve the plan (not just the raw meta) so the flag agrees with
 			// pricing: a line whose plan no longer resolves is priced as one-time
 			// and must not read as a subscription here.
-			if ( $this->line_plan( $cart_item ) instanceof Plan ) {
+			if ( $this->resolve_line_plan( $cart_item ) instanceof Plan ) {
 				$has = true;
 				break;
 			}
@@ -180,11 +177,11 @@ final class StoreApiExtension {
 	}
 
 	/**
-	 * Schema for the cart-level flag.
+	 * Describe the cart-level payload for the Store API schema.
 	 *
 	 * @return array<string, mixed>
 	 */
-	public function cart_schema(): array {
+	public function get_cart_schema(): array {
 		return [
 			'has_subscriptions' => [
 				'description' => __( 'Whether the cart contains at least one subscription line.', 'woocommerce-subscriptions-lite' ),
@@ -196,16 +193,17 @@ final class StoreApiExtension {
 	}
 
 	/**
-	 * Resolve the `Plan` for a cart item, or null for one-time / unresolved.
+	 * Resolve the `Plan` for a cart item, or null for a one-time line or a plan
+	 * that no longer resolves. Scoped to Lite's own plans.
 	 *
 	 * @param array<string, mixed> $cart_item Cart item row.
 	 * @return Plan|null
 	 */
-	private function line_plan( array $cart_item ): ?Plan {
+	private function resolve_line_plan( array $cart_item ): ?Plan {
 		$plan_id = isset( $cart_item[ CartPlanHooks::CART_ITEM_KEY ] ) ? (int) $cart_item[ CartPlanHooks::CART_ITEM_KEY ] : 0;
 		if ( $plan_id <= 0 ) {
 			return null;
 		}
-		return ( $this->plan_finder )( $plan_id );
+		return $this->plans->find( $plan_id, Package::EXTENSION_SLUG );
 	}
 }
