@@ -82,4 +82,20 @@ final class ProductPlanResolver {
 
 		return [];
 	}
+
+	/**
+	 * Whether a plan applies to a product - it is among the plans the PDP picker
+	 * renders for it. The add-to-cart applicability gate.
+	 *
+	 * @param int $plan_id    Plan id to check.
+	 * @param int $product_id Product (or variation) id.
+	 */
+	public function plan_applies_to_product( int $plan_id, int $product_id ): bool {
+		foreach ( $this->get_plans_for_product( $product_id ) as $plan ) {
+			if ( $plan->get_id() === $plan_id ) {
+				return true;
+			}
+		}
+		return false;
+	}
 }

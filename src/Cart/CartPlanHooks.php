@@ -120,11 +120,11 @@ final class CartPlanHooks {
 	 * @param array<string, mixed> $cart_item_data Store API cart item data body.
 	 */
 	public function validate_plan( bool $passed, int $product_id, int $quantity = 0, int $variation_id = 0, array $variations = [], array $cart_item_data = [] ): bool {
-		$plan_id = $this->candidate_plan_id( $cart_item_data );
+		$plan_id = $this->get_candidate_plan_id_for_cart_item( $cart_item_data );
 		if ( null === $plan_id ) {
 			return $passed;
 		}
-		if ( ! $this->plan_applies( $plan_id, $product_id ) ) {
+		if ( ! $this->resolver->plan_applies_to_product( $plan_id, $product_id ) ) {
 			wc_add_notice(
 				__( 'The selected subscription plan is not available for this product.', 'woocommerce-subscriptions-lite' ),
 				'error'
@@ -135,22 +135,26 @@ final class CartPlanHooks {
 	}
 
 	/**
-	 * Attach a validated plan id to the cart item.
+	 * Validate the selected plan and attach it to the cart item. This method -
+	 * not `validate_plan()` - is what makes the stored key trustworthy, so it
+	 * cannot assume the input is already clean.
 	 *
-	 * Any client-supplied `_selling_plan_id` is stripped first, then re-added
-	 * only when it passes applicability - so a crafted Store API `cart_item_data`
-	 * body (which seeds this accumulator verbatim and does not populate `$_POST`)
-	 * cannot inject an unvalidated plan. This is also the defense for trusted
-	 * server-side adds that bypass the validation filter.
+	 * `validate_plan()` only rejects (with a notice) on the customer-facing add
+	 * paths and never modifies this accumulator, and it does not fire at all on a
+	 * direct `WC()->cart->add_to_cart()`. So any client-supplied
+	 * `_selling_plan_id` - which the Store API seeds into this accumulator from
+	 * the request body verbatim - is dropped first and re-added only when it
+	 * applies to the product. The stored value is one validated here, on every
+	 * add path.
 	 *
 	 * @param array<string, mixed> $cart_item_data Cart item data accumulator.
 	 * @param int                  $product_id     Parent product id (plans attach to the parent).
 	 * @return array<string, mixed>
 	 */
 	public function add_cart_item_data( array $cart_item_data, int $product_id ): array {
-		$plan_id = $this->candidate_plan_id( $cart_item_data );
+		$plan_id = $this->get_candidate_plan_id_for_cart_item( $cart_item_data );
 		unset( $cart_item_data[ self::CART_ITEM_KEY ] );
-		if ( null !== $plan_id && $this->plan_applies( $plan_id, $product_id ) ) {
+		if ( null !== $plan_id && $this->resolver->plan_applies_to_product( $plan_id, $product_id ) ) {
 			$cart_item_data[ self::CART_ITEM_KEY ] = $plan_id;
 		}
 		return $cart_item_data;
@@ -268,7 +272,9 @@ final class CartPlanHooks {
 		if ( ! $plan instanceof Plan ) {
 			return $html;
 		}
-		return $html . ' ' . esc_html( PlanOptionFormatter::cadence_suffix( $plan ) );
+		// Wrap the suffix so it is styleable and does not inherit stray styling
+		// from a preceding closed price element.
+		return $html . ' <span class="wc-subscriptions-lite-cadence">' . esc_html( PlanOptionFormatter::cadence_suffix( $plan ) ) . '</span>';
 	}
 
 	/**
@@ -287,32 +293,16 @@ final class CartPlanHooks {
 	}
 
 	/**
-	 * Whether `$plan_id` is among the plans that apply to `$product_id` under
-	 * its Lite applicability mode - the same set the PDP picker renders.
-	 *
-	 * @param int $plan_id    Candidate plan id (from POST or the Store API body).
-	 * @param int $product_id Parent product id being added.
-	 */
-	private function plan_applies( int $plan_id, int $product_id ): bool {
-		foreach ( $this->resolver->get_plans_for_product( $product_id ) as $plan ) {
-			if ( $plan instanceof Plan && $plan->get_id() === $plan_id ) {
-				return true;
-			}
-		}
-		return false;
-	}
-
-	/**
 	 * The selected plan id for this add-to-cart, from `$_POST` (classic + AJAX)
 	 * or, failing that, the Store API `cart_item_data` body. Null when neither
 	 * carries a positive id. Whichever source it comes from, the value is only
-	 * ever trusted after {@see self::plan_applies()} - this method just reads and
-	 * sanitizes the candidate.
+	 * ever trusted after `ProductPlanResolver::plan_applies_to_product()` - this
+	 * method just reads and sanitizes the candidate.
 	 *
 	 * @param array<string, mixed> $cart_item_data Store API cart item data body.
 	 */
-	private function candidate_plan_id( array $cart_item_data ): ?int {
-		$posted = self::posted_plan_id();
+	private function get_candidate_plan_id_for_cart_item( array $cart_item_data ): ?int {
+		$posted = self::get_posted_plan_id();
 		if ( null !== $posted ) {
 			return $posted;
 		}
@@ -332,7 +322,7 @@ final class CartPlanHooks {
 	 * No nonce: WooCommerce's add-to-cart form carries none by design; the
 	 * validation hook defends tampered values.
 	 */
-	private static function posted_plan_id(): ?int {
+	private static function get_posted_plan_id(): ?int {
 		// phpcs:disable WordPress.Security.NonceVerification.Missing, WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- Woo add-to-cart carries no nonce by design; absint() sanitizes.
 		$raw = isset( $_POST[ self::CART_ITEM_KEY ] ) && is_string( $_POST[ self::CART_ITEM_KEY ] )
 			? wp_unslash( $_POST[ self::CART_ITEM_KEY ] )

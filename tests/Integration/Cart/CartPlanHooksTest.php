@@ -408,7 +408,7 @@ final class CartPlanHooksTest extends LiteIntegrationTestCase {
 
 		$html = ( new CartPlanHooks() )->cart_item_price( '<span>$18.00</span>', $cart_item );
 
-		$this->assertStringContainsString( '/ month', $html );
+		$this->assertStringContainsString( '<span class="wc-subscriptions-lite-cadence">/ month</span>', $html, 'The cadence is wrapped so it can be styled.' );
 	}
 
 	public function test_copy_to_line_item_meta_writes_the_plan_id(): void {
