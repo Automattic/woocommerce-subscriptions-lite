@@ -2,20 +2,20 @@
 // merchant theme's colors and typography; these rules cover layout and
 // spacing (base-styles tokens), nothing visual.
 
-@import "@wordpress/base-styles/variables";
+@use "@wordpress/base-styles/variables";
 
 .wc-subscriptions-lite-plan-picker {
 	border: 0;
-	margin: 0 0 $grid-unit-20;
+	margin: 0 0 variables.$grid-unit-20;
 	min-width: 0;
 	padding: 0;
 
 	&__modes {
 		display: flex;
 		flex-direction: column;
-		gap: $grid-unit-05;
+		gap: variables.$grid-unit-05;
 		list-style: none;
-		margin: 0 0 $grid-unit-10;
+		margin: 0 0 variables.$grid-unit-10;
 		padding: 0;
 	}
 
@@ -24,14 +24,14 @@
 	}
 
 	&__plans {
-		margin: 0 0 $grid-unit-10;
+		margin: 0 0 variables.$grid-unit-10;
 	}
 
 	// Ancestor-qualified (`& &__`) so the tight gap outranks WooCommerce's
 	// block-theme `.woocommerce-page label { margin-bottom: 0.7em; }`.
 	& &__plans-label {
 		display: block;
-		margin: 0 0 $grid-unit-05;
+		margin: 0 0 variables.$grid-unit-05;
 	}
 
 	&__select {
@@ -41,6 +41,6 @@
 	}
 
 	&__noscript {
-		margin: 0 0 $grid-unit-10;
+		margin: 0 0 variables.$grid-unit-10;
 	}
 }

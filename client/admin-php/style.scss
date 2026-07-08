@@ -8,9 +8,9 @@
  * @wordpress/base-styles.
  */
 
-@import "@wordpress/base-styles/colors";
-@import "@wordpress/base-styles/variables";
-@import "product-plans-panel";
+@use "@wordpress/base-styles/colors";
+@use "@wordpress/base-styles/variables";
+@use "product-plans-panel";
 
 /*
  * Subscription-status palette.
@@ -35,7 +35,7 @@ $status-pending-cancellation-fg: #b45917;
  * the subscription-status colours above.
  */
 .wc-subs-lite-status-badge {
-	font-size: $default-font-size;
+	font-size: variables.$default-font-size;
 
 	&.wc-subs-lite-status-badge--active {
 		background: $status-active-bg;
@@ -71,7 +71,7 @@ $status-pending-cancellation-fg: #b45917;
 
 		&::before {
 			content: "| ";
-			color: $gray-400;
+			color: colors.$gray-400;
 		}
 	}
 
@@ -87,11 +87,11 @@ $status-pending-cancellation-fg: #b45917;
  * `.wp-core-ui .button-link` / `.button` colour so the red wins on both views.
  */
 .wc-subs-lite-admin .wc-subs-lite-cancel-link {
-	color: $alert-red;
+	color: colors.$alert-red;
 
 	&:hover,
 	&:focus {
-		color: $alert-red;
+		color: colors.$alert-red;
 	}
 }
 
@@ -115,7 +115,7 @@ $status-pending-cancellation-fg: #b45917;
 
 /* Billing-history table spacing below the details block. */
 .wc-subs-lite-history-table {
-	margin-top: $grid-unit-10;
+	margin-top: variables.$grid-unit-10;
 }
 
 /* Detail page Actions box: links stacked one per line, like the list row. */
@@ -125,7 +125,7 @@ $status-pending-cancellation-fg: #b45917;
 	list-style: none;
 
 	li {
-		margin-bottom: $grid-unit-10;
+		margin-bottom: variables.$grid-unit-10;
 
 		&:last-child {
 			margin-bottom: 0;
