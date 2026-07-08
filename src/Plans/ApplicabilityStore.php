@@ -168,11 +168,11 @@ final class ApplicabilityStore {
 
 		$found = [];
 		foreach ( $this->catalog->get_plans( $plan_ids ) as $plan ) {
-			$found[] = (int) $plan->get_id();
+			$found[ (int) $plan->get_id() ] = true;
 		}
 
 		foreach ( $plan_ids as $plan_id ) {
-			if ( ! in_array( $plan_id, $found, true ) ) {
+			if ( ! isset( $found[ $plan_id ] ) ) {
 				throw new InvalidArgumentException(
 					esc_html( sprintf( 'ApplicabilityStore: plan %d does not exist for extension "%s".', $plan_id, Package::EXTENSION_SLUG ) )
 				);
