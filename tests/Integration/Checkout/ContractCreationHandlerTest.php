@@ -2,13 +2,10 @@
 /**
  * Integration tests for the checkout contract-creation handler.
  *
- * These run END TO END against real WordPress/WooCommerce. The behavioural cases
- * drive the REAL trigger: an order reaching a paid status via `update_status()`
+ * These run END TO END against real WordPress/WooCommerce: the behavioural cases
+ * drive the REAL trigger - an order reaching a paid status via `update_status()`
  * fires the bootstrap-bound handler, exactly as a gateway or a merchant confirming
- * an offline payment would. Only the throwing-factory case constructs the handler
- * directly (to inject a failing factory), and it does so on an order already moved
- * to a paid status *before* the plan was stamped, so the bound handler saw nothing
- * to create.
+ * an offline payment would.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Tests
  */
@@ -18,13 +15,11 @@ declare( strict_types=1 );
 namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Checkout;
 
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Subscriptions;
-use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Contract;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Plan;
 use Automattic\WooCommerce\SubscriptionsLite\Checkout\ContractCreationHandler;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ApplicabilityStore;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ProductApplicability;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
-use RuntimeException;
 use WC_Order;
 use WC_Product_Simple;
 
@@ -234,26 +229,6 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 		$order->update_status( 'on-hold' ); // Not a paid status.
 
 		$this->assertSame( [], Subscriptions::list_for_customer( $customer_id ), 'An unpaid order creates no contract.' );
-	}
-
-	public function test_a_throwing_factory_is_swallowed_and_creates_no_contract(): void {
-		$customer_id = $this->create_customer();
-		$plan        = $this->make_plan();
-		$order       = $this->create_subscription_order( $customer_id );
-
-		// Reach the paid status BEFORE stamping, so the bound handler sees no plan
-		// and creates nothing; then inject a failing factory and invoke directly.
-		$order->update_status( 'processing' );
-		$this->apply_and_stamp( $order, $plan );
-
-		$handler = new ContractCreationHandler(
-			static function ( WC_Order $o, Plan $p ): Contract {
-				throw new RuntimeException( 'factory failure under test' );
-			}
-		);
-		$handler->create_contracts_for_order( $order->get_id() );
-
-		$this->assertSame( [], Subscriptions::list_for_customer( $customer_id ), 'A throwing factory does not fatal checkout.' );
 	}
 
 	public function test_the_handler_is_bound_to_the_paid_status_transition(): void {

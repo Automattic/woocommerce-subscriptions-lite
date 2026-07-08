@@ -38,56 +38,10 @@ defined( 'ABSPATH' ) || exit;
 /**
  * Render the order's subscription (or a deferral warning) below the order table.
  *
- * Construct via the no-arg constructor in production; tests inject the contract /
- * plan / url seams to render without the full checkout stack.
+ * Reads the contract through the engine facade and the plan through the Lite
+ * catalog; covered by integration tests that render a real order end to end.
  */
 final class OrderReceived {
-
-	/**
-	 * Contract finder. Production: `Subscriptions::get_for_customer()` (facade, ownership-checked).
-	 *
-	 * @var callable(int, int): ?Contract
-	 */
-	private $contract_finder;
-
-	/**
-	 * Plan finder. Production: the Lite-scoped catalog read.
-	 *
-	 * @var callable(int): ?Plan
-	 */
-	private $plan_finder;
-
-	/**
-	 * Portal detail-URL builder. Production: `Endpoints::detail_url()`.
-	 *
-	 * @var callable(int): string
-	 */
-	private $detail_url;
-
-	/**
-	 * Construct the renderer.
-	 *
-	 * @param (callable(int, int): ?Contract)|null $contract_finder Contract finder; defaults to the facade.
-	 * @param (callable(int): ?Plan)|null          $plan_finder     Plan finder; defaults to the Lite catalog read.
-	 * @param (callable(int): string)|null         $detail_url      Portal URL builder; defaults to `Endpoints`.
-	 */
-	public function __construct(
-		?callable $contract_finder = null,
-		?callable $plan_finder = null,
-		?callable $detail_url = null
-	) {
-		$this->contract_finder = $contract_finder ?? static function ( int $contract_id, int $customer_id ): ?Contract {
-			return Subscriptions::get_for_customer( $contract_id, $customer_id );
-		};
-		$this->plan_finder     = $plan_finder ?? static function ( int $plan_id ): ?Plan {
-			$plans = ( new SellingPlans( [ Package::EXTENSION_SLUG ] ) )->get_plans( [ $plan_id ] );
-			$plan  = reset( $plans );
-			return $plan instanceof Plan ? $plan : null;
-		};
-		$this->detail_url      = $detail_url ?? static function ( int $contract_id ): string {
-			return ( new Endpoints() )->detail_url( $contract_id );
-		};
-	}
 
 	/**
 	 * Wire the order-details hook. Called once from the bootstrap.
@@ -109,7 +63,7 @@ final class OrderReceived {
 
 		$contract_id = (int) $order->get_meta( OrderLinkage::META_CONTRACT_ID );
 		if ( $contract_id > 0 ) {
-			$contract = ( $this->contract_finder )( $contract_id, $order->get_customer_id() );
+			$contract = Subscriptions::get_for_customer( $contract_id, $order->get_customer_id() );
 			if ( $contract instanceof Contract ) {
 				$this->render_table( $contract );
 				return;
@@ -135,8 +89,8 @@ final class OrderReceived {
 	private function render_table( Contract $contract ): void {
 		$contract_id  = (int) $contract->get_id();
 		$status       = (string) $contract->get_status();
-		$url          = ( $this->detail_url )( $contract_id );
-		$plan         = ( $this->plan_finder )( $contract->get_selling_plan_id() );
+		$url          = ( new Endpoints() )->detail_url( $contract_id );
+		$plan         = $this->find_plan( $contract->get_selling_plan_id() );
 		$cadence      = $plan instanceof Plan ? PlanOptionFormatter::cadence_suffix( $plan ) : '';
 		$amount       = wc_price( (float) $contract->get_billing_total(), [ 'currency' => $contract->get_currency() ] );
 		$next_gmt     = $contract->get_next_payment_gmt();
@@ -190,6 +144,18 @@ final class OrderReceived {
 			</tbody>
 		</table>
 		<?php
+	}
+
+	/**
+	 * The plan behind a contract, read from the Lite catalog, or null if gone.
+	 *
+	 * @param int $plan_id The selling plan id.
+	 */
+	private function find_plan( int $plan_id ): ?Plan {
+		$plans = ( new SellingPlans( [ Package::EXTENSION_SLUG ] ) )->get_plans( [ $plan_id ] );
+		$plan  = reset( $plans );
+
+		return $plan instanceof Plan ? $plan : null;
 	}
 
 	/**

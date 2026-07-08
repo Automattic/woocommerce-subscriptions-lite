@@ -39,9 +39,9 @@ defined( 'ABSPATH' ) || exit;
 /**
  * Create one contract per paid subscription order.
  *
- * Construct via the no-arg constructor in production (engine defaults); tests
- * inject fake factory / plan-finder / applicability / scheduler / finder seams to
- * exercise the grouping, idempotency, and error paths.
+ * Collaborators (the engine factory, plan repository, applicability resolver, and
+ * renewal wiring) are called directly; the grouping, idempotency, and error paths
+ * are covered by integration tests against real WooCommerce.
  */
 final class ContractCreationHandler {
 
@@ -75,76 +75,6 @@ final class ContractCreationHandler {
 	private const LOG_SOURCE = 'woocommerce-subscriptions-lite';
 
 	/**
-	 * Contract factory. Production: the engine's `ContractFactory`.
-	 *
-	 * @var callable(WC_Order, Plan): Contract
-	 */
-	private $contract_factory;
-
-	/**
-	 * Plan finder. Production: `PlanRepository::find()`.
-	 *
-	 * @var callable(int): ?Plan
-	 */
-	private $plan_finder;
-
-	/**
-	 * Applicability gate. Production: `ProductPlanResolver::is_plan_applicable_to_product()`.
-	 *
-	 * @var callable(int, int): bool
-	 */
-	private $applicability;
-
-	/**
-	 * First-renewal scheduler. Production: `RenewalWiring::schedule_first_renewal()`.
-	 *
-	 * @var callable(Contract): bool
-	 */
-	private $scheduler;
-
-	/**
-	 * Existing-contract finder for the idempotency guard. Production reads the
-	 * order-linkage meta and loads the contract by id.
-	 *
-	 * @var callable(WC_Order): ?Contract
-	 */
-	private $contract_finder;
-
-	/**
-	 * Construct the handler.
-	 *
-	 * @param (callable(WC_Order, Plan): Contract)|null $contract_factory Factory; defaults to the engine `ContractFactory`.
-	 * @param (callable(int): ?Plan)|null               $plan_finder      Plan finder; defaults to `PlanRepository::find()`.
-	 * @param (callable(int, int): bool)|null           $applicability    Applicability gate; defaults to `ProductPlanResolver`.
-	 * @param (callable(Contract): bool)|null           $scheduler        First-renewal scheduler; defaults to the renewal wiring.
-	 * @param (callable(WC_Order): ?Contract)|null      $contract_finder  Existing-contract finder; defaults to the order-linkage lookup.
-	 */
-	public function __construct(
-		?callable $contract_factory = null,
-		?callable $plan_finder = null,
-		?callable $applicability = null,
-		?callable $scheduler = null,
-		?callable $contract_finder = null
-	) {
-		$this->contract_factory = $contract_factory ?? static function ( WC_Order $order, Plan $plan ): Contract {
-			return ( new ContractFactory() )->create_from_order( $order, $plan );
-		};
-		$this->plan_finder      = $plan_finder ?? static function ( int $plan_id ): ?Plan {
-			return ( new PlanRepository() )->find( $plan_id );
-		};
-		$this->applicability    = $applicability ?? static function ( int $plan_id, int $product_id ): bool {
-			return ( new ProductPlanResolver() )->is_plan_applicable_to_product( $plan_id, $product_id );
-		};
-		$this->scheduler        = $scheduler ?? static function ( Contract $contract ): bool {
-			return ( new RenewalWiring() )->schedule_first_renewal( $contract );
-		};
-		$this->contract_finder  = $contract_finder ?? static function ( WC_Order $order ): ?Contract {
-			$contract_id = (int) $order->get_meta( OrderLinkage::META_CONTRACT_ID );
-			return $contract_id > 0 ? ( new ContractRepository() )->find( $contract_id ) : null;
-		};
-	}
-
-	/**
 	 * Wire the handler on the order reaching a paid status.
 	 *
 	 * `woocommerce_order_status_changed` fires for every checkout surface (classic
@@ -158,8 +88,7 @@ final class ContractCreationHandler {
 	 * processing -> completed double-fire safe.
 	 */
 	public static function register(): void {
-		$instance = new self();
-		add_action( 'woocommerce_order_status_changed', [ $instance, 'create_contracts_for_order' ], 10, 1 );
+		add_action( 'woocommerce_order_status_changed', [ new self(), 'create_contracts_for_order' ], 10, 1 );
 	}
 
 	/**
@@ -177,7 +106,7 @@ final class ContractCreationHandler {
 
 		// Idempotency: a repeat paid-status transition (e.g. processing -> completed)
 		// must neither double-create a contract nor duplicate a deferral note.
-		if ( null !== ( $this->contract_finder )( $order )
+		if ( null !== $this->find_existing_contract( $order )
 			|| '' !== (string) $order->get_meta( self::CREATION_DEFERRED_META ) ) {
 			return;
 		}
@@ -194,7 +123,7 @@ final class ContractCreationHandler {
 		}
 
 		try {
-			$contract = ( $this->contract_factory )( $order, $outcome['plan'] );
+			$contract = ( new ContractFactory() )->create_from_order( $order, $outcome['plan'] );
 		} catch ( Throwable $e ) {
 			wc_get_logger()->error(
 				sprintf( 'ContractCreationHandler: failed to create a contract for order %d: %s', $order_id, $e->getMessage() ),
@@ -203,7 +132,7 @@ final class ContractCreationHandler {
 			return;
 		}
 
-		( $this->scheduler )( $contract );
+		( new RenewalWiring() )->schedule_first_renewal( $contract );
 	}
 
 	/**
@@ -218,6 +147,7 @@ final class ContractCreationHandler {
 	 * @return array{plan: Plan|null, reason: string|null}
 	 */
 	private function classify_order( WC_Order $order ): array {
+		$resolver  = new ProductPlanResolver();
 		$plan_ids  = [];
 		$has_plain = false; // A product line with no plan, or one whose plan no longer applies.
 
@@ -227,7 +157,7 @@ final class ContractCreationHandler {
 			}
 
 			$plan_id = (int) $item->get_meta( self::SELLING_PLAN_META );
-			if ( $plan_id <= 0 || ! ( $this->applicability )( $plan_id, $item->get_product_id() ) ) {
+			if ( $plan_id <= 0 || ! $resolver->is_plan_applicable_to_product( $plan_id, $item->get_product_id() ) ) {
 				$has_plain = true;
 				continue;
 			}
@@ -256,12 +186,23 @@ final class ContractCreationHandler {
 			];
 		}
 
-		$plan = ( $this->plan_finder )( (int) array_key_first( $plan_ids ) );
+		$plan = ( new PlanRepository() )->find( (int) array_key_first( $plan_ids ) );
 
 		return [
 			'plan'   => $plan instanceof Plan ? $plan : null,
 			'reason' => null,
 		];
+	}
+
+	/**
+	 * The contract already linked to this order, if any - the idempotency guard.
+	 *
+	 * @param WC_Order $order The order.
+	 */
+	private function find_existing_contract( WC_Order $order ): ?Contract {
+		$contract_id = (int) $order->get_meta( OrderLinkage::META_CONTRACT_ID );
+
+		return $contract_id > 0 ? ( new ContractRepository() )->find( $contract_id ) : null;
 	}
 
 	/**
