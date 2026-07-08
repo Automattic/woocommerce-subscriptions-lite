@@ -16,6 +16,7 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Admin;
 
+use Automattic\WooCommerce\SubscriptionsLite\Admin\PageController;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\RowActionController;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\RowActionResult;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
@@ -188,6 +189,21 @@ final class RowActionControllerTest extends LiteIntegrationTestCase {
 
 		$this->assertSame( RowActionResult::ERROR, $result->type(), 'No contract id resolves to not found.' );
 		$this->assertSame( [], $cancel_calls, 'A missing contract id never reaches the facade.' );
+	}
+
+	public function test_redirect_target_returns_the_origin_page_and_falls_back_to_the_list(): void {
+		$controller = $this->make_controller();
+		$call       = function ( $referer ) {
+			return $this->redirect_target( $referer );
+		};
+
+		// An action triggered from the detail page returns to the detail page, not the list.
+		$detail = admin_url( 'admin.php?page=wc-subscriptions-lite&action=view&id=7' );
+		$this->assertSame( $detail, $call->call( $controller, $detail ) );
+
+		// No local referer (missing or empty) falls back to the list.
+		$this->assertSame( PageController::page_url(), $call->call( $controller, false ) );
+		$this->assertSame( PageController::page_url(), $call->call( $controller, '' ) );
 	}
 
 	public function test_register_binds_the_admin_post_handlers(): void {

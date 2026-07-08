@@ -2,10 +2,12 @@
 /**
  * SubscriptionData meta box - the contract's status and billing facts.
  *
- * Mirrors WooCommerce's "Order data" box: a read view of the subscription's
- * status, schedule, recurring total, and originating order, rendered inside a
- * postbox on the detail screen. All values come through the engine facade's
- * entities and the shared {@see StatusLabels}/{@see Formatting} helpers.
+ * Mirrors the general block of WooCommerce's "Order data" box: a read view of
+ * the subscription's status, recurring total, payment method and originating
+ * order, rendered inside a postbox on the detail screen. The billing cadence and
+ * the schedule dates live in the side {@see Schedule} box. All values come
+ * through the engine facade's entities and the shared {@see StatusLabels}/{@see
+ * Formatting} helpers.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Admin\MetaBoxes
  */
@@ -35,25 +37,14 @@ final class SubscriptionData {
 	 * @param Contract $contract The contract being viewed.
 	 */
 	public static function output( Contract $contract ): void {
-		?>
-		<table class="widefat striped wc-subs-lite-detail-table">
-			<tbody>
-				<?php
-				foreach ( self::rows( $contract ) as $row ) {
-					printf(
-						'<tr><th scope="row">%s</th><td>%s</td></tr>',
-						esc_html( $row['label'] ),
-						wp_kses_post( $row['value'] )
-					);
-				}
-				?>
-			</tbody>
-		</table>
-		<?php
+		DetailTable::render( self::rows( $contract ) );
 	}
 
 	/**
-	 * Compose the label/value rows.
+	 * Compose the label/value rows: the contract's status, recurring total,
+	 * payment method and originating order. The billing cadence and the schedule
+	 * dates live in the side "Schedule" box, so this box stays the at-a-glance
+	 * summary the merchant reads first.
 	 *
 	 * @param Contract $contract The contract.
 	 * @return array<int, array{label: string, value: string}>
@@ -76,22 +67,6 @@ final class SubscriptionData {
 			[
 				'label' => __( 'Payment method', 'woocommerce-subscriptions-lite' ),
 				'value' => esc_html( self::payment_method_label( $contract ) ),
-			],
-			[
-				'label' => __( 'Start date', 'woocommerce-subscriptions-lite' ),
-				'value' => esc_html( Formatting::date( $contract->get_start_gmt() ) ),
-			],
-			[
-				'label' => __( 'Next payment', 'woocommerce-subscriptions-lite' ),
-				'value' => esc_html( Formatting::date( $contract->get_next_payment_gmt() ) ),
-			],
-			[
-				'label' => __( 'Last payment', 'woocommerce-subscriptions-lite' ),
-				'value' => esc_html( Formatting::date( $contract->get_last_payment_gmt() ) ),
-			],
-			[
-				'label' => __( 'End date', 'woocommerce-subscriptions-lite' ),
-				'value' => esc_html( Formatting::date( $contract->get_end_gmt() ) ),
 			],
 			[
 				'label' => __( 'Original order', 'woocommerce-subscriptions-lite' ),
