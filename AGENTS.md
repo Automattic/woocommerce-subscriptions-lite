@@ -41,6 +41,16 @@ The repository root serves as both the composer package (Packagist reads the roo
 - WordPress coding standards for plugin-facing code; tooling configuration pending.
 - Default branch `trunk`; work in feature branches, PRs into `trunk`.
 
+### Naming: prefixes by role
+
+One namespace, three prefixes, each with a fixed role. Pick the prefix by what the identifier *is*, not by taste:
+
+- **`woocommerce_subscriptions_lite_` / `woocommerce-subscriptions-lite`** (the plugin slug) - anything WordPress/WooCommerce registers or that other code binds to: hooks, filters, actions, AJAX actions, nonce actions, option and transient keys, DOM element ids (underscore); text domain, plugin/extension slug, script-module namespace (hyphen).
+- **`wc-subscriptions-lite-`** - front-end registration and presentation: script/style handles, admin page slugs, CSS class names.
+- **`wcsl`** (`_wcsl_`, `data-wcsl-`) - terse private markers that are never a contract: post-meta keys, POST field names, `data-` attributes.
+
+Do not add a `wc_subscriptions_lite_` (underscore) middle form - it duplicates the first prefix; use the full slug. Persisted names (post-meta keys, option names, the extension slug that the engine stores as the plan-ownership key) are a compatibility surface - settle them before release, not during hardening.
+
 ## Styling and UI
 
 All UI work follows [`docs/styling.md`](docs/styling.md). In short: author SCSS, never raw `.css`; use `@wordpress/base-styles` design tokens (no hardcoded colours/spacing); reuse WordPress-admin and WooCommerce styles instead of re-deriving them; and match the surface - wp-admin screens render native to wp-admin (`WP_List_Table` / `form-table`, or `@wordpress/components` for rich editors), while storefront screens are theme-native (server-rendered + the Interactivity API, **not** `@wordpress/components`). The build (`@wordpress/scripts`) compiles SCSS and handles prefixing + RTL; `npm run lint:css` and `npm run lint:js` must pass.

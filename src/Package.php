@@ -31,6 +31,12 @@ final class Package {
 	const VERSION = '0.0.1-dev';
 
 	/**
+	 * Extension slug identifying Lite to the engine: consumer registration,
+	 * plan ownership scoping, and every `Api\` facade call that takes a slug.
+	 */
+	const EXTENSION_SLUG = 'woocommerce-subscriptions-lite';
+
+	/**
 	 * Boot the package's feature modules.
 	 */
 	public static function init(): void {

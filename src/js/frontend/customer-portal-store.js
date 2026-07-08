@@ -21,7 +21,7 @@ import { store, getElement } from '@wordpress/interactivity';
 
 // Import the portal stylesheet so @wordpress/scripts compiles the SCSS, adds
 // vendor prefixes, and emits the stylesheet (style-customer-portal.css) plus
-// its RTL variant into build/scripts/. The portal asset loader enqueues the
+// its RTL variant into build/modules/. The portal asset loader enqueues the
 // compiled CSS; the JS module itself carries no runtime style dependency.
 import './style.scss';
 

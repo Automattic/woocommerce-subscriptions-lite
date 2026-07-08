@@ -193,7 +193,7 @@ final class RowActionControllerTest extends LiteIntegrationTestCase {
 	public function test_register_binds_the_admin_post_handlers(): void {
 		RowActionController::register();
 
-		$this->assertNotFalse( has_action( 'admin_post_wc_subscriptions_lite_renew_now' ) );
-		$this->assertNotFalse( has_action( 'admin_post_wc_subscriptions_lite_cancel_admin' ) );
+		$this->assertNotFalse( has_action( 'admin_post_woocommerce_subscriptions_lite_renew_now' ) );
+		$this->assertNotFalse( has_action( 'admin_post_woocommerce_subscriptions_lite_cancel_admin' ) );
 	}
 }

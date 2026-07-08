@@ -16,9 +16,9 @@ defined( 'ABSPATH' ) || exit;
  *
  * The wrapper plugin calls {@see self::init()} once the engine has resolved at
  * runtime. Each feature module is a small registration site that binds its own
- * hooks; this class only orchestrates which modules load. Feature logic is
- * intentionally absent at the scaffold stage - the modules below depend on the
- * engine's public surface, which lands in a later phase.
+ * hooks; this class only orchestrates which modules load. Its `$initialized`
+ * guard is the single idempotency gate: modules register unconditionally and
+ * rely on init() running once.
  */
 final class Bootstrap {
 
@@ -54,13 +54,16 @@ final class Bootstrap {
 			// work on Lite's behalf. Registered on every load so it is present for the
 			// dispatcher's own scheduled request, not just interactive ones.
 			\Automattic\WooCommerce\SubscriptionsEngine\Integration\Ownership\ConsumerRegistry::register(
-				'woocommerce-subscriptions-lite'
+				Package::EXTENSION_SLUG
 			);
 		}
 
-		// Product detail page: render the subscription plan picker and feed the
-		// chosen plan into the add-to-cart flow.
-		// TODO: PDP module - register once the PDP widening slice lands.
+		// Product detail page: the plan picker on the add-to-cart form and the
+		// per-variation option HTML in variation payloads. Both register
+		// unconditionally - variation payloads are also assembled in admin
+		// contexts (product previews).
+		ProductPage\PlanPicker::register();
+		ProductPage\VariationPlanData::register();
 
 		// Cart: carry the chosen plan through cart item data and totals.
 		// TODO: Cart module - register once the PDP widening slice lands.
@@ -86,6 +89,11 @@ final class Bootstrap {
 
 			// Register the WooCommerce Settings > Subscriptions tab (plans manager).
 			Admin\SettingsPage::register();
+
+			// Product edit screen: the Subscriptions product-data tab writing
+			// Lite-owned plan applicability, validated against the engine's
+			// plans catalog.
+			Admin\ProductPlansPanel::register();
 		}
 
 		// Email: contract and renewal notifications.

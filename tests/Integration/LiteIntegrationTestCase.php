@@ -87,18 +87,22 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 	/**
 	 * Persist a plan and return the entity (with its id stamped by the insert).
 	 *
-	 * @param string   $period     Billing period (day / week / month / year).
-	 * @param int      $interval   Billing interval.
-	 * @param int|null $max_cycles Maximum billing cycles, or null for open-ended.
+	 * @param string               $period     Billing period (day / week / month / year).
+	 * @param int                  $interval   Billing interval.
+	 * @param int|null             $max_cycles Maximum billing cycles, or null for open-ended.
+	 * @param array<string, mixed> $overrides  Plan attribute overrides (name, status, sort_order, extension_slug, ...).
 	 */
-	protected function make_plan( string $period = 'month', int $interval = 1, ?int $max_cycles = null ): Plan {
+	protected function make_plan( string $period = 'month', int $interval = 1, ?int $max_cycles = null, array $overrides = [] ): Plan {
 		$plan = Plan::create(
-			[
-				'name'           => ucfirst( $period ) . 'ly plan',
-				'billing_policy' => new BillingPolicy( $period, $interval, null, $max_cycles, null ),
-				'category'       => Plan::DEFAULT_CATEGORY,
-				'extension_slug' => 'woocommerce-subscriptions-lite',
-			]
+			array_merge(
+				[
+					'name'           => ucfirst( $period ) . 'ly plan',
+					'billing_policy' => new BillingPolicy( $period, $interval, null, $max_cycles, null ),
+					'category'       => Plan::DEFAULT_CATEGORY,
+					'extension_slug' => 'woocommerce-subscriptions-lite',
+				],
+				$overrides
+			)
 		);
 		( new PlanRepository() )->insert( $plan );
 

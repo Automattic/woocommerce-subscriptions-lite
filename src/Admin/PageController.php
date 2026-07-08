@@ -48,12 +48,12 @@ final class PageController {
 	/**
 	 * `admin-post.php` action for the "Renew now" row action.
 	 */
-	const ACTION_RENEW_NOW = 'wc_subscriptions_lite_renew_now';
+	const ACTION_RENEW_NOW = 'woocommerce_subscriptions_lite_renew_now';
 
 	/**
 	 * `admin-post.php` action for the "Cancel" row action.
 	 */
-	const ACTION_CANCEL = 'wc_subscriptions_lite_cancel_admin';
+	const ACTION_CANCEL = 'woocommerce_subscriptions_lite_cancel_admin';
 
 	/**
 	 * Default number of subscriptions shown on the list view.
@@ -302,7 +302,7 @@ final class PageController {
 	 * @param int $user_id User id.
 	 */
 	private static function notice_key( int $user_id ): string {
-		return 'wc_subscriptions_lite_admin_notice_' . $user_id;
+		return 'woocommerce_subscriptions_lite_admin_notice_' . $user_id;
 	}
 
 	/**

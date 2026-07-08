@@ -18,7 +18,8 @@ The repo builds with [`@wordpress/scripts`](https://www.npmjs.com/package/@wordp
 - `npm run build` produces the production build; `npm run start` watches/rebuilds during development.
 - **Admin PHP scripts:** `webpack.scripts.config.js`, entry `client/admin-php/index.js` -> `build/scripts/admin-php.js`. Import the entry's SCSS from its `index.js` (`import './style.scss';`) so wp-scripts compiles it, prefixes it, emits the RTL file, and writes the `admin-php.asset.php` dependency manifest.
 - **Admin React scripts:** `webpack.scripts.config.js`, entry `client/admin-react/index.js` -> `build/scripts/admin-react.js`. Import the entry's SCSS from its `index.js` (`import './style.scss';`) so wp-scripts compiles it, prefixes it, emits the RTL file, and writes the `admin-react.asset.php` dependency manifest.
-- **Blocks / storefront:** `npm run build:blocks` (`wp-scripts build --experimental-modules`) builds standard blocks and Interactivity API modules. Storefront interactivity lives here (see below).
+- **Interactivity API view modules (storefront):** `webpack.modules.config.js` (`npm run build:modules`, wp-scripts with `--experimental-modules`) builds ALL Interactivity API view modules - the PDP plan picker and the customer-portal store - into `build/modules/` as ESM script modules, with `@wordpress/interactivity` externalized as an import-mapped dependency and each entry's imported SCSS extracted to `style-<entry>.css` (+ RTL variant).
+- **Blocks:** `npm run build:blocks` (`wp-scripts build --experimental-modules --blocks-manifest`) builds standard blocks from `src/blocks/`.
 - `@woocommerce/dependency-extraction-webpack-plugin` maps `@wordpress/*` / `@woocommerce/*` imports to WordPress's already-bundled scripts, so `import { Button } from '@wordpress/components'` adds a dependency rather than re-bundling React. Never vendor your own copy of these.
 
 There is no place for a hand-written `.css` file enqueued directly. Author `.scss` and let the build produce the stylesheet, then enqueue the compiled asset using its generated `*.asset.php` (handles dependencies + version).
@@ -53,7 +54,7 @@ Either way: SCSS + `@wordpress/base-styles` tokens, reuse wp-admin / WooCommerce
 The storefront must look like the merchant's **theme**, not wp-admin:
 
 - **Do not use `@wordpress/components` here** - it carries wp-admin styling and clashes with themes.
-- **Render server-side** (overridable PHP templates under `templates/`, the WooCommerce way) and add interactivity with the **[Interactivity API](https://developer.wordpress.org/block-editor/reference-guides/interactivity-api/)** via blocks (the `build:blocks` pipeline). Same approach as WooCommerce's cart / mini-cart blocks: PHP-rendered markup, light JS, framework-agnostic styling.
+- **Render server-side** (overridable PHP templates under `templates/`, the WooCommerce way) and add interactivity with the **[Interactivity API](https://developer.wordpress.org/block-editor/reference-guides/interactivity-api/)** via view modules (the `build:modules` pipeline; blocks via `build:blocks`). Same approach as WooCommerce's cart / mini-cart blocks: PHP-rendered markup, light JS, framework-agnostic styling.
 - **Inherit theme + WooCommerce styles.** Use WooCommerce's storefront classes and `theme.json` CSS custom properties; ship only minimal *structural* SCSS (layout, spacing) and let the theme own colour and typography.
 - **Progressive enhancement:** the core flow should work from server-rendered markup; JS enhances rather than gating it, where feasible.
 

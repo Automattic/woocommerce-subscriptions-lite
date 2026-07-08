@@ -54,8 +54,8 @@ final class Assets {
 			return;
 		}
 
-		$build_url  = Package::get_url() . '/build/scripts';
-		$build_path = Package::get_path() . '/build/scripts';
+		$build_url  = Package::get_url() . '/build/modules';
+		$build_path = Package::get_path() . '/build/modules';
 		$version    = Package::get_version();
 
 		// The iAPI store is a script module; `@wordpress/interactivity` is its
