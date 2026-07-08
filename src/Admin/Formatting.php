@@ -62,4 +62,68 @@ final class Formatting {
 
 		return esc_html( trim( $currency . ' ' . $amount ) );
 	}
+
+	/**
+	 * Format a billing cadence as plain text (`Every 3 months`).
+	 *
+	 * Matches the wording of the admin product-panel Frequency column so a
+	 * plan reads the same on the product screen and the subscription detail
+	 * screen. Escape with esc_html() when rendering.
+	 *
+	 * @param string $period   Period unit: 'day' | 'week' | 'month' | 'year'.
+	 * @param int    $interval Period count (coerced to a minimum of 1).
+	 */
+	public static function billing_cadence( string $period, int $interval ): string {
+		$interval = max( 1, $interval );
+
+		return sprintf(
+			/* translators: 1: billing interval count, 2: pluralized billing period (e.g. "month", "months"). */
+			__( 'Every %1$d %2$s', 'woocommerce-subscriptions-lite' ),
+			$interval,
+			self::period_label( $period, $interval )
+		);
+	}
+
+	/**
+	 * Format a native trial duration as plain text (`7 days`), or the placeholder
+	 * for a non-positive length. Escape with esc_html() when rendering.
+	 *
+	 * @param int    $length Trial length.
+	 * @param string $unit   Period unit: 'day' | 'week' | 'month' | 'year'.
+	 */
+	public static function trial_duration( int $length, string $unit ): string {
+		if ( $length < 1 ) {
+			return self::PLACEHOLDER;
+		}
+
+		return sprintf(
+			/* translators: 1: trial length, 2: pluralized period (e.g. "day", "days"). */
+			__( '%1$d %2$s', 'woocommerce-subscriptions-lite' ),
+			$length,
+			self::period_label( $unit, $length )
+		);
+	}
+
+	/**
+	 * Pluralized period label via _n(), so locales with non-trivial plural rules
+	 * translate each unit independently. Unknown periods fall through to the raw
+	 * value.
+	 *
+	 * @param string $period   One of 'day' | 'week' | 'month' | 'year'.
+	 * @param int    $interval Interval count driving pluralization.
+	 */
+	private static function period_label( string $period, int $interval ): string {
+		switch ( $period ) {
+			case 'day':
+				return _n( 'day', 'days', $interval, 'woocommerce-subscriptions-lite' );
+			case 'week':
+				return _n( 'week', 'weeks', $interval, 'woocommerce-subscriptions-lite' );
+			case 'month':
+				return _n( 'month', 'months', $interval, 'woocommerce-subscriptions-lite' );
+			case 'year':
+				return _n( 'year', 'years', $interval, 'woocommerce-subscriptions-lite' );
+			default:
+				return $period;
+		}
+	}
 }
