@@ -110,6 +110,12 @@ final class Items {
 			return number_format_i18n( (int) $quantity );
 		}
 
-		return rtrim( rtrim( number_format( $quantity, 4, '.', '' ), '0' ), '.' );
+		// Trim trailing zeros to find the significant decimal count, then localise
+		// (locale decimal separator) rather than hardcoding a dot.
+		$trimmed  = rtrim( rtrim( number_format( $quantity, 4, '.', '' ), '0' ), '.' );
+		$dot      = strpos( $trimmed, '.' );
+		$decimals = false === $dot ? 0 : strlen( $trimmed ) - $dot - 1;
+
+		return number_format_i18n( $quantity, $decimals );
 	}
 }

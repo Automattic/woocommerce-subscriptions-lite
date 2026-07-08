@@ -245,15 +245,26 @@ final class PageController {
 			// per-row Renew now / Cancel POST forms are never nested inside a GET form
 			// (invalid HTML). Sort, pagination and view links are query-arg links, so
 			// they carry the search/status state without a wrapping form.
-			$status = $table->current_status();
+			//
+			// WP_List_Table::search_box() renders nothing when the current view has no
+			// rows and no active search, so the form is emitted only when it will hold
+			// a visible field - a genuinely empty view (e.g. Expired with zero rows and
+			// no search) shows no search box, matching the orders screen. The merchant
+			// searches from a non-empty view (All).
+			$status     = $table->current_status();
+			$has_search = '' !== self::current_search_term();
+			if ( $table->has_items() || $has_search ) :
+				?>
+				<form method="get" class="wc-subs-lite-search-form">
+					<input type="hidden" name="page" value="<?php echo esc_attr( self::PAGE_SLUG ); ?>" />
+					<?php if ( '' !== $status ) : ?>
+						<input type="hidden" name="status" value="<?php echo esc_attr( $status ); ?>" />
+					<?php endif; ?>
+					<?php $table->search_box( __( 'Search subscriptions', 'woocommerce-subscriptions-lite' ), 'subscription' ); ?>
+				</form>
+				<?php
+			endif;
 			?>
-			<form method="get" class="wc-subs-lite-search-form">
-				<input type="hidden" name="page" value="<?php echo esc_attr( self::PAGE_SLUG ); ?>" />
-				<?php if ( '' !== $status ) : ?>
-					<input type="hidden" name="status" value="<?php echo esc_attr( $status ); ?>" />
-				<?php endif; ?>
-				<?php $table->search_box( __( 'Search subscriptions', 'woocommerce-subscriptions-lite' ), 'subscription' ); ?>
-			</form>
 
 			<?php $table->display(); ?>
 		</div>
@@ -316,6 +327,15 @@ final class PageController {
 	 */
 	private static function notice_key( int $user_id ): string {
 		return 'woocommerce_subscriptions_lite_admin_notice_' . $user_id;
+	}
+
+	/**
+	 * The trimmed list search term from the request, or '' - used to decide whether
+	 * the search form has anything to render on an otherwise empty view.
+	 */
+	private static function current_search_term(): string {
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only list search.
+		return isset( $_GET['s'] ) ? trim( sanitize_text_field( wp_unslash( (string) $_GET['s'] ) ) ) : '';
 	}
 
 	/**

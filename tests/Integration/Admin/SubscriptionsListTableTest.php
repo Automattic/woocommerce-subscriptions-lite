@@ -145,6 +145,17 @@ final class SubscriptionsListTableTest extends LiteIntegrationTestCase {
 		$this->assertGreaterThan( $table_pos, $post_form, 'Row-action POST forms render inside the table, never inside the GET form.' );
 	}
 
+	public function test_search_form_is_hidden_on_an_empty_view_without_search(): void {
+		$customer = $this->create_customer();
+		$this->create_contract( $customer ); // Active only.
+
+		$this->set_request( [ 'status' => 'expired' ] ); // Zero expired rows, no search term.
+		$html = $this->render_list_page();
+
+		// No empty search form on a view that has nothing to search and no active term.
+		$this->assertStringNotContainsString( 'wc-subs-lite-search-form', $html );
+	}
+
 	/**
 	 * Set the request superglobals the list table reads.
 	 *

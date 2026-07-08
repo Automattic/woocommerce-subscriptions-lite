@@ -310,9 +310,16 @@ final class SubscriptionsListTable extends WP_List_Table {
 			return esc_html__( '(no customer)', 'woocommerce-subscriptions-lite' );
 		}
 
+		// get_edit_user_link() is empty when the current user cannot edit this customer;
+		// fall back to the plain name rather than a dead `<a href="">`.
+		$edit_link = (string) get_edit_user_link( $customer_id );
+		if ( '' === $edit_link ) {
+			return esc_html( $user->display_name );
+		}
+
 		return sprintf(
 			'<a href="%s">%s</a>',
-			esc_url( (string) get_edit_user_link( $customer_id ) ),
+			esc_url( $edit_link ),
 			esc_html( $user->display_name )
 		);
 	}
