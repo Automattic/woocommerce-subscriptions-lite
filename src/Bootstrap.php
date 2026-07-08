@@ -75,9 +75,12 @@ final class Bootstrap {
 		Cart\Blocks\StoreApiExtension::register();
 		Cart\Blocks\Integration::register();
 
-		// Checkout: turn a completed order into a subscription contract via the
-		// engine factory, then schedule its first renewal.
+		// Checkout: on payment, turn the order into a subscription contract via the
+		// engine factory and schedule its first renewal; require an account for
+		// subscription carts; and show the new subscription on the order-received page.
 		Checkout\ContractCreationHandler::register();
+		Checkout\AccountRequirement::register();
+		Checkout\OrderReceived::register();
 
 		// Customer portal (My Account): the subscriptions list + single
 		// subscription detail, with the lifecycle actions (cancel / hold /

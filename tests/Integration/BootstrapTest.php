@@ -26,7 +26,18 @@ use Automattic\WooCommerce\SubscriptionsLite\ProductPage\VariationPlanData;
 final class BootstrapTest extends LiteIntegrationTestCase {
 
 	public function test_the_checkout_module_is_wired(): void {
-		$this->assertNotFalse( has_action( 'woocommerce_checkout_order_processed' ) );
+		$this->assertNotFalse(
+			has_action( 'woocommerce_order_status_changed' ),
+			'Contract creation is bound to the order reaching a paid status.'
+		);
+		$this->assertNotFalse(
+			has_filter( 'woocommerce_checkout_registration_required' ),
+			'Subscription carts require a customer account.'
+		);
+		$this->assertNotFalse(
+			has_action( 'woocommerce_order_details_after_order_table' ),
+			'The order-received subscription summary is wired.'
+		);
 	}
 
 	public function test_the_customer_portal_is_wired(): void {

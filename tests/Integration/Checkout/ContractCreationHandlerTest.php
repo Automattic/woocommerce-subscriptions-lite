@@ -2,10 +2,10 @@
 /**
  * Integration tests for the checkout contract-creation handler.
  *
- * The happy paths run END TO END: a real order whose line item carries a
- * `_wcsl_selling_plan_id`, a real plan row, the handler with its production seams,
- * and the contract read back through the engine facade. The failure-isolation
- * case injects a throwing factory through the handler's own constructor seam.
+ * These run END TO END against real WordPress/WooCommerce: the behavioural cases
+ * drive the REAL trigger - an order reaching a paid status via `update_status()`
+ * fires the bootstrap-bound handler, exactly as a gateway or a merchant confirming
+ * an offline payment would.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Tests
  */
@@ -15,43 +15,90 @@ declare( strict_types=1 );
 namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Checkout;
 
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Subscriptions;
-use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Contract;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Plan;
 use Automattic\WooCommerce\SubscriptionsLite\Checkout\ContractCreationHandler;
+use Automattic\WooCommerce\SubscriptionsLite\Plans\ApplicabilityStore;
+use Automattic\WooCommerce\SubscriptionsLite\Plans\ProductApplicability;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
-use RuntimeException;
 use WC_Order;
+use WC_Product_Simple;
 
 /**
  * @covers \Automattic\WooCommerce\SubscriptionsLite\Checkout\ContractCreationHandler
  */
 final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 
+	private const SELLING_PLAN_META = '_wcsl_selling_plan_id';
+
 	/**
-	 * Stamp a selling-plan id on every line item of an order.
+	 * Make every product line of an order applicable to all Lite plans and stamp
+	 * `$plan` on each - the production shape after add-to-cart.
 	 *
-	 * @param WC_Order $order   The order.
-	 * @param int      $plan_id The plan id to stamp.
+	 * @param WC_Order $order The order.
+	 * @param Plan     $plan  The plan to stamp.
 	 */
-	private function stamp_plan_on_items( WC_Order $order, int $plan_id ): void {
+	private function apply_and_stamp( WC_Order $order, Plan $plan ): void {
 		foreach ( $order->get_items() as $item ) {
-			$item->add_meta_data( '_wcsl_selling_plan_id', (string) $plan_id, true );
+			( new ApplicabilityStore() )->set(
+				$item->get_product_id(),
+				new ProductApplicability( ProductApplicability::MODE_INHERIT_ALL )
+			);
+			$item->add_meta_data( self::SELLING_PLAN_META, (string) $plan->get_id(), true );
 			$item->save();
 		}
+		$order->save();
 	}
 
-	public function test_creates_a_contract_for_a_subscription_order_end_to_end(): void {
+	/**
+	 * Add a product line to an order. With a plan it is made applicable + stamped;
+	 * without one it is a plain (one-time) line.
+	 *
+	 * @param WC_Order  $order The order.
+	 * @param string    $name  Product name.
+	 * @param Plan|null $plan  Plan to stamp, or null for a one-time line.
+	 */
+	private function add_line( WC_Order $order, string $name, ?Plan $plan ): void {
+		$product = new WC_Product_Simple();
+		$product->set_name( $name );
+		$product->set_regular_price( '5.00' );
+		$product->save();
+
+		$item_id = $order->add_product( $product, 1 );
+
+		if ( $plan instanceof Plan ) {
+			( new ApplicabilityStore() )->set(
+				$product->get_id(),
+				new ProductApplicability( ProductApplicability::MODE_INHERIT_ALL )
+			);
+			$item = $order->get_item( $item_id );
+			$item->add_meta_data( self::SELLING_PLAN_META, (string) $plan->get_id(), true );
+			$item->save();
+		}
+
+		$order->calculate_totals();
+		$order->save();
+	}
+
+	/**
+	 * The deferral reason recorded on an order, or '' when none.
+	 *
+	 * @param WC_Order $order The order.
+	 */
+	private function deferral_reason( WC_Order $order ): string {
+		return (string) wc_get_order( $order->get_id() )->get_meta( ContractCreationHandler::CREATION_DEFERRED_META );
+	}
+
+	public function test_creates_one_active_contract_when_the_order_reaches_a_paid_status(): void {
 		$customer_id = $this->create_customer();
 		$plan        = $this->make_plan();
 		$order       = $this->create_subscription_order( $customer_id, [ 'product_name' => 'Checkout Box' ] );
-		$this->stamp_plan_on_items( $order, (int) $plan->get_id() );
+		$this->apply_and_stamp( $order, $plan );
 
-		( new ContractCreationHandler() )->create_contracts_for_order( $order->get_id(), [], $order );
+		$order->update_status( 'processing' ); // Fires the bootstrap-bound handler.
 
 		$contracts = Subscriptions::list_for_customer( $customer_id );
-		$this->assertCount( 1, $contracts, 'One contract per subscription order.' );
+		$this->assertCount( 1, $contracts, 'One contract for a single-plan order.' );
 
-		// The single-contract read hydrates the full shape (items included).
 		$contract = Subscriptions::get_for_customer( (int) $contracts[0]->get_id(), $customer_id );
 		$this->assertSame( 'active', $contract->get_status() );
 		$this->assertSame( (int) $plan->get_id(), $contract->get_selling_plan_id() );
@@ -59,79 +106,135 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 		$this->assertSame( 'Checkout Box', $contract->get_items()[0]['item_name'] );
 	}
 
-	public function test_is_idempotent_for_an_order_that_already_has_a_contract(): void {
+	public function test_two_lines_on_the_same_plan_make_one_multi_line_contract(): void {
+		$customer_id = $this->create_customer();
+		$plan        = $this->make_plan();
+		$order       = $this->create_subscription_order( $customer_id, [ 'product_name' => 'First Box' ] );
+		$this->add_line( $order, 'Second Box', $plan );  // Same plan, second product.
+		$this->apply_and_stamp( $order, $plan );          // Stamp + apply to both lines.
+
+		$order->update_status( 'processing' );
+
+		$contracts = Subscriptions::list_for_customer( $customer_id );
+		$this->assertCount( 1, $contracts, 'Same-plan lines consolidate into one contract.' );
+
+		$contract = Subscriptions::get_for_customer( (int) $contracts[0]->get_id(), $customer_id );
+		$this->assertEqualsCanonicalizing(
+			[ 'First Box', 'Second Box' ],
+			array_column( $contract->get_items(), 'item_name' ),
+			'The one contract carries both distinct line items.'
+		);
+	}
+
+	public function test_an_offline_order_creates_the_contract_when_payment_is_confirmed_later(): void {
 		$customer_id = $this->create_customer();
 		$plan        = $this->make_plan();
 		$order       = $this->create_subscription_order( $customer_id );
-		$this->stamp_plan_on_items( $order, (int) $plan->get_id() );
+		$this->apply_and_stamp( $order, $plan );
 
-		$handler = new ContractCreationHandler();
-		$handler->create_contracts_for_order( $order->get_id(), [], $order );
-		$handler->create_contracts_for_order( $order->get_id(), [], wc_get_order( $order->get_id() ) );
+		$order->update_status( 'on-hold' ); // BACS/cheque: awaiting the transfer.
+		$this->assertSame( [], Subscriptions::list_for_customer( $customer_id ), 'An on-hold offline order has no contract yet.' );
 
-		$this->assertCount(
-			1,
-			Subscriptions::list_for_customer( $customer_id ),
-			'Re-processing the same order creates no second contract.'
-		);
+		$order->update_status( 'processing' ); // Merchant confirms the payment.
+		$this->assertCount( 1, Subscriptions::list_for_customer( $customer_id ), 'Confirming the offline payment creates the contract.' );
+	}
+
+	public function test_two_different_plans_defer_without_a_contract(): void {
+		$customer_id = $this->create_customer();
+		$monthly     = $this->make_plan( 'month' );
+		$weekly      = $this->make_plan( 'week' );
+		$order       = $this->create_subscription_order( $customer_id );
+		$this->apply_and_stamp( $order, $monthly );       // First line -> monthly.
+		$this->add_line( $order, 'Weekly Box', $weekly ); // Second line -> weekly.
+
+		$order->update_status( 'processing' );
+
+		$this->assertSame( [], Subscriptions::list_for_customer( $customer_id ), 'No contract for divergent plans.' );
+		$this->assertSame( ContractCreationHandler::REASON_DIVERGENT_PLANS, $this->deferral_reason( $order ) );
+	}
+
+	public function test_a_one_time_line_alongside_a_plan_defers_without_a_contract(): void {
+		$customer_id = $this->create_customer();
+		$plan        = $this->make_plan();
+		$order       = $this->create_subscription_order( $customer_id );
+		$this->apply_and_stamp( $order, $plan );          // First line -> the plan.
+		$this->add_line( $order, 'One-time Mug', null );  // Second line -> one-time.
+
+		$order->update_status( 'processing' );
+
+		$this->assertSame( [], Subscriptions::list_for_customer( $customer_id ), 'No contract for a mixed cart.' );
+		$this->assertSame( ContractCreationHandler::REASON_MIXED_CART, $this->deferral_reason( $order ) );
+	}
+
+	public function test_two_plans_plus_a_one_time_line_defer_as_divergent_plans(): void {
+		// classify_order() checks divergent-plans before mixed-cart; this pins that
+		// precedence - if it flipped, the reason below would change.
+		$customer_id = $this->create_customer();
+		$monthly     = $this->make_plan( 'month' );
+		$weekly      = $this->make_plan( 'week' );
+		$order       = $this->create_subscription_order( $customer_id );
+		$this->apply_and_stamp( $order, $monthly );
+		$this->add_line( $order, 'Weekly Box', $weekly );
+		$this->add_line( $order, 'One-time Mug', null );
+
+		$order->update_status( 'processing' );
+
+		$this->assertSame( [], Subscriptions::list_for_customer( $customer_id ) );
+		$this->assertSame( ContractCreationHandler::REASON_DIVERGENT_PLANS, $this->deferral_reason( $order ) );
+	}
+
+	public function test_is_idempotent_across_repeated_paid_transitions(): void {
+		$customer_id = $this->create_customer();
+		$plan        = $this->make_plan();
+		$order       = $this->create_subscription_order( $customer_id );
+		$this->apply_and_stamp( $order, $plan );
+
+		$order->update_status( 'processing' ); // Creates the contract.
+		$order->update_status( 'completed' );  // Fires again - must be a no-op.
+
+		$this->assertCount( 1, Subscriptions::list_for_customer( $customer_id ), 'A second paid transition creates no second contract.' );
 	}
 
 	public function test_an_order_without_plan_items_creates_nothing(): void {
 		$customer_id = $this->create_customer();
-		$order       = $this->create_subscription_order( $customer_id ); // No plan meta on the item.
+		$order       = $this->create_subscription_order( $customer_id ); // No plan meta.
 
-		( new ContractCreationHandler() )->create_contracts_for_order( $order->get_id(), [], $order );
-
-		$this->assertSame( [], Subscriptions::list_for_customer( $customer_id ) );
-	}
-
-	public function test_an_unresolvable_plan_id_creates_nothing(): void {
-		$customer_id = $this->create_customer();
-		$order       = $this->create_subscription_order( $customer_id );
-		$this->stamp_plan_on_items( $order, 999999 ); // Plan deleted between cart-add and checkout.
-
-		( new ContractCreationHandler() )->create_contracts_for_order( $order->get_id(), [], $order );
+		$order->update_status( 'processing' );
 
 		$this->assertSame( [], Subscriptions::list_for_customer( $customer_id ) );
 	}
 
-	public function test_a_throwing_line_item_does_not_block_its_siblings(): void {
+	public function test_a_plan_not_applicable_to_the_product_creates_nothing(): void {
 		$customer_id = $this->create_customer();
 		$plan        = $this->make_plan();
 		$order       = $this->create_subscription_order( $customer_id );
-		// A second plan-carrying line item on the same order.
-		$product = new \WC_Product_Simple();
-		$product->set_name( 'Second Box' );
-		$product->set_regular_price( '5.00' );
-		$product->save();
-		$order->add_product( $product, 1 );
+		// Stamp the plan but never make the product applicable (mode stays 'disable').
+		foreach ( $order->get_items() as $item ) {
+			$item->add_meta_data( self::SELLING_PLAN_META, (string) $plan->get_id(), true );
+			$item->save();
+		}
 		$order->save();
-		$this->stamp_plan_on_items( $order, (int) $plan->get_id() );
 
-		$calls   = 0;
-		$handler = new ContractCreationHandler(
-			static function ( WC_Order $o, Plan $p ) use ( &$calls ): Contract {
-				++$calls;
-				if ( 1 === $calls ) {
-					throw new RuntimeException( 'factory failure under test' );
-				}
-				return ( new \Automattic\WooCommerce\SubscriptionsEngine\Integration\Checkout\ContractFactory() )->create_from_order( $o, $p );
-			}
-		);
-		$handler->create_contracts_for_order( $order->get_id(), [], $order );
+		$order->update_status( 'processing' );
 
-		$this->assertSame( 2, $calls, 'The throwing line item does not abort the loop.' );
-		$this->assertCount(
-			1,
-			Subscriptions::list_for_customer( $customer_id ),
-			'The sibling line item still gets its contract.'
-		);
+		$this->assertSame( [], Subscriptions::list_for_customer( $customer_id ), 'A non-applicable plan is excluded.' );
 	}
 
-	public function test_the_checkout_hook_is_bound_by_the_bootstrap(): void {
+	public function test_an_order_that_never_reaches_a_paid_status_creates_nothing(): void {
+		$customer_id = $this->create_customer();
+		$plan        = $this->make_plan();
+		$order       = $this->create_subscription_order( $customer_id );
+		$this->apply_and_stamp( $order, $plan );
+
+		$order->update_status( 'on-hold' ); // Not a paid status.
+
+		$this->assertSame( [], Subscriptions::list_for_customer( $customer_id ), 'An unpaid order creates no contract.' );
+	}
+
+	public function test_the_handler_is_bound_to_the_paid_status_transition(): void {
 		$this->assertNotFalse(
-			has_action( 'woocommerce_checkout_order_processed' ),
-			'The classic checkout-processed hook is bound.'
+			has_action( 'woocommerce_order_status_changed' ),
+			'Contract creation is bound to the order reaching a paid status.'
 		);
 	}
 }
