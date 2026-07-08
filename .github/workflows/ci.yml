@@ -101,4 +101,5 @@ jobs:
 
       - name: Show wp-env debug logs on failure
         if: failure()
-        run: npx wp-env logs tests || true
+        timeout-minutes: 2
+        run: npx wp-env logs tests --no-watch || true
