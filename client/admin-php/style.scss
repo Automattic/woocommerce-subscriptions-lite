@@ -118,6 +118,16 @@ $status-pending-cancellation-fg: #b45917;
 	margin-top: $grid-unit-10;
 }
 
+/*
+ * Items table: the quantity and total columns read compact and right-aligned,
+ * like the order-items box on the WooCommerce order edit screen.
+ */
+.wc-subs-lite-items-table .wc-subs-lite-col-qty,
+.wc-subs-lite-items-table .wc-subs-lite-col-total {
+	width: 100px;
+	text-align: right;
+}
+
 /* Detail page Actions box: links stacked one per line, like the list row. */
 .wc-subs-lite-detail-actions {
 	margin: 0;
