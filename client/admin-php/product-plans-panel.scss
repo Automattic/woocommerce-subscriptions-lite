@@ -5,14 +5,17 @@
  * panel div reuses `.woocommerce_options_panel` and the plans table reuses
  * wp-admin's `.widefat`, so only subscription-specific spacing, the section
  * labels, and the help-text tone live here. Tokens come from
- * @wordpress/base-styles (imported by the entry stylesheet).
+ * @wordpress/base-styles (loaded via `@use` below).
  *
  * The `.woocommerce_options_panel` prefix keeps every rule more specific
  * than WooCommerce's own panel rules regardless of stylesheet load order.
  */
 
+@use "@wordpress/base-styles/colors";
+@use "@wordpress/base-styles/variables";
+
 .woocommerce_options_panel .wc-subscriptions-lite-product-plans {
-	padding: $grid-unit-20;
+	padding: variables.$grid-unit-20;
 
 	// WooCommerce floats every panel label and legend into a 150px gutter
 	// column (float: left; width: 150px; margin-left: -150px) that only
@@ -32,7 +35,7 @@
 	// reference control renders 13px text; wp-admin selects default to 14px.
 	select {
 		float: none;
-		font-size: $default-font-size;
+		font-size: variables.$default-font-size;
 	}
 
 	// WooCommerce's `.woocommerce_options_panel p` rule indents every
@@ -46,54 +49,54 @@
 	// Small uppercase section labels, one per block (purchase options, plan
 	// selection, one-time purchases).
 	.wc-subscriptions-lite-section-label {
-		color: $gray-900;
+		color: colors.$gray-900;
 		display: block;
-		font-size: $font-size-x-small;
+		font-size: variables.$font-size-x-small;
 		font-weight: 500;
-		margin: 0 0 $grid-unit-10;
+		margin: 0 0 variables.$grid-unit-10;
 		text-transform: uppercase;
 	}
 
 	.wc-subscriptions-lite-purchase-mode-help {
-		color: $gray-700;
-		font-size: $helptext-font-size;
+		color: colors.$gray-700;
+		font-size: variables.$helptext-font-size;
 		// The reference help renders 18px leading on 12px type; no
 		// base-styles token corresponds, and WooCommerce's panel `p` rule
 		// would otherwise open it to 24px.
 		line-height: 1.5;
-		margin: $grid-unit-10 0 0;
+		margin: variables.$grid-unit-10 0 0;
 	}
 
 	.wc-subscriptions-lite-plans-section {
-		margin-top: $grid-unit-30;
+		margin-top: variables.$grid-unit-30;
 	}
 
 	.wc-subscriptions-lite-plans-scope {
 		border: 0;
-		margin: 0 0 $grid-unit-30;
+		margin: 0 0 variables.$grid-unit-30;
 		padding: 0;
 
 		label {
 			display: block;
-			margin-bottom: $grid-unit-10;
+			margin-bottom: variables.$grid-unit-10;
 		}
 	}
 
 	.wc-subscriptions-lite-plans-scope-help {
-		color: $gray-700;
+		color: colors.$gray-700;
 		display: block;
-		font-size: $helptext-font-size;
+		font-size: variables.$helptext-font-size;
 		// Left offset lines the helper up with the radio's label text: the
 		// 16px wp-admin radio control plus its 4px gap. The 2px top margin
 		// matches the reference, which hardcodes it; no token corresponds.
-		margin: 2px 0 0 ($grid-unit-20 + $grid-unit-05);
+		margin: 2px 0 0 (variables.$grid-unit-20 + variables.$grid-unit-05);
 	}
 
 	.wc-subscriptions-lite-plans-table {
-		margin-bottom: $grid-unit-10;
+		margin-bottom: variables.$grid-unit-10;
 
 		.wc-subscriptions-lite-plans-table-check {
-			width: $grid-unit-40;
+			width: variables.$grid-unit-40;
 
 			// wp-admin gives header checkboxes an 8px left margin (`.widefat th
 			// input`) that body-cell checkboxes never get, so the select-all box
@@ -119,7 +122,7 @@
 			position: relative;
 
 			&::before {
-				background-color: $white;
+				background-color: colors.$white;
 				content: "";
 				// The 2px dash matches @wordpress/components' mixed state; no
 				// base-styles token corresponds.
@@ -128,7 +131,7 @@
 				position: absolute;
 				top: 50%;
 				transform: translate(-50%, -50%);
-				width: $grid-unit-10;
+				width: variables.$grid-unit-10;
 			}
 		}
 	}
@@ -137,11 +140,11 @@
 	// notice chrome; the flat pale-yellow fill and $alert-yellow bar match
 	// the reference's warning notice (core notices are white with a shadow).
 	.wc-subscriptions-lite-plans-empty-warning {
-		background-color: rgba($alert-yellow, 0.1);
+		background-color: rgba(colors.$alert-yellow, 0.1);
 		border: 0;
-		border-left: $grid-unit-05 solid $alert-yellow;
+		border-left: variables.$grid-unit-05 solid colors.$alert-yellow;
 		box-shadow: none;
-		margin: $grid-unit-15 0 $grid-unit-20;
+		margin: variables.$grid-unit-15 0 variables.$grid-unit-20;
 
 		// The script toggles the hidden attribute; make sure no notice rule
 		// with a display value can override it.
@@ -150,21 +153,21 @@
 		}
 
 		p {
-			font-size: $default-font-size;
-			line-height: $default-line-height;
-			margin: $grid-unit-15 0;
-			padding: 0 $grid-unit-05;
+			font-size: variables.$default-font-size;
+			line-height: variables.$default-line-height;
+			margin: variables.$grid-unit-15 0;
+			padding: 0 variables.$grid-unit-05;
 		}
 	}
 
 	// WooCommerce's panel `p` rule shrinks this to 12px/24px; restore the
 	// wp-admin base type the reference inherits for links.
 	.wc-subscriptions-lite-manage-plans {
-		font-size: $default-font-size;
-		line-height: $default-line-height;
+		font-size: variables.$default-font-size;
+		line-height: variables.$default-line-height;
 	}
 
 	.wc-subscriptions-lite-one-time {
-		margin-top: $grid-unit-30;
+		margin-top: variables.$grid-unit-30;
 	}
 }
