@@ -141,11 +141,11 @@ final class VariationPlanDataTest extends LiteIntegrationTestCase {
 		$plan_id = (int) $plan->get_id();
 		$this->assertSame( [ $plan_id ], array_keys( $expensive['subscriptions_lite']['option_html'] ) );
 		$this->assertSame(
-			'$27.00 every 1 month (10% off)',
+			'$27.00 / month (10% off)',
 			html_entity_decode( wp_strip_all_tags( $expensive['subscriptions_lite']['option_html'][ $plan_id ] ), ENT_QUOTES )
 		);
 		$this->assertSame(
-			'$18.00 every 1 month (10% off)',
+			'$18.00 / month (10% off)',
 			html_entity_decode( wp_strip_all_tags( $cheap['subscriptions_lite']['option_html'][ $plan_id ] ), ENT_QUOTES )
 		);
 	}

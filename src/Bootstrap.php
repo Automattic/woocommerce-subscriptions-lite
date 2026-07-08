@@ -65,8 +65,15 @@ final class Bootstrap {
 		ProductPage\PlanPicker::register();
 		ProductPage\VariationPlanData::register();
 
-		// Cart: carry the chosen plan through cart item data and totals.
-		// TODO: Cart module - register once the PDP widening slice lands.
+		// Cart: carry the chosen plan through cart item data, price the line at
+		// the recurring amount, and write the plan onto the order line item.
+		Cart\CartPlanHooks::register();
+
+		// Cart/Checkout Blocks: expose per-item plan data on core's Store API and
+		// enqueue the checkout filters (frequency suffix + "Total due today").
+		// Guarded so Lite still loads on WooCommerce builds without Blocks.
+		Cart\Blocks\StoreApiExtension::register();
+		Cart\Blocks\Integration::register();
 
 		// Checkout: turn a completed order into a subscription contract via the
 		// engine factory, then schedule its first renewal.

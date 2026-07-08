@@ -3,10 +3,17 @@
  * PlanOptionFormatter - plan price, frequency, and discount display strings.
  *
  * The single source of truth for how a selling plan reads on the product
- * surfaces: the PDP picker option text (`$21.60 every 1 month (10% off)`) and
- * the admin product-panel table's Frequency and Discount columns. The price
- * math lives on the engine's Plan entity (PricingPolicy::calculate_price());
- * this class owns only formatting and i18n.
+ * surfaces: the PDP picker option text (`$21.60 / month (10% off)`) and the
+ * admin product-panel table's Frequency and Discount columns. The price math
+ * lives on the engine's Plan entity (PricingPolicy::calculate_price()); this
+ * class owns only formatting and i18n.
+ *
+ * Two cadence phrasings, both keyed off the billing interval:
+ *  - price cadence (customer price strings): `/ month` at interval 1, else
+ *    `every N months` - identical to the customer portal's recurring summary.
+ *  - frequency label (the customer-facing plan name): the adjective `Monthly`
+ *    at interval 1, else `Every N months`. The admin `format_frequency()`
+ *    column stays explicit (`Every 1 month`) so merchants read the exact config.
  *
  * format() and format_discount() carry wc_price()'s inline HTML (the wrapping
  * price span), so callers rendering to HTML escape with wp_kses_post(), never
@@ -20,6 +27,7 @@ declare( strict_types=1 );
 namespace Automattic\WooCommerce\SubscriptionsLite\ProductPage;
 
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Plan;
+use Automattic\WooCommerce\SubscriptionsEngine\Core\ValueObject\BillingPolicy;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\Formatting;
 
 defined( 'ABSPATH' ) || exit;
@@ -34,31 +42,46 @@ defined( 'ABSPATH' ) || exit;
 final class PlanOptionFormatter {
 
 	/**
-	 * Format a picker option's visible text: `{price} every N {period}` plus
-	 * an optional ` ({discount})` suffix. Carries wc_price() HTML.
+	 * Format a picker option's visible text: `{price} {cadence}` plus an optional
+	 * ` ({discount})` suffix (`$21.60 / month (10% off)`). Carries wc_price() HTML.
 	 *
 	 * @param Plan  $plan       Plan being formatted.
 	 * @param float $base_price Base price the plan applies to.
 	 * @return string Option text; escape with wp_kses_post() when rendering.
 	 */
 	public static function format( Plan $plan, float $base_price ): string {
-		$policy   = $plan->get_billing_policy();
-		$interval = $policy->get_interval();
-
-		$price     = wc_price( $plan->calculate_price( $base_price, 1 ) );
-		$frequency = sprintf(
-			/* translators: 1: billing interval count, 2: pluralized billing period (e.g. "month", "months"). */
-			__( 'every %1$d %2$s', 'woocommerce-subscriptions-lite' ),
-			$interval,
-			self::period_label( $policy->get_period(), $interval )
-		);
-
+		$price    = wc_price( $plan->calculate_price( $base_price, 1 ) );
+		$cadence  = self::price_cadence( $plan->get_billing_policy() );
 		$discount = self::discount_suffix( $plan, $base_price );
+
 		if ( '' === $discount ) {
-			return sprintf( '%s %s', $price, $frequency );
+			return sprintf( '%s %s', $price, $cadence );
 		}
 
-		return sprintf( '%s %s (%s)', $price, $frequency, $discount );
+		return sprintf( '%s %s (%s)', $price, $cadence, $discount );
+	}
+
+	/**
+	 * Price-cadence suffix for a cart/checkout line price (`/ month`, or
+	 * `every 2 weeks` above interval 1). Plain text; escape with esc_html().
+	 * Matches the customer portal's recurring-summary phrasing.
+	 *
+	 * @param Plan $plan Plan being formatted.
+	 */
+	public static function cadence_suffix( Plan $plan ): string {
+		return self::price_cadence( $plan->get_billing_policy() );
+	}
+
+	/**
+	 * Short customer-facing plan label for a cart line / Store API row: the
+	 * frequency read as an adjective (`Monthly`, or `Every 2 weeks` above
+	 * interval 1). Post the name/description drop, a plan's identity is its
+	 * cadence. Plain text.
+	 *
+	 * @param Plan $plan Plan being formatted.
+	 */
+	public static function plan_label( Plan $plan ): string {
+		return self::frequency_label( $plan->get_billing_policy() );
 	}
 
 	/**
@@ -92,6 +115,80 @@ final class PlanOptionFormatter {
 		$suffix = self::discount_suffix( $plan, $base_price );
 
 		return '' === $suffix ? Formatting::PLACEHOLDER : $suffix;
+	}
+
+	/**
+	 * Price-cadence suffix: `/ month` at interval 1, else `every N months`. The
+	 * `/ period` form and the `every N periods` msgids match the customer
+	 * portal's cadence, so a single translation covers both surfaces.
+	 *
+	 * @param BillingPolicy $policy Billing policy carrying the period + interval.
+	 */
+	private static function price_cadence( BillingPolicy $policy ): string {
+		$period   = $policy->get_period();
+		$interval = $policy->get_interval();
+
+		if ( 1 === $interval ) {
+			switch ( $period ) {
+				case 'day':
+					return __( '/ day', 'woocommerce-subscriptions-lite' );
+				case 'week':
+					return __( '/ week', 'woocommerce-subscriptions-lite' );
+				case 'month':
+					return __( '/ month', 'woocommerce-subscriptions-lite' );
+				case 'year':
+					return __( '/ year', 'woocommerce-subscriptions-lite' );
+			}
+		}
+
+		switch ( $period ) {
+			case 'day':
+				/* translators: %d: interval count. */
+				return sprintf( _n( 'every %d day', 'every %d days', $interval, 'woocommerce-subscriptions-lite' ), $interval );
+			case 'week':
+				/* translators: %d: interval count. */
+				return sprintf( _n( 'every %d week', 'every %d weeks', $interval, 'woocommerce-subscriptions-lite' ), $interval );
+			case 'month':
+				/* translators: %d: interval count. */
+				return sprintf( _n( 'every %d month', 'every %d months', $interval, 'woocommerce-subscriptions-lite' ), $interval );
+			case 'year':
+				/* translators: %d: interval count. */
+				return sprintf( _n( 'every %d year', 'every %d years', $interval, 'woocommerce-subscriptions-lite' ), $interval );
+			default:
+				return '';
+		}
+	}
+
+	/**
+	 * The frequency read as a customer-facing label: the adjective `Monthly` at
+	 * interval 1, else `Every N months`. Unknown periods at interval 1 fall back
+	 * to the explicit `Every 1 {period}` form.
+	 *
+	 * @param BillingPolicy $policy Billing policy carrying the period + interval.
+	 */
+	private static function frequency_label( BillingPolicy $policy ): string {
+		$period   = $policy->get_period();
+		$interval = $policy->get_interval();
+
+		if ( 1 === $interval ) {
+			switch ( $period ) {
+				case 'day':
+					return __( 'Daily', 'woocommerce-subscriptions-lite' );
+				case 'week':
+					return __( 'Weekly', 'woocommerce-subscriptions-lite' );
+				case 'month':
+					return __( 'Monthly', 'woocommerce-subscriptions-lite' );
+				case 'year':
+					return __( 'Yearly', 'woocommerce-subscriptions-lite' );
+			}
+		}
+
+		return sprintf(
+			/* translators: 1: billing interval count, 2: pluralized billing period (e.g. "month", "months"). */
+			__( 'Every %1$d %2$s', 'woocommerce-subscriptions-lite' ),
+			$interval,
+			self::period_label( $period, $interval )
+		);
 	}
 
 	/**
