@@ -12,8 +12,8 @@
  * endpoints.
  */
 
-@import "@wordpress/base-styles/colors";
-@import "@wordpress/base-styles/variables";
+@use "@wordpress/base-styles/colors";
+@use "@wordpress/base-styles/variables";
 
 /*
  * Status palette.
@@ -39,10 +39,10 @@ $status-failed-fg: #761919;
  * delete red (mirroring the admin cancel action), and the inline action-error
  * regions use a light-red surface @wordpress/base-styles ships no token for.
  */
-$destructive: $alert-red;
+$destructive: colors.$alert-red;
 $destructive-hover: #a81616;
 $error-bg: #fcebea;
-$error-fg: $alert-red;
+$error-fg: colors.$alert-red;
 
 /*
  * Subscription + related-order status badge. The grey base covers cancelled /
@@ -52,13 +52,13 @@ $error-fg: $alert-red;
 .wc-subs-lite-status-badge {
 	display: inline-block;
 	padding: 0.25em 0.75em;
-	border-radius: $radius-full;
+	border-radius: variables.$radius-full;
 	font-size: 0.85em;
 	font-weight: 600;
 	line-height: 1.6;
 	white-space: nowrap;
-	background: $gray-100;
-	color: $gray-700;
+	background: colors.$gray-100;
+	color: colors.$gray-700;
 
 	&.wc-subs-lite-status-badge--active,
 	&.wc-subs-lite-status-badge--completed,
@@ -87,25 +87,25 @@ $error-fg: $alert-red;
 /* Tighter spacing under the "Via {gateway}" line in the next-payment cell. */
 .account-subscriptions-table .subscription-next-payment small {
 	display: inline-block;
-	margin-top: $grid-unit-05;
-	color: $gray-700;
+	margin-top: variables.$grid-unit-05;
+	color: colors.$gray-700;
 }
 
 /* Detail data block (Status / Recurring / dates / Payment). */
 .subscription-detail-block {
 	display: grid;
 	grid-template-columns: minmax(8em, 12em) 1fr;
-	gap: $grid-unit-05 $grid-unit-15;
-	margin-bottom: $grid-unit-30;
-	padding: $grid-unit-15 $grid-unit-20;
-	border: $border-width solid $gray-200;
-	border-radius: $radius-medium;
-	background: $gray-100;
+	gap: variables.$grid-unit-05 variables.$grid-unit-15;
+	margin-bottom: variables.$grid-unit-30;
+	padding: variables.$grid-unit-15 variables.$grid-unit-20;
+	border: variables.$border-width solid colors.$gray-200;
+	border-radius: variables.$radius-medium;
+	background: colors.$gray-100;
 
 	dt {
 		margin: 0;
 		font-weight: 500;
-		color: $gray-700;
+		color: colors.$gray-700;
 	}
 
 	dd {
@@ -117,8 +117,8 @@ $error-fg: $alert-red;
 .subscription-detail-related-heading,
 .subscription-detail-totals-heading,
 .subscription-detail-addresses-heading {
-	margin-top: $grid-unit-30;
-	margin-bottom: $grid-unit-10;
+	margin-top: variables.$grid-unit-30;
+	margin-bottom: variables.$grid-unit-10;
 }
 
 /* Action-buttons row (cancel / pause / reactivate + needs-payment notice). */
@@ -126,8 +126,8 @@ $error-fg: $alert-red;
 	display: flex;
 	flex-wrap: wrap;
 	align-items: center;
-	gap: $grid-unit-10;
-	margin-bottom: $grid-unit-30;
+	gap: variables.$grid-unit-10;
+	margin-bottom: variables.$grid-unit-30;
 }
 
 .subscription-needs-payment-notice {
@@ -139,9 +139,9 @@ $error-fg: $alert-red;
 .subscription-detail-actions__error {
 	flex-basis: 100%;
 	margin: 0;
-	padding: $grid-unit-10 $grid-unit-15;
-	border: $border-width solid $error-fg;
-	border-radius: $radius-medium;
+	padding: variables.$grid-unit-10 variables.$grid-unit-15;
+	border: variables.$border-width solid $error-fg;
+	border-radius: variables.$radius-medium;
 	background: $error-bg;
 	color: $error-fg;
 
@@ -170,8 +170,8 @@ $error-fg: $alert-red;
    block, matching the spacing of the core my-account orders pagination. */
 .subscriptions-lite-pagination {
 	display: flex;
-	gap: $grid-unit-10;
-	margin-top: $grid-unit-20;
+	gap: variables.$grid-unit-10;
+	margin-top: variables.$grid-unit-20;
 }
 
 /* Subscription-totals table: quantity marker + right-aligned amounts. */
@@ -194,78 +194,78 @@ $error-fg: $alert-red;
 .subscription-detail-addresses {
 
 	.subscription-address-label {
-		margin: 0 0 $grid-unit-05;
+		margin: 0 0 variables.$grid-unit-05;
 		font-size: 1em;
 		font-weight: 500;
-		color: $gray-700;
+		color: colors.$gray-700;
 	}
 
 	.woocommerce-customer-details--phone,
 	.woocommerce-customer-details--email {
-		margin: $grid-unit-05 0 0;
+		margin: variables.$grid-unit-05 0 0;
 	}
 }
 
 /* Cancel confirmation modal (native <dialog>, wired to the iAPI store). */
 .wc-subscriptions-lite-cancel-modal {
-	width: calc(100% - #{$grid-unit-20});
+	width: calc(100% - #{variables.$grid-unit-20});
 	max-width: 480px;
 	padding: 0;
-	border: $border-width solid $gray-300;
-	border-radius: $radius-large;
-	background: $white;
+	border: variables.$border-width solid colors.$gray-300;
+	border-radius: variables.$radius-large;
+	background: colors.$white;
 	color: inherit;
-	box-shadow: 0 10px 25px rgba($black, 0.15);
+	box-shadow: 0 10px 25px rgba(colors.$black, 0.15);
 
 	&::backdrop {
-		background: rgba($black, 0.45);
+		background: rgba(colors.$black, 0.45);
 	}
 
 	&__inner {
 		position: relative;
-		padding: $grid-unit-30;
+		padding: variables.$grid-unit-30;
 	}
 
 	&__close {
 		position: absolute;
-		top: $grid-unit-05;
-		right: $grid-unit-05;
-		width: $grid-unit-40;
-		height: $grid-unit-40;
+		top: variables.$grid-unit-05;
+		right: variables.$grid-unit-05;
+		width: variables.$grid-unit-40;
+		height: variables.$grid-unit-40;
 		padding: 0;
 		border: 0;
-		border-radius: $radius-small;
+		border-radius: variables.$radius-small;
 		background: transparent;
-		color: $gray-600;
+		color: colors.$gray-600;
 		font-size: 1.5em;
 		line-height: 1;
 		cursor: pointer;
 
 		&:hover,
 		&:focus {
-			background: $gray-100;
-			color: $gray-900;
+			background: colors.$gray-100;
+			color: colors.$gray-900;
 		}
 	}
 
 	&__title {
-		margin: 0 0 $grid-unit-10;
-		padding-right: $grid-unit-30;
+		margin: 0 0 variables.$grid-unit-10;
+		padding-right: variables.$grid-unit-30;
 		font-size: 1.25em;
 		line-height: 1.3;
 	}
 
 	&__body {
-		margin: 0 0 $grid-unit-15;
-		color: $gray-700;
+		margin: 0 0 variables.$grid-unit-15;
+		color: colors.$gray-700;
 		line-height: 1.5;
 	}
 
 	&__error {
-		margin: 0 0 $grid-unit-15;
-		padding: $grid-unit-10 $grid-unit-15;
-		border: $border-width solid $error-fg;
-		border-radius: $radius-medium;
+		margin: 0 0 variables.$grid-unit-15;
+		padding: variables.$grid-unit-10 variables.$grid-unit-15;
+		border: variables.$border-width solid $error-fg;
+		border-radius: variables.$radius-medium;
 		background: $error-bg;
 		color: $error-fg;
 
@@ -277,7 +277,7 @@ $error-fg: $alert-red;
 	&__actions {
 		display: flex;
 		justify-content: flex-end;
-		gap: $grid-unit-10;
+		gap: variables.$grid-unit-10;
 	}
 
 	/*
@@ -289,7 +289,7 @@ $error-fg: $alert-red;
 	&__submit {
 		background: $destructive !important;
 		border-color: $destructive !important;
-		color: $white !important;
+		color: colors.$white !important;
 
 		&:hover,
 		&:focus {

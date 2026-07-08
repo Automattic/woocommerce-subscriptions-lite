@@ -38,6 +38,13 @@ module.exports = {
 			'admin-php',
 			'index.js'
 		),
+		'checkout-filters': path.resolve(
+			process.cwd(),
+			'client',
+			'frontend',
+			'checkout',
+			'index.js'
+		),
 	},
 	output: {
 		...defaultConfig.output,

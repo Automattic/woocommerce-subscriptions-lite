@@ -7,7 +7,7 @@
  *
  * Rendered inside the add-to-cart form for simple and variable products that
  * resolve at least one selling plan. The chosen plan posts as
- * `_selling_plan_id`; while the one-time option is selected the plan select is
+ * `_wcsl_selling_plan_id`; while the one-time option is selected the plan select is
  * disabled and posts nothing. The server paints the state matching the initial
  * context, so the markup is correct before (and without) the
  * `woocommerce-subscriptions-lite/plan-picker` Interactivity API module
@@ -33,7 +33,7 @@ $wcsl_select_id  = 'wc-subscriptions-lite-plan-picker-select-' . $wcsl_product_i
 
 // The radios need a shared name for HTML radio-group exclusivity; the product
 // id suffix keeps multiple pickers on one page independent. The cart flow
-// ignores this key and reads only `_selling_plan_id`.
+// ignores this key and reads only `_wcsl_selling_plan_id`.
 $wcsl_mode_name = '_wcsl_picker_mode_' . $wcsl_product_id;
 
 $wcsl_picker_classes = 'wc-subscriptions-lite-plan-picker'
@@ -134,7 +134,7 @@ $wcsl_context = (string) wp_json_encode(
 		<select
 			id="<?php echo esc_attr( $wcsl_select_id ); ?>"
 			class="wc-subscriptions-lite-plan-picker__select"
-			name="_selling_plan_id"
+			name="_wcsl_selling_plan_id"
 			data-wp-bind--disabled="state.isOneTime"
 			<?php disabled( $one_time_allowed ); ?>
 		>

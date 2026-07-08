@@ -3,7 +3,7 @@
  * ContractCreationHandler - turns a processed checkout order into contracts.
  *
  * The checkout seam: the first moment a real customer's checkout fills the
- * engine's contract table. For each order line item carrying a `_selling_plan_id`
+ * engine's contract table. For each order line item carrying a `_wcsl_selling_plan_id`
  * the handler resolves the chosen {@see Plan} and hands the order + plan to the
  * engine's {@see ContractFactory::create_from_order()}, then schedules the first
  * renewal through {@see RenewalWiring}. The handler is intentionally thin - find
@@ -46,7 +46,7 @@ final class ContractCreationHandler {
 	 * lays this down on the order line item at checkout; the engine's contract
 	 * data model is keyed off it.
 	 */
-	private const SELLING_PLAN_META = '_selling_plan_id';
+	private const SELLING_PLAN_META = '_wcsl_selling_plan_id';
 
 	/**
 	 * Logger source tag.

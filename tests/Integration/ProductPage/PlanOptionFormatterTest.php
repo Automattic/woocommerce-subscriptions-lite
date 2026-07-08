@@ -66,7 +66,7 @@ final class PlanOptionFormatterTest extends LiteIntegrationTestCase {
 			]
 		);
 
-		$this->assertSame( '$21.60 every 1 month (10% off)', self::as_text( PlanOptionFormatter::format( $plan, 24.0 ) ) );
+		$this->assertSame( '$21.60 / month (10% off)', self::as_text( PlanOptionFormatter::format( $plan, 24.0 ) ) );
 	}
 
 	public function test_the_price_carries_real_wc_price_markup(): void {
@@ -98,7 +98,7 @@ final class PlanOptionFormatterTest extends LiteIntegrationTestCase {
 			]
 		);
 
-		$this->assertSame( '$15.00 every 1 month ($5.00 off)', self::as_text( PlanOptionFormatter::format( $plan, 20.0 ) ) );
+		$this->assertSame( '$15.00 / month ($5.00 off)', self::as_text( PlanOptionFormatter::format( $plan, 20.0 ) ) );
 	}
 
 	public function test_price_replacement_below_base_shows_the_difference(): void {
@@ -111,7 +111,7 @@ final class PlanOptionFormatterTest extends LiteIntegrationTestCase {
 			]
 		);
 
-		$this->assertSame( '$12.00 every 1 month ($8.00 off)', self::as_text( PlanOptionFormatter::format( $plan, 20.0 ) ) );
+		$this->assertSame( '$12.00 / month ($8.00 off)', self::as_text( PlanOptionFormatter::format( $plan, 20.0 ) ) );
 	}
 
 	public function test_price_replacement_increase_gets_no_suffix(): void {
@@ -124,13 +124,13 @@ final class PlanOptionFormatterTest extends LiteIntegrationTestCase {
 			]
 		);
 
-		$this->assertSame( '$15.00 every 1 month', self::as_text( PlanOptionFormatter::format( $plan, 10.0 ) ) );
+		$this->assertSame( '$15.00 / month', self::as_text( PlanOptionFormatter::format( $plan, 10.0 ) ) );
 	}
 
 	public function test_no_pricing_policy_renders_price_and_frequency_only(): void {
 		$plan = $this->make_priced_plan( null );
 
-		$this->assertSame( '$24.00 every 1 month', self::as_text( PlanOptionFormatter::format( $plan, 24.0 ) ) );
+		$this->assertSame( '$24.00 / month', self::as_text( PlanOptionFormatter::format( $plan, 24.0 ) ) );
 	}
 
 	public function test_zero_value_adjustments_produce_no_suffix(): void {
@@ -151,8 +151,8 @@ final class PlanOptionFormatterTest extends LiteIntegrationTestCase {
 			]
 		);
 
-		$this->assertSame( '$24.00 every 1 month', self::as_text( PlanOptionFormatter::format( $percentage, 24.0 ) ) );
-		$this->assertSame( '$24.00 every 1 month', self::as_text( PlanOptionFormatter::format( $fixed, 24.0 ) ) );
+		$this->assertSame( '$24.00 / month', self::as_text( PlanOptionFormatter::format( $percentage, 24.0 ) ) );
+		$this->assertSame( '$24.00 / month', self::as_text( PlanOptionFormatter::format( $fixed, 24.0 ) ) );
 	}
 
 	public function test_starting_cycle_above_one_appends_the_from_cycle_qualifier(): void {
@@ -167,7 +167,7 @@ final class PlanOptionFormatterTest extends LiteIntegrationTestCase {
 		);
 
 		// Cycle 1 is unaffected by the later-starting policy, so the price is the base.
-		$this->assertSame( '$20.00 every 1 month ($5.00 off (from cycle 2))', self::as_text( PlanOptionFormatter::format( $plan, 20.0 ) ) );
+		$this->assertSame( '$20.00 / month ($5.00 off (from cycle 2))', self::as_text( PlanOptionFormatter::format( $plan, 20.0 ) ) );
 	}
 
 	public function test_plural_frequency(): void {
@@ -179,6 +179,28 @@ final class PlanOptionFormatterTest extends LiteIntegrationTestCase {
 	public function test_format_frequency_is_capitalized_and_pluralized(): void {
 		$this->assertSame( 'Every 1 month', PlanOptionFormatter::format_frequency( $this->make_priced_plan( null ) ) );
 		$this->assertSame( 'Every 2 weeks', PlanOptionFormatter::format_frequency( $this->make_priced_plan( null, 'week', 2 ) ) );
+	}
+
+	public function test_plan_label_reads_a_single_interval_as_an_adjective(): void {
+		$this->assertSame( 'Daily', PlanOptionFormatter::plan_label( $this->make_priced_plan( null, 'day', 1 ) ) );
+		$this->assertSame( 'Weekly', PlanOptionFormatter::plan_label( $this->make_priced_plan( null, 'week', 1 ) ) );
+		$this->assertSame( 'Monthly', PlanOptionFormatter::plan_label( $this->make_priced_plan( null, 'month', 1 ) ) );
+		$this->assertSame( 'Yearly', PlanOptionFormatter::plan_label( $this->make_priced_plan( null, 'year', 1 ) ) );
+	}
+
+	public function test_plan_label_reads_a_multi_interval_as_a_count(): void {
+		$this->assertSame( 'Every 2 weeks', PlanOptionFormatter::plan_label( $this->make_priced_plan( null, 'week', 2 ) ) );
+		$this->assertSame( 'Every 3 months', PlanOptionFormatter::plan_label( $this->make_priced_plan( null, 'month', 3 ) ) );
+	}
+
+	public function test_cadence_suffix_uses_the_slash_form_at_interval_one(): void {
+		$this->assertSame( '/ month', PlanOptionFormatter::cadence_suffix( $this->make_priced_plan( null, 'month', 1 ) ) );
+		$this->assertSame( '/ week', PlanOptionFormatter::cadence_suffix( $this->make_priced_plan( null, 'week', 1 ) ) );
+	}
+
+	public function test_cadence_suffix_uses_the_every_form_above_interval_one(): void {
+		$this->assertSame( 'every 2 weeks', PlanOptionFormatter::cadence_suffix( $this->make_priced_plan( null, 'week', 2 ) ) );
+		$this->assertSame( 'every 3 months', PlanOptionFormatter::cadence_suffix( $this->make_priced_plan( null, 'month', 3 ) ) );
 	}
 
 	public function test_format_discount_returns_the_placeholder_when_there_is_nothing_to_show(): void {
