@@ -3,7 +3,7 @@
  * Integration tests for the detail-screen meta-box registration.
  *
  * Asserts the screen registers the section boxes in the order-edit arrangement:
- * details -> items -> addresses -> billing history in the main column, actions +
+ * details -> addresses -> items -> billing history in the main column, actions +
  * schedule + customer on the side.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Tests
@@ -48,8 +48,8 @@ final class DetailRendererTest extends LiteIntegrationTestCase {
 		$data_pos      = array_search( 'wc-subs-lite-data', $normal_high, true );
 		$items_pos     = array_search( 'wc-subs-lite-items', $normal_high, true );
 		$addresses_pos = array_search( 'wc-subs-lite-addresses', $normal_high, true );
-		$this->assertLessThan( $items_pos, $data_pos, 'Details register before items.' );
-		$this->assertLessThan( $addresses_pos, $items_pos, 'Items register before addresses, so the column reads details -> items -> addresses.' );
+		$this->assertLessThan( $addresses_pos, $data_pos, 'Details register before addresses.' );
+		$this->assertLessThan( $items_pos, $addresses_pos, 'Addresses register before items, so the column reads details -> addresses -> items.' );
 
 		$this->assertArrayHasKey( 'wc-subs-lite-history', $boxes['normal']['default'] ?? [] );
 		$this->assertArrayHasKey( 'wc-subs-lite-actions', $boxes['side']['high'] ?? [] );

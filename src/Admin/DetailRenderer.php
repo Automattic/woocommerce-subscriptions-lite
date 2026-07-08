@@ -3,7 +3,7 @@
  * DetailRenderer - the admin subscription detail screen.
  *
  * A WordPress meta-box screen for `?page=...&action=view&id=N`, modelled on
- * WooCommerce's order edit screen: each section (details, items, addresses,
+ * WooCommerce's order edit screen: each section (details, addresses, items,
  * billing history in the main column; actions, schedule, customer on the side) is
  * a postbox registered on this page's screen id and rendered with
  * `do_meta_boxes()`, so the screen inherits wp-admin's collapsible two-column
@@ -70,7 +70,7 @@ final class DetailRenderer {
 		);
 
 		// Main column, all normal/high in registration order, so it reads
-		// details -> items -> addresses -> billing history like the order edit screen.
+		// details -> addresses -> items -> billing history like the order edit screen.
 		add_meta_box(
 			'wc-subs-lite-data',
 			__( 'Subscription details', 'woocommerce-subscriptions-lite' ),
@@ -80,17 +80,17 @@ final class DetailRenderer {
 			'high'
 		);
 		add_meta_box(
-			'wc-subs-lite-items',
-			__( 'Items', 'woocommerce-subscriptions-lite' ),
-			[ Items::class, 'output' ],
+			'wc-subs-lite-addresses',
+			__( 'Addresses', 'woocommerce-subscriptions-lite' ),
+			[ Addresses::class, 'output' ],
 			$screen_id,
 			'normal',
 			'high'
 		);
 		add_meta_box(
-			'wc-subs-lite-addresses',
-			__( 'Addresses', 'woocommerce-subscriptions-lite' ),
-			[ Addresses::class, 'output' ],
+			'wc-subs-lite-items',
+			__( 'Items', 'woocommerce-subscriptions-lite' ),
+			[ Items::class, 'output' ],
 			$screen_id,
 			'normal',
 			'high'
