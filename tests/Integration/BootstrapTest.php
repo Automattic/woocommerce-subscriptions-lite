@@ -35,7 +35,7 @@ final class BootstrapTest extends LiteIntegrationTestCase {
 			'Subscription carts require a customer account.'
 		);
 		$this->assertNotFalse(
-			has_action( 'woocommerce_thankyou' ),
+			has_action( 'woocommerce_order_details_after_order_table' ),
 			'The order-received subscription summary is wired.'
 		);
 	}

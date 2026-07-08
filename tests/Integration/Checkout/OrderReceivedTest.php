@@ -42,9 +42,11 @@ final class OrderReceivedTest extends LiteIntegrationTestCase {
 
 		$html = $this->render( $order_id );
 
-		$this->assertStringContainsString( 'woocommerce-order-subscription', $html, 'The subscription summary section renders.' );
-		$this->assertStringContainsString( 'wc-subscriptions-lite-manage-subscription', $html, 'The manage-subscription link renders.' );
-		$this->assertStringContainsString( (string) $contract_id, $html, 'The manage link targets the contract.' );
+		$this->assertStringContainsString( 'Related subscriptions', $html, 'The related-subscriptions section renders.' );
+		$this->assertStringContainsString( 'woocommerce-orders-table', $html, 'It reuses the WooCommerce orders-table markup so the theme styles it.' );
+		$this->assertStringContainsString( 'wc-subscriptions-lite-manage-subscription', $html, 'The View link renders.' );
+		$this->assertStringContainsString( '#' . $contract_id, $html, 'The row shows the contract number.' );
+		$this->assertStringContainsString( (string) $contract_id, $html, 'The View link targets the contract.' );
 	}
 
 	public function test_renders_a_warning_when_creation_was_deferred(): void {
