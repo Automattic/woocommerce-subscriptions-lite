@@ -94,7 +94,7 @@ final class PlanPicker {
 
 		$product_id = (int) $product->get_id();
 
-		$plans = ( new ProductPlanResolver() )->for_product( $product_id );
+		$plans = ( new ProductPlanResolver() )->get_plans_for_product( $product_id );
 		if ( empty( $plans ) ) {
 			return '';
 		}

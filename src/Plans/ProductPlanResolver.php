@@ -1,7 +1,6 @@
 <?php
 /**
- * ProductPlanResolver - resolves which selling plans apply to a product and
- * bridges the result through Lite's product-plans filter.
+ * ProductPlanResolver - resolves which selling plans apply to a product.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Plans
  */
@@ -27,14 +26,6 @@ defined( 'ABSPATH' ) || exit;
  * in the catalog's display order.
  */
 final class ProductPlanResolver {
-
-	/**
-	 * Filter over the plans resolved for a product, with
-	 * `( $plans, $product_id )`. Lite's eligibility extension point over the
-	 * resolved set (Premium overlays it): consumers may remove or append
-	 * plans; non-Plan entries are discarded after the filter runs.
-	 */
-	public const PRODUCT_PLANS_FILTER = 'woocommerce_subscriptions_lite_product_plans';
 
 	/**
 	 * Applicability meta store.
@@ -65,12 +56,12 @@ final class ProductPlanResolver {
 	 *
 	 * An unknown product resolves to no plans. Otherwise the parent product's
 	 * applicability mode drives the lookup; an empty selection under
-	 * 'inherit_select' short-circuits to no plans without running the filter.
+	 * 'inherit_select' resolves to no plans.
 	 *
 	 * @param int $product_id Product (or variation) id.
 	 * @return array<int, Plan> Plans in display order.
 	 */
-	public function for_product( int $product_id ): array {
+	public function get_plans_for_product( int $product_id ): array {
 		$product = wc_get_product( $product_id );
 		if ( ! $product instanceof WC_Product ) {
 			return [];
@@ -79,38 +70,16 @@ final class ProductPlanResolver {
 		$parent_id     = (int) $product->get_parent_id();
 		$applicability = $this->store->get( $parent_id > 0 ? $parent_id : $product_id );
 
-		$plans = [];
 		if ( ProductApplicability::MODE_INHERIT_ALL === $applicability->get_mode() ) {
-			$plans = $this->catalog->list_plans();
-		} elseif ( ProductApplicability::MODE_INHERIT_SELECT === $applicability->get_mode() ) {
-			$plan_ids = $applicability->get_plan_ids();
-			if ( [] === $plan_ids ) {
-				return [];
-			}
-
-			$plans = $this->catalog->get_plans( $plan_ids );
+			return $this->catalog->list_plans();
 		}
 
-		/**
-		 * Filters the plans resolved for a product.
-		 *
-		 * Lite's eligibility extension point over the resolved set: consumers
-		 * may remove or append plans. Entries that are not Plan instances are
-		 * discarded after the filter runs.
-		 *
-		 * @param array<int, Plan> $plans      Resolved plans, in display order.
-		 * @param int              $product_id The id the caller asked about (a variation id is passed as-is).
-		 */
-		// phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.DynamicHooknameFound -- the constant is a literal carrying the woocommerce_subscriptions_lite prefix.
-		$plans = apply_filters( self::PRODUCT_PLANS_FILTER, $plans, $product_id );
+		if ( ProductApplicability::MODE_INHERIT_SELECT === $applicability->get_mode() ) {
+			$plan_ids = $applicability->get_plan_ids();
 
-		return array_values(
-			array_filter(
-				is_array( $plans ) ? $plans : [],
-				static function ( $plan ): bool {
-					return $plan instanceof Plan;
-				}
-			)
-		);
+			return [] === $plan_ids ? [] : $this->catalog->get_plans( $plan_ids );
+		}
+
+		return [];
 	}
 }

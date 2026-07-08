@@ -3,9 +3,8 @@
  * Integration tests for the product plan resolver.
  *
  * Resolution runs END TO END: real products and variations, applicability in
- * real postmeta through the Lite store, plans read back through the engine's
- * catalog facade, and the Lite product-plans filter dispatched through the
- * real hook table.
+ * real postmeta through the Lite store, and plans read back through the
+ * engine's catalog facade.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Tests
  */
@@ -28,12 +27,6 @@ use WC_Product_Variation;
  * @covers \Automattic\WooCommerce\SubscriptionsLite\Plans\ProductPlanResolver
  */
 final class ProductPlanResolverTest extends LiteIntegrationTestCase {
-
-	public function tear_down(): void {
-		remove_all_filters( ProductPlanResolver::PRODUCT_PLANS_FILTER );
-
-		parent::tear_down();
-	}
 
 	/**
 	 * Create a saved simple product.
@@ -62,7 +55,7 @@ final class ProductPlanResolverTest extends LiteIntegrationTestCase {
 	}
 
 	public function test_unknown_product_resolves_to_no_plans(): void {
-		$this->assertSame( [], ( new ProductPlanResolver() )->for_product( 999999 ) );
+		$this->assertSame( [], ( new ProductPlanResolver() )->get_plans_for_product( 999999 ) );
 	}
 
 	public function test_disable_mode_resolves_to_no_plans(): void {
@@ -72,7 +65,7 @@ final class ProductPlanResolverTest extends LiteIntegrationTestCase {
 		// Fresh products default to disable; write it explicitly for the round trip.
 		( new ApplicabilityStore() )->set( $product_id, new ProductApplicability( ProductApplicability::MODE_DISABLE ) );
 
-		$this->assertSame( [], ( new ProductPlanResolver() )->for_product( $product_id ) );
+		$this->assertSame( [], ( new ProductPlanResolver() )->get_plans_for_product( $product_id ) );
 	}
 
 	public function test_inherit_all_resolves_every_active_lite_plan(): void {
@@ -83,7 +76,7 @@ final class ProductPlanResolverTest extends LiteIntegrationTestCase {
 
 		( new ApplicabilityStore() )->set( $product_id, new ProductApplicability( ProductApplicability::MODE_INHERIT_ALL ) );
 
-		$plans = ( new ProductPlanResolver() )->for_product( $product_id );
+		$plans = ( new ProductPlanResolver() )->get_plans_for_product( $product_id );
 
 		$this->assertSame( [ $first_id, $second_id ], self::plan_ids( $plans ) );
 	}
@@ -104,53 +97,21 @@ final class ProductPlanResolverTest extends LiteIntegrationTestCase {
 		$archived->set_status( Plan::STATUS_ARCHIVED );
 		( new PlanRepository() )->update( $archived );
 
-		$plans = ( new ProductPlanResolver() )->for_product( $product_id );
+		$plans = ( new ProductPlanResolver() )->get_plans_for_product( $product_id );
 
 		$this->assertSame( [ $attached_id ], self::plan_ids( $plans ) );
 	}
 
-	public function test_empty_selection_short_circuits_without_running_the_filter(): void {
+	public function test_inherit_select_with_an_empty_selection_resolves_to_no_plans(): void {
 		$product_id = $this->make_product();
+		$this->make_plan();
 
 		( new ApplicabilityStore() )->set(
 			$product_id,
 			new ProductApplicability( ProductApplicability::MODE_INHERIT_SELECT, [] )
 		);
 
-		$calls = 0;
-		add_filter(
-			ProductPlanResolver::PRODUCT_PLANS_FILTER,
-			static function ( array $plans ) use ( &$calls ): array {
-				++$calls;
-
-				return $plans;
-			}
-		);
-
-		$this->assertSame( [], ( new ProductPlanResolver() )->for_product( $product_id ) );
-		$this->assertSame( 0, $calls );
-	}
-
-	public function test_disable_mode_runs_the_filter_over_the_empty_set(): void {
-		$product_id = $this->make_product();
-
-		( new ApplicabilityStore() )->set( $product_id, new ProductApplicability( ProductApplicability::MODE_DISABLE ) );
-
-		$calls = 0;
-		$seen  = null;
-		add_filter(
-			ProductPlanResolver::PRODUCT_PLANS_FILTER,
-			static function ( array $plans ) use ( &$calls, &$seen ): array {
-				++$calls;
-				$seen = $plans;
-
-				return $plans;
-			}
-		);
-
-		$this->assertSame( [], ( new ProductPlanResolver() )->for_product( $product_id ) );
-		$this->assertSame( 1, $calls );
-		$this->assertSame( [], $seen );
+		$this->assertSame( [], ( new ProductPlanResolver() )->get_plans_for_product( $product_id ) );
 	}
 
 	public function test_archived_and_foreign_slug_plans_are_excluded(): void {
@@ -162,7 +123,7 @@ final class ProductPlanResolverTest extends LiteIntegrationTestCase {
 
 		( new ApplicabilityStore() )->set( $product_id, new ProductApplicability( ProductApplicability::MODE_INHERIT_ALL ) );
 
-		$plans = ( new ProductPlanResolver() )->for_product( $product_id );
+		$plans = ( new ProductPlanResolver() )->get_plans_for_product( $product_id );
 
 		$this->assertSame( [ $active_id ], self::plan_ids( $plans ) );
 	}
@@ -181,7 +142,7 @@ final class ProductPlanResolverTest extends LiteIntegrationTestCase {
 
 		( new ApplicabilityStore() )->set( $parent_id, new ProductApplicability( ProductApplicability::MODE_INHERIT_ALL ) );
 
-		$plans = ( new ProductPlanResolver() )->for_product( $variation_id );
+		$plans = ( new ProductPlanResolver() )->get_plans_for_product( $variation_id );
 
 		$this->assertSame( [ $plan_id ], self::plan_ids( $plans ) );
 	}
@@ -194,118 +155,8 @@ final class ProductPlanResolverTest extends LiteIntegrationTestCase {
 
 		( new ApplicabilityStore() )->set( $product_id, new ProductApplicability( ProductApplicability::MODE_INHERIT_ALL ) );
 
-		$plans = ( new ProductPlanResolver() )->for_product( $product_id );
+		$plans = ( new ProductPlanResolver() )->get_plans_for_product( $product_id );
 
 		$this->assertSame( [ $first_id, $last_id ], self::plan_ids( $plans ) );
-	}
-
-	public function test_filter_can_remove_and_append_plans(): void {
-		$product_id = $this->make_product();
-
-		$removed_id = (int) $this->make_plan( 'month', 1, null, [ 'name' => 'Removed' ] )->get_id();
-		$this->make_plan( 'week', 1, null, [ 'name' => 'Kept' ] );
-		$appended = $this->make_plan(
-			'year',
-			1,
-			null,
-			[
-				'name'   => 'Appended',
-				'status' => Plan::STATUS_ARCHIVED,
-			]
-		);
-
-		( new ApplicabilityStore() )->set( $product_id, new ProductApplicability( ProductApplicability::MODE_INHERIT_ALL ) );
-
-		add_filter(
-			ProductPlanResolver::PRODUCT_PLANS_FILTER,
-			static function ( array $plans ) use ( $removed_id, $appended ): array {
-				$plans = array_filter(
-					$plans,
-					static function ( Plan $plan ) use ( $removed_id ): bool {
-						return $plan->get_id() !== $removed_id;
-					}
-				);
-
-				$plans[] = $appended;
-
-				return $plans;
-			}
-		);
-
-		$plans = ( new ProductPlanResolver() )->for_product( $product_id );
-		$names = array_map(
-			static function ( Plan $plan ): string {
-				return $plan->get_name();
-			},
-			$plans
-		);
-
-		$this->assertSame( [ 'Kept', 'Appended' ], $names );
-	}
-
-	public function test_filter_receives_the_original_product_id(): void {
-		// A variation: applicability is read from the parent, but the filter must
-		// see the variation id the caller asked about - not the parent id.
-		$parent = new WC_Product_Variable();
-		$parent->set_name( 'Coffee Box' );
-		$parent->save();
-		( new ApplicabilityStore() )->set( $parent->get_id(), new ProductApplicability( ProductApplicability::MODE_INHERIT_ALL ) );
-
-		$this->make_plan();
-
-		$variation = new WC_Product_Variation();
-		$variation->set_parent_id( $parent->get_id() );
-		$variation->set_regular_price( '24.00' );
-		$variation_id = (int) $variation->save();
-
-		$seen = null;
-		add_filter(
-			ProductPlanResolver::PRODUCT_PLANS_FILTER,
-			static function ( array $plans, int $filtered_product_id ) use ( &$seen ): array {
-				$seen = $filtered_product_id;
-
-				return $plans;
-			},
-			10,
-			2
-		);
-
-		( new ProductPlanResolver() )->for_product( $variation_id );
-
-		$this->assertSame( $variation_id, $seen );
-		$this->assertNotSame( (int) $parent->get_id(), $seen, 'The filter must see the variation id, not the parent it resolved applicability from.' );
-	}
-
-	public function test_non_plan_filter_garbage_is_dropped(): void {
-		$product_id = $this->make_product();
-		$plan_id    = (int) $this->make_plan()->get_id();
-
-		( new ApplicabilityStore() )->set( $product_id, new ProductApplicability( ProductApplicability::MODE_INHERIT_ALL ) );
-
-		add_filter(
-			ProductPlanResolver::PRODUCT_PLANS_FILTER,
-			static function ( array $plans ): array {
-				$plans[] = 'not-a-plan';
-				$plans[] = null;
-				$plans[] = new \stdClass();
-
-				return $plans;
-			}
-		);
-
-		$plans = ( new ProductPlanResolver() )->for_product( $product_id );
-
-		$this->assertSame( [ $plan_id ], self::plan_ids( $plans ) );
-	}
-
-	public function test_filter_returning_garbage_yields_no_plans(): void {
-		$product_id = $this->make_product();
-		$this->make_plan();
-
-		( new ApplicabilityStore() )->set( $product_id, new ProductApplicability( ProductApplicability::MODE_INHERIT_ALL ) );
-
-		add_filter( ProductPlanResolver::PRODUCT_PLANS_FILTER, '__return_false' );
-
-		$this->assertSame( [], ( new ProductPlanResolver() )->for_product( $product_id ) );
 	}
 }

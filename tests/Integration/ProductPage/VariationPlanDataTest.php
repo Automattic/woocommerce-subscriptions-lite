@@ -5,8 +5,7 @@
  * The payload paths run END TO END: real variable products and variations,
  * plans resolved through Lite's plan resolver from real applicability meta,
  * and the bootstrap-registered filter dispatched through the real hook table.
- * The memoization and no-id edge cases observe and shape the resolution
- * through Lite's product-plans filter.
+ * The memoization case observes resolution reuse across a parent's variations.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Tests
  */
@@ -22,7 +21,6 @@ use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\PlanRepositor
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ApplicabilityStore;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ProductApplicability;
-use Automattic\WooCommerce\SubscriptionsLite\Plans\ProductPlanResolver;
 use Automattic\WooCommerce\SubscriptionsLite\ProductPage\VariationPlanData;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
 use ReflectionProperty;
@@ -43,12 +41,6 @@ final class VariationPlanDataTest extends LiteIntegrationTestCase {
 		$cache = new ReflectionProperty( VariationPlanData::class, 'plans_cache' );
 		$cache->setAccessible( true );
 		$cache->setValue( null, [] );
-	}
-
-	public function tear_down(): void {
-		remove_all_filters( ProductPlanResolver::PRODUCT_PLANS_FILTER );
-
-		parent::tear_down();
 	}
 
 	/**
@@ -159,63 +151,38 @@ final class VariationPlanDataTest extends LiteIntegrationTestCase {
 	}
 
 	/**
-	 * A plan appended through the resolver's filter without a persisted id
-	 * cannot be keyed into the option map and is skipped.
-	 */
-	public function test_plans_without_an_id_are_skipped(): void {
-		$saved   = $this->discounted_plan();
-		$unsaved = Plan::create(
-			[
-				'name'           => 'Unsaved',
-				'billing_policy' => new BillingPolicy( 'month', 1, null, null, null ),
-				'extension_slug' => Package::EXTENSION_SLUG,
-			]
-		);
-
-		add_filter(
-			ProductPlanResolver::PRODUCT_PLANS_FILTER,
-			static function ( array $plans ) use ( $unsaved ): array {
-				$plans[] = $unsaved;
-
-				return $plans;
-			}
-		);
-
-		$parent = $this->subscribable_parent();
-		$result = ( new VariationPlanData() )->filter_available_variation( [], $parent, $this->variation_of( $parent, '10.00' ) );
-
-		$this->assertSame( [ (int) $saved->get_id() ], array_keys( $result['subscriptions_lite']['option_html'] ) );
-	}
-
-	/**
-	 * The resolver's filter fires once per resolution, so counting its calls
-	 * observes the memoization: one resolution per parent product.
+	 * Resolution is memoized per parent product: a parent's variations reuse a
+	 * single resolution. A plan that joins the catalog after the first
+	 * variation is serialized is absent from a later variation of the same
+	 * parent, while a different parent resolves afresh and sees it.
 	 */
 	public function test_plan_resolution_is_memoized_per_parent_product(): void {
-		$this->discounted_plan();
-		$resolved_ids = [];
-		add_filter(
-			ProductPlanResolver::PRODUCT_PLANS_FILTER,
-			static function ( array $plans, int $product_id ) use ( &$resolved_ids ): array {
-				$resolved_ids[] = $product_id;
+		$first_plan = $this->discounted_plan();
 
-				return $plans;
-			},
-			10,
-			2
+		$data     = new VariationPlanData();
+		$parent_a = $this->subscribable_parent();
+
+		$before = $data->filter_available_variation( [], $parent_a, $this->variation_of( $parent_a, '30.00' ) );
+		$this->assertSame( [ (int) $first_plan->get_id() ], array_keys( $before['subscriptions_lite']['option_html'] ) );
+
+		// A second plan joins the storewide catalog after parent A is cached.
+		$second_plan = $this->discounted_plan( false );
+
+		// Parent A's next variation reuses the memoized resolution: no new plan.
+		$again = $data->filter_available_variation( [], $parent_a, $this->variation_of( $parent_a, '20.00' ) );
+		$this->assertSame(
+			[ (int) $first_plan->get_id() ],
+			array_keys( $again['subscriptions_lite']['option_html'] ),
+			'A parent reuses one resolution across its variations, so a later-added plan does not appear.'
 		);
 
-		$filter   = new VariationPlanData();
-		$parent_a = $this->subscribable_parent();
+		// A different parent resolves afresh and sees both plans.
 		$parent_b = $this->subscribable_parent();
-		$filter->filter_available_variation( [], $parent_a, $this->variation_of( $parent_a, '30.00' ) );
-		$filter->filter_available_variation( [], $parent_a, $this->variation_of( $parent_a, '20.00' ) );
-		$filter->filter_available_variation( [], $parent_b, $this->variation_of( $parent_b, '10.00' ) );
-
-		$this->assertSame(
-			[ $parent_a->get_id(), $parent_b->get_id() ],
-			$resolved_ids,
-			'One resolution per parent product, not per variation.'
+		$fresh    = $data->filter_available_variation( [], $parent_b, $this->variation_of( $parent_b, '10.00' ) );
+		$this->assertEqualsCanonicalizing(
+			[ (int) $first_plan->get_id(), (int) $second_plan->get_id() ],
+			array_keys( $fresh['subscriptions_lite']['option_html'] ),
+			'A different parent resolves afresh and sees the plan added after parent A was cached.'
 		);
 	}
 

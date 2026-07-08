@@ -67,7 +67,7 @@ final class VariationPlanData {
 	public function filter_available_variation( array $data, WC_Product $product, WC_Product_Variation $variation ): array {
 		$product_id = (int) $product->get_id();
 		if ( ! array_key_exists( $product_id, self::$plans_cache ) ) {
-			self::$plans_cache[ $product_id ] = ( new ProductPlanResolver() )->for_product( $product_id );
+			self::$plans_cache[ $product_id ] = ( new ProductPlanResolver() )->get_plans_for_product( $product_id );
 		}
 
 		$plans = self::$plans_cache[ $product_id ];
