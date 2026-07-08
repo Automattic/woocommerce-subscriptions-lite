@@ -50,7 +50,7 @@ final class CartPlanHooksTest extends LiteIntegrationTestCase {
 	public function tear_down(): void {
 		WC()->cart->empty_cart();
 		wc_clear_notices();
-		unset( $_POST[ CartPlanHooks::CART_ITEM_KEY ] );
+		unset( $_POST[ CartPlanHooks::SELLING_PLAN_ID_KEY ] );
 		parent::tear_down();
 	}
 
@@ -107,9 +107,9 @@ final class CartPlanHooksTest extends LiteIntegrationTestCase {
 	 */
 	private function add_to_cart( int $product_id, ?int $plan_id ): string {
 		if ( null === $plan_id ) {
-			unset( $_POST[ CartPlanHooks::CART_ITEM_KEY ] );
+			unset( $_POST[ CartPlanHooks::SELLING_PLAN_ID_KEY ] );
 		} else {
-			$_POST[ CartPlanHooks::CART_ITEM_KEY ] = (string) $plan_id;
+			$_POST[ CartPlanHooks::SELLING_PLAN_ID_KEY ] = (string) $plan_id;
 		}
 
 		return (string) WC()->cart->add_to_cart( $product_id );
@@ -123,7 +123,7 @@ final class CartPlanHooksTest extends LiteIntegrationTestCase {
 		$key  = $this->add_to_cart( $product_id, $plan_id );
 		$item = WC()->cart->get_cart_item( $key );
 
-		$this->assertSame( $plan_id, $item[ CartPlanHooks::CART_ITEM_KEY ] );
+		$this->assertSame( $plan_id, $item[ CartPlanHooks::SELLING_PLAN_ID_KEY ] );
 	}
 
 	public function test_the_same_product_on_two_plans_is_two_cart_rows(): void {
@@ -146,7 +146,7 @@ final class CartPlanHooksTest extends LiteIntegrationTestCase {
 		$key  = $this->add_to_cart( $product_id, null );
 		$item = WC()->cart->get_cart_item( $key );
 
-		$this->assertArrayNotHasKey( CartPlanHooks::CART_ITEM_KEY, $item );
+		$this->assertArrayNotHasKey( CartPlanHooks::SELLING_PLAN_ID_KEY, $item );
 	}
 
 	public function test_validation_rejects_a_plan_that_does_not_apply(): void {
@@ -161,8 +161,8 @@ final class CartPlanHooksTest extends LiteIntegrationTestCase {
 			new ProductApplicability( ProductApplicability::MODE_INHERIT_SELECT, [ $attached_id ] )
 		);
 
-		$_POST[ CartPlanHooks::CART_ITEM_KEY ] = (string) $other_id;
-		$passed                                = apply_filters( 'woocommerce_add_to_cart_validation', true, $product_id, 1 );
+		$_POST[ CartPlanHooks::SELLING_PLAN_ID_KEY ] = (string) $other_id;
+		$passed                                      = apply_filters( 'woocommerce_add_to_cart_validation', true, $product_id, 1 );
 
 		$this->assertFalse( $passed, 'A non-applicable plan fails add-to-cart validation.' );
 		$this->assertNotEmpty( wc_get_notices( 'error' ) );
@@ -176,8 +176,8 @@ final class CartPlanHooksTest extends LiteIntegrationTestCase {
 			new ProductApplicability( ProductApplicability::MODE_INHERIT_SELECT, [ $attached_id ] )
 		);
 
-		$_POST[ CartPlanHooks::CART_ITEM_KEY ] = (string) $attached_id;
-		$passed                                = apply_filters( 'woocommerce_add_to_cart_validation', true, $product_id, 1 );
+		$_POST[ CartPlanHooks::SELLING_PLAN_ID_KEY ] = (string) $attached_id;
+		$passed                                      = apply_filters( 'woocommerce_add_to_cart_validation', true, $product_id, 1 );
 
 		$this->assertTrue( $passed );
 		$this->assertEmpty( wc_get_notices( 'error' ) );
@@ -199,7 +199,7 @@ final class CartPlanHooksTest extends LiteIntegrationTestCase {
 		$item = WC()->cart->get_cart_item( $key );
 
 		$this->assertNotSame( '', $key );
-		$this->assertArrayNotHasKey( CartPlanHooks::CART_ITEM_KEY, $item, 'The non-applicable plan is not attached.' );
+		$this->assertArrayNotHasKey( CartPlanHooks::SELLING_PLAN_ID_KEY, $item, 'The non-applicable plan is not attached.' );
 	}
 
 	public function test_validation_rejects_a_store_api_injected_plan(): void {
@@ -212,7 +212,7 @@ final class CartPlanHooksTest extends LiteIntegrationTestCase {
 			$product_id,
 			new ProductApplicability( ProductApplicability::MODE_INHERIT_SELECT, [ $attached_id ] )
 		);
-		unset( $_POST[ CartPlanHooks::CART_ITEM_KEY ] );
+		unset( $_POST[ CartPlanHooks::SELLING_PLAN_ID_KEY ] );
 
 		$passed = apply_filters(
 			'woocommerce_add_to_cart_validation',
@@ -221,7 +221,7 @@ final class CartPlanHooksTest extends LiteIntegrationTestCase {
 			1,
 			0,
 			[],
-			[ CartPlanHooks::CART_ITEM_KEY => $other_id ]
+			[ CartPlanHooks::SELLING_PLAN_ID_KEY => $other_id ]
 		);
 
 		$this->assertFalse( $passed, 'A plan injected via cart_item_data fails validation.' );
@@ -237,14 +237,14 @@ final class CartPlanHooksTest extends LiteIntegrationTestCase {
 			$product_id,
 			new ProductApplicability( ProductApplicability::MODE_INHERIT_SELECT, [ $attached_id ] )
 		);
-		unset( $_POST[ CartPlanHooks::CART_ITEM_KEY ] );
+		unset( $_POST[ CartPlanHooks::SELLING_PLAN_ID_KEY ] );
 
 		$result = ( new CartPlanHooks() )->add_cart_item_data(
-			[ CartPlanHooks::CART_ITEM_KEY => $other_id ],
+			[ CartPlanHooks::SELLING_PLAN_ID_KEY => $other_id ],
 			$product_id
 		);
 
-		$this->assertArrayNotHasKey( CartPlanHooks::CART_ITEM_KEY, $result, 'The injected non-applicable plan is stripped.' );
+		$this->assertArrayNotHasKey( CartPlanHooks::SELLING_PLAN_ID_KEY, $result, 'The injected non-applicable plan is stripped.' );
 	}
 
 	public function test_capture_keeps_a_valid_store_api_plan(): void {
@@ -254,14 +254,14 @@ final class CartPlanHooksTest extends LiteIntegrationTestCase {
 			$product_id,
 			new ProductApplicability( ProductApplicability::MODE_INHERIT_SELECT, [ $attached_id ] )
 		);
-		unset( $_POST[ CartPlanHooks::CART_ITEM_KEY ] );
+		unset( $_POST[ CartPlanHooks::SELLING_PLAN_ID_KEY ] );
 
 		$result = ( new CartPlanHooks() )->add_cart_item_data(
-			[ CartPlanHooks::CART_ITEM_KEY => $attached_id ],
+			[ CartPlanHooks::SELLING_PLAN_ID_KEY => $attached_id ],
 			$product_id
 		);
 
-		$this->assertSame( $attached_id, $result[ CartPlanHooks::CART_ITEM_KEY ] );
+		$this->assertSame( $attached_id, $result[ CartPlanHooks::SELLING_PLAN_ID_KEY ] );
 	}
 
 	public function test_an_array_shaped_plan_id_is_treated_as_one_time_not_fatal(): void {
@@ -270,12 +270,12 @@ final class CartPlanHooksTest extends LiteIntegrationTestCase {
 		( new ApplicabilityStore() )->set( $product_id, new ProductApplicability( ProductApplicability::MODE_INHERIT_ALL ) );
 
 		// phpcs:ignore WordPress.Security.NonceVerification.Missing -- Simulating a tampered add-to-cart POST.
-		$_POST[ CartPlanHooks::CART_ITEM_KEY ] = [ '99' ];
-		$key                                   = (string) WC()->cart->add_to_cart( $product_id );
-		$item                                  = WC()->cart->get_cart_item( $key );
+		$_POST[ CartPlanHooks::SELLING_PLAN_ID_KEY ] = [ '99' ];
+		$key  = (string) WC()->cart->add_to_cart( $product_id );
+		$item = WC()->cart->get_cart_item( $key );
 
 		$this->assertNotSame( '', $key, 'The add still succeeds as a one-time purchase.' );
-		$this->assertArrayNotHasKey( CartPlanHooks::CART_ITEM_KEY, $item );
+		$this->assertArrayNotHasKey( CartPlanHooks::SELLING_PLAN_ID_KEY, $item );
 	}
 
 	public function test_the_line_price_reflects_the_recurring_amount(): void {
@@ -378,17 +378,17 @@ final class CartPlanHooksTest extends LiteIntegrationTestCase {
 		( new CartPlanHooks() )->copy_to_line_item_meta(
 			$item,
 			'cart-key',
-			[ CartPlanHooks::CART_ITEM_KEY => 999999 ]
+			[ CartPlanHooks::SELLING_PLAN_ID_KEY => 999999 ]
 		);
 
-		$this->assertSame( '', $item->get_meta( CartPlanHooks::CART_ITEM_KEY ) );
+		$this->assertSame( '', $item->get_meta( CartPlanHooks::SELLING_PLAN_ID_KEY ) );
 	}
 
 	public function test_get_item_data_adds_a_plan_label_row(): void {
 		// Post the name/description drop, a plan's customer-facing label is its
 		// cadence read as an adjective.
 		$plan      = $this->make_plan( 'month', 1 );
-		$cart_item = [ CartPlanHooks::CART_ITEM_KEY => (int) $plan->get_id() ];
+		$cart_item = [ CartPlanHooks::SELLING_PLAN_ID_KEY => (int) $plan->get_id() ];
 
 		$rows = ( new CartPlanHooks() )->get_item_data( [], $cart_item );
 
@@ -404,7 +404,7 @@ final class CartPlanHooksTest extends LiteIntegrationTestCase {
 
 	public function test_cart_item_price_appends_the_cadence(): void {
 		$plan      = $this->make_plan( 'month', 1 );
-		$cart_item = [ CartPlanHooks::CART_ITEM_KEY => (int) $plan->get_id() ];
+		$cart_item = [ CartPlanHooks::SELLING_PLAN_ID_KEY => (int) $plan->get_id() ];
 
 		$html = ( new CartPlanHooks() )->cart_item_price( '<span>$18.00</span>', $cart_item );
 
@@ -420,10 +420,10 @@ final class CartPlanHooksTest extends LiteIntegrationTestCase {
 		( new CartPlanHooks() )->copy_to_line_item_meta(
 			$item,
 			'cart-key',
-			[ CartPlanHooks::CART_ITEM_KEY => (int) $plan->get_id() ]
+			[ CartPlanHooks::SELLING_PLAN_ID_KEY => (int) $plan->get_id() ]
 		);
 
-		$this->assertSame( (int) $plan->get_id(), (int) $item->get_meta( CartPlanHooks::CART_ITEM_KEY ) );
+		$this->assertSame( (int) $plan->get_id(), (int) $item->get_meta( CartPlanHooks::SELLING_PLAN_ID_KEY ) );
 	}
 
 	public function test_copy_to_line_item_meta_skips_one_time_lines(): void {
@@ -431,7 +431,7 @@ final class CartPlanHooksTest extends LiteIntegrationTestCase {
 
 		( new CartPlanHooks() )->copy_to_line_item_meta( $item, 'cart-key', [] );
 
-		$this->assertSame( '', $item->get_meta( CartPlanHooks::CART_ITEM_KEY ) );
+		$this->assertSame( '', $item->get_meta( CartPlanHooks::SELLING_PLAN_ID_KEY ) );
 	}
 
 	public function test_register_wires_the_default_hooks(): void {
@@ -460,12 +460,12 @@ final class CartPlanHooksTest extends LiteIntegrationTestCase {
 		( new CartPlanHooks() )->copy_to_line_item_meta(
 			$item,
 			'cart-key',
-			[ CartPlanHooks::CART_ITEM_KEY => (int) $plan->get_id() ]
+			[ CartPlanHooks::SELLING_PLAN_ID_KEY => (int) $plan->get_id() ]
 		);
 
 		$this->assertSame(
 			(int) $plan->get_id(),
-			(int) $item->get_meta( '_selling_plan_id' ),
+			(int) $item->get_meta( '_wcsl_selling_plan_id' ),
 			'The order line item carries the key the contract handler reads.'
 		);
 	}

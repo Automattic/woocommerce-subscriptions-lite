@@ -1,6 +1,6 @@
 <?php
 /**
- * Cart-side round-trip for the PDP picker's `_selling_plan_id` selection.
+ * Cart-side round-trip for the PDP picker's `_wcsl_selling_plan_id` selection.
  *
  * WooCommerce cart hooks carry the chosen plan from PDP form-submit through the
  * cart and into the order's line-item meta:
@@ -19,7 +19,7 @@
  *     the Blocks cart automatically). Frequency lives on the price, not here.
  *  5. `woocommerce_cart_item_price` / `_subtotal` - append the cadence to the
  *     classic price/subtotal ("$21.60 / month").
- *  6. `woocommerce_checkout_create_order_line_item` - copy `_selling_plan_id`
+ *  6. `woocommerce_checkout_create_order_line_item` - copy `_wcsl_selling_plan_id`
  *     onto the order line item; `Checkout\ContractCreationHandler` (WOOSUBS-1774)
  *     reads it. Fires for both classic and Blocks checkout.
  *
@@ -50,10 +50,10 @@ defined( 'ABSPATH' ) || exit;
 final class CartPlanHooks {
 
 	/**
-	 * The one carrier key: `_selling_plan_id` on cart item data AND on the order
+	 * The one carrier key: `_wcsl_selling_plan_id` on cart item data AND on the order
 	 * line item, so the symbol is greppable end-to-end.
 	 */
-	public const CART_ITEM_KEY = '_selling_plan_id';
+	public const SELLING_PLAN_ID_KEY = '_wcsl_selling_plan_id';
 
 	/**
 	 * Applicability-aware resolver: the plans that apply to a product. The
@@ -83,13 +83,10 @@ final class CartPlanHooks {
 	}
 
 	/**
-	 * Wire the cart-side hooks. Called once from the Lite bootstrap. Constructs a
-	 * default instance unless the caller supplies one.
-	 *
-	 * @param self|null $instance Pre-built module; defaults to a new instance.
+	 * Wire the cart-side hooks. Called once from the Lite bootstrap.
 	 */
-	public static function register( ?self $instance = null ): void {
-		$instance = $instance ?? new self();
+	public static function register(): void {
+		$instance = new self();
 		add_filter( 'woocommerce_add_to_cart_validation', [ $instance, 'validate_plan' ], 10, 6 );
 		add_filter( 'woocommerce_add_cart_item_data', [ $instance, 'add_cart_item_data' ], 10, 2 );
 		add_action( 'woocommerce_before_calculate_totals', [ $instance, 'apply_plan_pricing' ], 10, 1 );
@@ -142,7 +139,7 @@ final class CartPlanHooks {
 	 * `validate_plan()` only rejects (with a notice) on the customer-facing add
 	 * paths and never modifies this accumulator, and it does not fire at all on a
 	 * direct `WC()->cart->add_to_cart()`. So any client-supplied
-	 * `_selling_plan_id` - which the Store API seeds into this accumulator from
+	 * `_wcsl_selling_plan_id` - which the Store API seeds into this accumulator from
 	 * the request body verbatim - is dropped first and re-added only when it
 	 * applies to the product. The stored value is one validated here, on every
 	 * add path.
@@ -153,9 +150,9 @@ final class CartPlanHooks {
 	 */
 	public function add_cart_item_data( array $cart_item_data, int $product_id ): array {
 		$plan_id = $this->get_candidate_plan_id_for_cart_item( $cart_item_data );
-		unset( $cart_item_data[ self::CART_ITEM_KEY ] );
+		unset( $cart_item_data[ self::SELLING_PLAN_ID_KEY ] );
 		if ( null !== $plan_id && $this->resolver->plan_applies_to_product( $plan_id, $product_id ) ) {
-			$cart_item_data[ self::CART_ITEM_KEY ] = $plan_id;
+			$cart_item_data[ self::SELLING_PLAN_ID_KEY ] = $plan_id;
 		}
 		return $cart_item_data;
 	}
@@ -238,7 +235,7 @@ final class CartPlanHooks {
 	}
 
 	/**
-	 * Copy `_selling_plan_id` onto the order line item. Same key as the cart
+	 * Copy `_wcsl_selling_plan_id` onto the order line item. Same key as the cart
 	 * item; consumed by `ContractCreationHandler`.
 	 *
 	 * Gated on the same {@see self::resolve_line_plan()} resolution the pricing and
@@ -257,7 +254,7 @@ final class CartPlanHooks {
 		if ( ! $plan instanceof Plan ) {
 			return;
 		}
-		$order_item->add_meta_data( self::CART_ITEM_KEY, (int) $plan->get_id(), true );
+		$order_item->add_meta_data( self::SELLING_PLAN_ID_KEY, (int) $plan->get_id(), true );
 	}
 
 	/**
@@ -285,7 +282,7 @@ final class CartPlanHooks {
 	 * @return Plan|null
 	 */
 	private function resolve_line_plan( array $cart_item ): ?Plan {
-		$plan_id = isset( $cart_item[ self::CART_ITEM_KEY ] ) ? (int) $cart_item[ self::CART_ITEM_KEY ] : 0;
+		$plan_id = isset( $cart_item[ self::SELLING_PLAN_ID_KEY ] ) ? (int) $cart_item[ self::SELLING_PLAN_ID_KEY ] : 0;
 		if ( $plan_id <= 0 ) {
 			return null;
 		}
@@ -306,26 +303,26 @@ final class CartPlanHooks {
 		if ( null !== $posted ) {
 			return $posted;
 		}
-		if ( isset( $cart_item_data[ self::CART_ITEM_KEY ] ) && is_scalar( $cart_item_data[ self::CART_ITEM_KEY ] ) ) {
-			$plan_id = absint( $cart_item_data[ self::CART_ITEM_KEY ] );
+		if ( isset( $cart_item_data[ self::SELLING_PLAN_ID_KEY ] ) && is_scalar( $cart_item_data[ self::SELLING_PLAN_ID_KEY ] ) ) {
+			$plan_id = absint( $cart_item_data[ self::SELLING_PLAN_ID_KEY ] );
 			return $plan_id > 0 ? $plan_id : null;
 		}
 		return null;
 	}
 
 	/**
-	 * Read `_selling_plan_id` from the add-to-cart POST. Null when absent (the
+	 * Read `_wcsl_selling_plan_id` from the add-to-cart POST. Null when absent (the
 	 * one-time radio leaves the `<select>` disabled, so the field is not sent)
 	 * or non-positive. The `is_string` guard rejects array-shaped tampers
-	 * (`_selling_plan_id[]=99`), which `absint()` would otherwise coerce to 1.
+	 * (`_wcsl_selling_plan_id[]=99`), which `absint()` would otherwise coerce to 1.
 	 *
 	 * No nonce: WooCommerce's add-to-cart form carries none by design; the
 	 * validation hook defends tampered values.
 	 */
 	private static function get_posted_plan_id(): ?int {
 		// phpcs:disable WordPress.Security.NonceVerification.Missing, WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- Woo add-to-cart carries no nonce by design; absint() sanitizes.
-		$raw = isset( $_POST[ self::CART_ITEM_KEY ] ) && is_string( $_POST[ self::CART_ITEM_KEY ] )
-			? wp_unslash( $_POST[ self::CART_ITEM_KEY ] )
+		$raw = isset( $_POST[ self::SELLING_PLAN_ID_KEY ] ) && is_string( $_POST[ self::SELLING_PLAN_ID_KEY ] )
+			? wp_unslash( $_POST[ self::SELLING_PLAN_ID_KEY ] )
 			: '';
 		// phpcs:enable
 		if ( '' === $raw ) {

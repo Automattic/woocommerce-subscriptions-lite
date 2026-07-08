@@ -97,7 +97,7 @@ final class PlanPickerTest extends LiteIntegrationTestCase {
 		$html = ( new PlanPicker() )->render( $product );
 
 		$this->assertStringContainsString( 'data-wp-interactive="woocommerce-subscriptions-lite/plan-picker"', $html );
-		$this->assertStringContainsString( 'name="_selling_plan_id"', $html, 'The chosen plan posts as the key the checkout slice reads.' );
+		$this->assertStringContainsString( 'name="_wcsl_selling_plan_id"', $html, 'The chosen plan posts as the key the checkout slice reads.' );
 		$this->assertStringContainsString( 'value="' . (int) $plan->get_id() . '"', $html, 'Each plan renders as a select option.' );
 		$this->assertStringContainsString( 'value="one-time"', $html );
 		$this->assertStringContainsString( 'checked="checked"', $html, 'One-time purchase is preselected when allowed.' );
@@ -121,7 +121,7 @@ final class PlanPickerTest extends LiteIntegrationTestCase {
 
 		$html = ( new PlanPicker() )->render( $product );
 
-		$this->assertStringContainsString( 'name="_selling_plan_id"', $html );
+		$this->assertStringContainsString( 'name="_wcsl_selling_plan_id"', $html );
 		$this->assertStringNotContainsString( 'wc-subscriptions-lite-plan-picker__modes', $html, 'No mode radios without a one-time option.' );
 		$this->assertStringNotContainsString( "disabled='disabled'", $html, 'The plan select starts enabled.' );
 		$this->assertStringNotContainsString( 'disabled="disabled"', $html );
@@ -276,6 +276,6 @@ final class PlanPickerTest extends LiteIntegrationTestCase {
 
 		unset( $GLOBALS['product'] );
 
-		$this->assertStringContainsString( 'name="_selling_plan_id"', $html );
+		$this->assertStringContainsString( 'name="_wcsl_selling_plan_id"', $html );
 	}
 }

@@ -55,16 +55,14 @@ final class StoreApiExtension {
 
 	/**
 	 * Register the per-item and cart-level endpoint data, if core's Store API is
-	 * present. Constructs a default instance unless the caller supplies one.
-	 *
-	 * @param self|null $instance Pre-built extension; defaults to a new instance.
+	 * present.
 	 */
-	public static function register( ?self $instance = null ): void {
+	public static function register(): void {
 		if ( ! function_exists( 'woocommerce_store_api_register_endpoint_data' ) ) {
 			return;
 		}
 
-		$instance = $instance ?? new self();
+		$instance = new self();
 
 		woocommerce_store_api_register_endpoint_data(
 			[
@@ -204,7 +202,7 @@ final class StoreApiExtension {
 	 * @return Plan|null
 	 */
 	private function resolve_line_plan( array $cart_item ): ?Plan {
-		$plan_id = isset( $cart_item[ CartPlanHooks::CART_ITEM_KEY ] ) ? (int) $cart_item[ CartPlanHooks::CART_ITEM_KEY ] : 0;
+		$plan_id = isset( $cart_item[ CartPlanHooks::SELLING_PLAN_ID_KEY ] ) ? (int) $cart_item[ CartPlanHooks::SELLING_PLAN_ID_KEY ] : 0;
 		if ( $plan_id <= 0 ) {
 			return null;
 		}

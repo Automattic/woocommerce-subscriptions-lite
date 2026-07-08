@@ -3,7 +3,7 @@
  * Integration tests for the checkout contract-creation handler.
  *
  * The happy paths run END TO END: a real order whose line item carries a
- * `_selling_plan_id`, a real plan row, the handler with its production seams,
+ * `_wcsl_selling_plan_id`, a real plan row, the handler with its production seams,
  * and the contract read back through the engine facade. The failure-isolation
  * case injects a throwing factory through the handler's own constructor seam.
  *
@@ -35,7 +35,7 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 	 */
 	private function stamp_plan_on_items( WC_Order $order, int $plan_id ): void {
 		foreach ( $order->get_items() as $item ) {
-			$item->add_meta_data( '_selling_plan_id', (string) $plan_id, true );
+			$item->add_meta_data( '_wcsl_selling_plan_id', (string) $plan_id, true );
 			$item->save();
 		}
 	}

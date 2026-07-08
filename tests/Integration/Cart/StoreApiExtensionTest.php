@@ -44,7 +44,7 @@ final class StoreApiExtensionTest extends LiteIntegrationTestCase {
 	 */
 	public function tear_down(): void {
 		WC()->cart->empty_cart();
-		unset( $_POST[ CartPlanHooks::CART_ITEM_KEY ] );
+		unset( $_POST[ CartPlanHooks::SELLING_PLAN_ID_KEY ] );
 		parent::tear_down();
 	}
 
@@ -72,8 +72,8 @@ final class StoreApiExtensionTest extends LiteIntegrationTestCase {
 
 		$data = ( new StoreApiExtension() )->get_item_data(
 			[
-				CartPlanHooks::CART_ITEM_KEY => (int) $plan->get_id(),
-				'data'                       => $product,
+				CartPlanHooks::SELLING_PLAN_ID_KEY => (int) $plan->get_id(),
+				'data'                             => $product,
 			]
 		);
 
@@ -98,7 +98,7 @@ final class StoreApiExtensionTest extends LiteIntegrationTestCase {
 		$plan_id    = (int) $this->make_plan()->get_id();
 		( new ApplicabilityStore() )->set( $product_id, new ProductApplicability( ProductApplicability::MODE_INHERIT_ALL ) );
 
-		$_POST[ CartPlanHooks::CART_ITEM_KEY ] = (string) $plan_id;
+		$_POST[ CartPlanHooks::SELLING_PLAN_ID_KEY ] = (string) $plan_id;
 		WC()->cart->add_to_cart( $product_id );
 
 		$this->assertTrue( ( new StoreApiExtension() )->get_cart_data()['has_subscriptions'] );
@@ -125,7 +125,7 @@ final class StoreApiExtensionTest extends LiteIntegrationTestCase {
 		$plan_id    = (int) $this->make_plan()->get_id();
 		( new ApplicabilityStore() )->set( $product_id, new ProductApplicability( ProductApplicability::MODE_INHERIT_ALL ) );
 
-		$_POST[ CartPlanHooks::CART_ITEM_KEY ] = (string) $plan_id;
+		$_POST[ CartPlanHooks::SELLING_PLAN_ID_KEY ] = (string) $plan_id;
 		WC()->cart->add_to_cart( $product_id );
 		( new PlanRepository() )->delete( $plan_id, Package::EXTENSION_SLUG );
 

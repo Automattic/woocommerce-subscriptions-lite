@@ -8,7 +8,7 @@
  * theme-overridable template (templates/single-product/plan-picker.php); its
  * behavior rides on the `woocommerce-subscriptions-lite/plan-picker`
  * Interactivity API store built to `build/modules/plan-picker-view.js`. The
- * chosen plan posts as `_selling_plan_id` - the key the checkout slice reads.
+ * chosen plan posts as `_wcsl_selling_plan_id` - the key the checkout slice reads.
  *
  * Plans and applicability come from Lite's own applicability layer -
  * {@see \Automattic\WooCommerce\SubscriptionsLite\Plans\ProductPlanResolver}
