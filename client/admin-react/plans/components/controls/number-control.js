@@ -5,7 +5,7 @@
  * product editor NumberControl.
  */
 
-import { useState, useEffect, useRef } from '@wordpress/element';
+import { useId, useState, useEffect, useRef } from '@wordpress/element';
 import { __ } from '@wordpress/i18n';
 import {
 	Button,
@@ -16,6 +16,12 @@ import { plus, reset } from '@wordpress/icons';
 
 /**
  * NumberControl component with increment/decrement buttons.
+ *
+ * The help text is rendered here (not via InputControl's help prop) so that
+ * an external aria-describedby (e.g. a validation error id) can be merged
+ * with the help text id; InputControl replaces any passed aria-describedby
+ * with its own help id whenever help is set. When help is present it renders
+ * as a sibling paragraph, so place the control in a block container.
  *
  * @param {Object}   props          Component props.
  * @param {string}   props.label    Field label.
@@ -28,16 +34,20 @@ import { plus, reset } from '@wordpress/icons';
  * @param {string}   props.help     Optional help text displayed below the input.
  * @return {Object} NumberControl component.
  */
-export function NumberControl( {
-	label,
-	value,
-	onChange,
-	onBlur,
-	min = 0,
-	max = Infinity,
-	step = 1,
-	help,
-} ) {
+export function NumberControl( props ) {
+	const {
+		label,
+		value,
+		onChange,
+		onBlur,
+		min = 0,
+		max = Infinity,
+		step = 1,
+		help,
+		'aria-describedby': describedBy,
+		'aria-invalid': ariaInvalid,
+	} = props;
+	const helpId = useId();
 	const [ increment, setIncrement ] = useState( 0 );
 	const timeoutRef = useRef( null );
 	const isInitialClick = useRef( false );
@@ -95,53 +105,65 @@ export function NumberControl( {
 		}
 	}
 
+	const ariaDescribedBy =
+		[ describedBy, help ? helpId : null ].filter( Boolean ).join( ' ' ) ||
+		undefined;
+
 	return (
-		<InputControl
-			__next40pxDefaultSize
-			className="wc-subscriptions-lite-plans__number-control"
-			type="number"
-			label={ label }
-			value={ value }
-			onChange={ onChange }
-			onBlur={ onBlur }
-			min={ min }
-			max={ max }
-			step={ step }
-			help={ help }
-			suffix={
-				<>
-					<Button
-						icon={ plus }
-						disabled={ parseFloat( value || '0' ) >= max }
-						onMouseDown={ () => handleIncrement( step ) }
-						onMouseLeave={ resetIncrement }
-						onMouseUp={ resetIncrement }
-						onBlur={ onBlur }
-						size="small"
-						aria-hidden="true"
-						aria-label={ __(
-							'Increment',
-							'woocommerce-subscriptions-lite'
-						) }
-						tabIndex={ -1 }
-					/>
-					<Button
-						icon={ reset }
-						disabled={ parseFloat( value || '0' ) <= min }
-						onMouseDown={ () => handleIncrement( -step ) }
-						onMouseLeave={ resetIncrement }
-						onMouseUp={ resetIncrement }
-						onBlur={ onBlur }
-						size="small"
-						aria-hidden="true"
-						aria-label={ __(
-							'Decrement',
-							'woocommerce-subscriptions-lite'
-						) }
-						tabIndex={ -1 }
-					/>
-				</>
-			}
-		/>
+		<>
+			<InputControl
+				__next40pxDefaultSize
+				className="wc-subscriptions-lite-plans__number-control"
+				type="number"
+				label={ label }
+				value={ value }
+				onChange={ onChange }
+				onBlur={ onBlur }
+				min={ min }
+				max={ max }
+				step={ step }
+				aria-describedby={ ariaDescribedBy }
+				aria-invalid={ ariaInvalid }
+				suffix={
+					<>
+						<Button
+							icon={ plus }
+							disabled={ parseFloat( value || '0' ) >= max }
+							onMouseDown={ () => handleIncrement( step ) }
+							onMouseLeave={ resetIncrement }
+							onMouseUp={ resetIncrement }
+							onBlur={ onBlur }
+							size="small"
+							aria-hidden="true"
+							aria-label={ __(
+								'Increment',
+								'woocommerce-subscriptions-lite'
+							) }
+							tabIndex={ -1 }
+						/>
+						<Button
+							icon={ reset }
+							disabled={ parseFloat( value || '0' ) <= min }
+							onMouseDown={ () => handleIncrement( -step ) }
+							onMouseLeave={ resetIncrement }
+							onMouseUp={ resetIncrement }
+							onBlur={ onBlur }
+							size="small"
+							aria-hidden="true"
+							aria-label={ __(
+								'Decrement',
+								'woocommerce-subscriptions-lite'
+							) }
+							tabIndex={ -1 }
+						/>
+					</>
+				}
+			/>
+			{ help && (
+				<p id={ helpId } className="wc-subscriptions-lite-plans__help">
+					{ help }
+				</p>
+			) }
+		</>
 	);
 }

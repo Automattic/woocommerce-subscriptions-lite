@@ -3,6 +3,7 @@
  */
 
 import { SelectControl } from '@wordpress/components';
+import { useId } from '@wordpress/element';
 import { __ } from '@wordpress/i18n';
 import { NumberControl } from '../controls/number-control';
 import { FormErrorMessage } from '../controls/form-error-message';
@@ -15,9 +16,17 @@ import { FormErrorMessage } from '../controls/form-error-message';
  * @param {Function} props.onChange    Change handler receiving a partial form-data patch.
  * @param {Object}   props.errors      Validation errors keyed by field id.
  * @param {Object}   props.definitions Normalized engine definitions.
+ * @param {Function} props.onBlur      Blur handler; validates this field.
  * @return {Object} FrequencyEdit component.
  */
-export function FrequencyEdit( { data, onChange, errors, definitions } ) {
+export function FrequencyEdit( {
+	data,
+	onChange,
+	onBlur,
+	errors,
+	definitions,
+} ) {
+	const intervalErrorId = `${ useId() }-interval-error`;
 	const periodOptions = definitions.billingUnits.map( ( unit ) => ( {
 		label: unit.label,
 		value: unit.value,
@@ -35,8 +44,13 @@ export function FrequencyEdit( { data, onChange, errors, definitions } ) {
 					onChange={ ( value ) =>
 						onChange( { interval: parseInt( value, 10 ) || 1 } )
 					}
+					onBlur={ onBlur }
 					min={ 1 }
 					max={ 365 }
+					aria-describedby={
+						errors.interval ? intervalErrorId : undefined
+					}
+					aria-invalid={ errors.interval ? 'true' : undefined }
 				/>
 				<SelectControl
 					__next40pxDefaultSize
@@ -49,7 +63,10 @@ export function FrequencyEdit( { data, onChange, errors, definitions } ) {
 					onChange={ ( value ) => onChange( { period: value } ) }
 				/>
 			</div>
-			<FormErrorMessage message={ errors.interval } />
+			<FormErrorMessage
+				id={ intervalErrorId }
+				message={ errors.interval }
+			/>
 		</div>
 	);
 }

@@ -81,6 +81,19 @@ final class SettingsPageTest extends LiteIntegrationTestCase {
 		$this->assertSame( '/wc/v3/subscriptions-engine/plans', $config['restBase'] );
 		$this->assertSame( 'woocommerce-subscriptions-lite', $config['extensionSlug'] );
 		$this->assertSame( 'day', $config['definitions']['billing_units'][0]['value'] );
+
+		// BOGO is offered as a pricing type so the editor can render it.
+		$pricing_type_values = array_column( $config['definitions']['pricing_types'], 'value' );
+		$this->assertContains( 'bogo', $pricing_type_values, 'The editor offers a Buy one, get one pricing type.' );
+
+		// Currency is no longer duplicated here: the client reads WooCommerce's
+		// own window.wcSettings, so the bundle depends on the wc-settings script.
+		$this->assertArrayNotHasKey( 'currency', $config, 'Currency is not duplicated in the inline config.' );
+		$this->assertContains(
+			'wc-settings',
+			wp_scripts()->query( self::SCRIPT_HANDLE )->deps,
+			'The bundle depends on wc-settings so window.wcSettings is present.'
+		);
 	}
 
 	public function test_render_requires_manage_woocommerce(): void {

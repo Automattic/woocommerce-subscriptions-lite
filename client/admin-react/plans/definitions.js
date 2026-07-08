@@ -58,6 +58,10 @@ export const DEFAULT_DEFINITIONS = {
 			value: 'price',
 			label: __( 'Fixed price', 'woocommerce-subscriptions-lite' ),
 		},
+		{
+			value: 'bogo',
+			label: __( 'Buy one, get one', 'woocommerce-subscriptions-lite' ),
+		},
 	],
 	pricingScopes: [
 		{

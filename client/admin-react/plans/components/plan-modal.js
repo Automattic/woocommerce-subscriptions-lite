@@ -49,6 +49,12 @@ export function PlanModal( {
 			shouldCloseOnClickOutside={ ! isSaving }
 			shouldCloseOnEsc={ ! isSaving }
 		>
+			<p className="wc-subscriptions-lite-plans__modal-intro">
+				{ __(
+					"After adding a plan you'll be able to use it as part of your storewide subscription settings that can be applied to any product.",
+					'woocommerce-subscriptions-lite'
+				) }
+			</p>
 			{ apiError && (
 				<Notice status="error" isDismissible={ false }>
 					<strong>

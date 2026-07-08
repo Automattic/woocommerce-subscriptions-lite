@@ -3,14 +3,7 @@
  */
 
 import { useCallback, useMemo, useState } from '@wordpress/element';
-import {
-	Button,
-	Card,
-	CardBody,
-	Flex,
-	FlexItem,
-	Notice,
-} from '@wordpress/components';
+import { Button, Flex, FlexItem, Notice } from '@wordpress/components';
 import { __ } from '@wordpress/i18n';
 import { plus } from '@wordpress/icons';
 import { config } from '../config';
@@ -24,12 +17,10 @@ import { PlanModal } from './plan-modal';
 
 const DEFAULT_VIEW = {
 	type: 'table',
-	perPage: 20,
+	perPage: 100,
 	page: 1,
-	search: '',
-	filters: [],
 	sort: { field: 'sort_order', direction: 'asc' },
-	layout: { density: 'comfortable' },
+	layout: {},
 };
 
 const CLOSED_EDITOR = {
@@ -67,21 +58,16 @@ export function PlanManager() {
 		setStatus,
 		reorder,
 	} = usePlans( view );
-	const { notice, error, showSuccess, showError, clear } = useNotifications();
+	const { showSuccess, showError } = useNotifications();
 	const { findDuplicate } = useValidation( registry );
 
 	const openCreate = useCallback( () => {
-		clear();
 		setEditor( { ...CLOSED_EDITOR, isOpen: true } );
-	}, [ clear ] );
+	}, [] );
 
-	const openEdit = useCallback(
-		( plan ) => {
-			clear();
-			setEditor( { ...CLOSED_EDITOR, isOpen: true, plan } );
-		},
-		[ clear ]
-	);
+	const openEdit = useCallback( ( plan ) => {
+		setEditor( { ...CLOSED_EDITOR, isOpen: true, plan } );
+	}, [] );
 
 	const closeEditor = useCallback( () => setEditor( CLOSED_EDITOR ), [] );
 
@@ -178,6 +164,12 @@ export function PlanManager() {
 		async ( ids ) => {
 			try {
 				await reorder( ids );
+				showSuccess(
+					__(
+						'Plans reordered successfully.',
+						'woocommerce-subscriptions-lite'
+					)
+				);
 				await reload();
 			} catch ( reorderError ) {
 				showError(
@@ -189,67 +181,51 @@ export function PlanManager() {
 				);
 			}
 		},
-		[ reload, reorder, showError ]
+		[ reload, reorder, showError, showSuccess ]
 	);
 
 	return (
 		<div className="wc-subscriptions-lite-plans">
-			{ notice && (
-				<Notice
-					status="success"
-					onRemove={ clear }
-					className="wc-subscriptions-lite-plans__notice"
-				>
-					{ notice }
-				</Notice>
-			) }
-			{ ( error || loadError ) && (
+			{ loadError && (
 				<Notice
 					status="error"
-					onRemove={ () => {
-						clear();
-						setLoadError( '' );
-					} }
+					onRemove={ () => setLoadError( '' ) }
 					className="wc-subscriptions-lite-plans__notice"
 				>
-					{ error || loadError }
+					{ loadError }
 				</Notice>
 			) }
 
-			<Card>
-				<CardBody>
-					<PlansTable
-						plans={ plans }
-						registry={ registry }
-						definitions={ definitions }
-						view={ view }
-						onChangeView={ setView }
-						paginationInfo={ paginationInfo }
-						isLoading={ isLoading }
-						onEdit={ openEdit }
-						onArchive={ ( plan ) =>
-							changeStatus( plan, 'archived' )
-						}
-						onRestore={ ( plan ) => changeStatus( plan, 'active' ) }
-						onReorder={ handleReorder }
-					/>
+			<div className="wc-subscriptions-lite-plans__panel">
+				<PlansTable
+					plans={ plans }
+					registry={ registry }
+					definitions={ definitions }
+					view={ view }
+					onChangeView={ setView }
+					paginationInfo={ paginationInfo }
+					isLoading={ isLoading }
+					onEdit={ openEdit }
+					onArchive={ ( plan ) => changeStatus( plan, 'archived' ) }
+					onRestore={ ( plan ) => changeStatus( plan, 'active' ) }
+					onReorder={ handleReorder }
+				/>
 
-					<Flex className="wc-subscriptions-lite-plans__add-plan-button">
-						<FlexItem>
-							<Button
-								variant="secondary"
-								icon={ plus }
-								onClick={ openCreate }
-							>
-								{ __(
-									'Add plan',
-									'woocommerce-subscriptions-lite'
-								) }
-							</Button>
-						</FlexItem>
-					</Flex>
-				</CardBody>
-			</Card>
+				<Flex className="wc-subscriptions-lite-plans__add-plan-button">
+					<FlexItem>
+						<Button
+							variant="secondary"
+							icon={ plus }
+							onClick={ openCreate }
+						>
+							{ __(
+								'Add subscription plan',
+								'woocommerce-subscriptions-lite'
+							) }
+						</Button>
+					</FlexItem>
+				</Flex>
+			</div>
 
 			{ editor.isOpen && (
 				<PlanModal

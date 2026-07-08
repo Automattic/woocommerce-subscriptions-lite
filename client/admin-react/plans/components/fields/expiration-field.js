@@ -5,6 +5,7 @@
  */
 
 import { CheckboxControl } from '@wordpress/components';
+import { useId } from '@wordpress/element';
 import { __ } from '@wordpress/i18n';
 import { NumberControl } from '../controls/number-control';
 import { FormErrorMessage } from '../controls/form-error-message';
@@ -16,15 +17,18 @@ import { FormErrorMessage } from '../controls/form-error-message';
  * @param {Object}   props.data     Current form data.
  * @param {Function} props.onChange Change handler receiving a partial form-data patch.
  * @param {Object}   props.errors   Validation errors keyed by field id.
+ * @param {Function} props.onBlur   Blur handler; validates this field.
  * @return {Object} ExpirationEdit component.
  */
-export function ExpirationEdit( { data, onChange, errors } ) {
+export function ExpirationEdit( { data, onChange, onBlur, errors } ) {
+	const maxCyclesErrorId = `${ useId() }-max-cycles-error`;
+
 	return (
 		<div className="wc-subscriptions-lite-plans__field">
 			<CheckboxControl
 				__nextHasNoMarginBottom
 				label={ __(
-					'Expire after a set number of payments',
+					'Expire subscription after a set number of payments',
 					'woocommerce-subscriptions-lite'
 				) }
 				checked={ Boolean( data.expires ) }
@@ -40,7 +44,7 @@ export function ExpirationEdit( { data, onChange, errors } ) {
 				<div className="wc-subscriptions-lite-plans__total-payments">
 					<NumberControl
 						label={ __(
-							'Total payments',
+							'Total number of payments',
 							'woocommerce-subscriptions-lite'
 						) }
 						value={ String( data.maxCycles ) }
@@ -49,14 +53,22 @@ export function ExpirationEdit( { data, onChange, errors } ) {
 								maxCycles: parseInt( value, 10 ) || 0,
 							} )
 						}
+						onBlur={ onBlur }
 						min={ 1 }
 						step={ 1 }
 						help={ __(
 							'The number of payments, including the initial purchase, before the subscription automatically expires.',
 							'woocommerce-subscriptions-lite'
 						) }
+						aria-describedby={
+							errors.maxCycles ? maxCyclesErrorId : undefined
+						}
+						aria-invalid={ errors.maxCycles ? 'true' : undefined }
 					/>
-					<FormErrorMessage message={ errors.maxCycles } />
+					<FormErrorMessage
+						id={ maxCyclesErrorId }
+						message={ errors.maxCycles }
+					/>
 				</div>
 			) }
 		</div>
