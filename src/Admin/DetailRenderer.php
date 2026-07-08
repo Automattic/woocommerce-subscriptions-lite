@@ -3,11 +3,13 @@
  * DetailRenderer - the admin subscription detail screen.
  *
  * A WordPress meta-box screen for `?page=...&action=view&id=N`, modelled on
- * WooCommerce's order edit screen: each section (data, billing history, actions,
- * customer) is a postbox registered on this page's screen id and rendered with
+ * WooCommerce's order edit screen: each section (details, items, addresses,
+ * billing history in the main column; actions, schedule, customer on the side) is
+ * a postbox registered on this page's screen id and rendered with
  * `do_meta_boxes()`, so the screen inherits wp-admin's collapsible two-column
- * layout and exposes an `add_meta_boxes_<screen>` extension point. Read + actions
- * only - not an editable save form. All data comes through the engine's public
+ * layout and exposes an `add_meta_boxes_<screen>` extension point. The boxes are a
+ * fixed order (drag-reorder is disabled), collapse only. Read + actions only - not
+ * an editable save form. All data comes through the engine's public
  * {@see \Automattic\WooCommerce\SubscriptionsEngine\Api\Subscriptions} facade.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Admin
@@ -19,9 +21,11 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Admin;
 
 use Throwable;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\MetaBoxes\Actions;
+use Automattic\WooCommerce\SubscriptionsLite\Admin\MetaBoxes\Addresses;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\MetaBoxes\BillingHistory;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\MetaBoxes\Customer;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\MetaBoxes\Items;
+use Automattic\WooCommerce\SubscriptionsLite\Admin\MetaBoxes\Schedule;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\MetaBoxes\SubscriptionData;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Subscriptions;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Contract;
@@ -65,20 +69,28 @@ final class DetailRenderer {
 			]
 		);
 
+		// Main column, all normal/high in registration order, so it reads
+		// details -> items -> addresses -> billing history like the order edit screen.
 		add_meta_box(
 			'wc-subs-lite-data',
-			__( 'Subscription data', 'woocommerce-subscriptions-lite' ),
+			__( 'Subscription details', 'woocommerce-subscriptions-lite' ),
 			[ SubscriptionData::class, 'output' ],
 			$screen_id,
 			'normal',
 			'high'
 		);
-		// Registered right after the data box, both normal/high, so the main
-		// column reads data -> items -> billing history like the order edit screen.
 		add_meta_box(
 			'wc-subs-lite-items',
 			__( 'Items', 'woocommerce-subscriptions-lite' ),
 			[ Items::class, 'output' ],
+			$screen_id,
+			'normal',
+			'high'
+		);
+		add_meta_box(
+			'wc-subs-lite-addresses',
+			__( 'Addresses', 'woocommerce-subscriptions-lite' ),
+			[ Addresses::class, 'output' ],
 			$screen_id,
 			'normal',
 			'high'
@@ -91,6 +103,26 @@ final class DetailRenderer {
 			'normal',
 			'default'
 		);
+
+		// Side column: actions on top (always registered - it carries the back-to-list
+		// link and the status-gated Renew now / Cancel controls), then the schedule and
+		// the customer.
+		add_meta_box(
+			'wc-subs-lite-actions',
+			__( 'Actions', 'woocommerce-subscriptions-lite' ),
+			[ Actions::class, 'output' ],
+			$screen_id,
+			'side',
+			'high'
+		);
+		add_meta_box(
+			'wc-subs-lite-schedule',
+			__( 'Schedule', 'woocommerce-subscriptions-lite' ),
+			[ Schedule::class, 'output' ],
+			$screen_id,
+			'side',
+			'default'
+		);
 		add_meta_box(
 			'wc-subs-lite-customer',
 			__( 'Customer', 'woocommerce-subscriptions-lite' ),
@@ -100,19 +132,14 @@ final class DetailRenderer {
 			'default'
 		);
 
-		// Always registered: it carries the back-to-list link as well as the status-gated
-		// Renew now / Cancel controls, so it is present even for a terminal contract.
-		add_meta_box(
-			'wc-subs-lite-actions',
-			__( 'Actions', 'woocommerce-subscriptions-lite' ),
-			[ Actions::class, 'output' ],
-			$screen_id,
-			'side',
-			'high'
-		);
-
+		// Keep the toggles (collapse) but lock the layout: the boxes are a fixed
+		// order, not a draggable dashboard, so disable jQuery UI sortable on the
+		// holders once postbox has initialised it.
 		wp_enqueue_script( 'postbox' );
-		wp_add_inline_script( 'postbox', 'jQuery(function(){postboxes.add_postbox_toggles(pagenow);});' );
+		wp_add_inline_script(
+			'postbox',
+			'jQuery(function(){postboxes.add_postbox_toggles(pagenow);jQuery(".meta-box-sortables.ui-sortable").sortable("disable");});'
+		);
 
 		/**
 		 * Fires after Lite registers its detail-screen meta boxes, so extensions

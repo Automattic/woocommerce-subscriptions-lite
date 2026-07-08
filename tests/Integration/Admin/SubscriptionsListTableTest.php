@@ -156,6 +156,36 @@ final class SubscriptionsListTableTest extends LiteIntegrationTestCase {
 		$this->assertStringNotContainsString( 'wc-subs-lite-search-form', $html );
 	}
 
+	public function test_columns_follow_the_design_order_without_an_actions_column(): void {
+		$this->assertSame(
+			[ 'id', 'customer', 'items', 'status', 'next_payment', 'total' ],
+			array_keys( ( new SubscriptionsListTable() )->get_columns() )
+		);
+	}
+
+	public function test_items_column_reports_the_line_item_count(): void {
+		$customer = $this->create_customer();
+		$this->create_contract( $customer ); // One line item.
+
+		$table = $this->prepared_table();
+
+		$this->assertCount( 1, $table->items );
+		$this->assertStringContainsString( '1 item', $table->column_items( $table->items[0] ) );
+	}
+
+	public function test_active_row_renders_native_row_actions_not_an_actions_column(): void {
+		$customer = $this->create_customer();
+		$this->create_contract( $customer ); // Active -> renewable + cancellable.
+
+		$html = $this->render_list_page();
+
+		$this->assertStringContainsString( 'row-actions', $html );
+		$this->assertStringContainsString( 'Renew now', $html );
+		$this->assertStringContainsString( 'column-items', $html );
+		// The dedicated Actions column is gone (actions are hover row-actions now).
+		$this->assertStringNotContainsString( 'column-actions', $html );
+	}
+
 	/**
 	 * Set the request superglobals the list table reads.
 	 *

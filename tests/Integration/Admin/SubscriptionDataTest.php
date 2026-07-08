@@ -1,9 +1,11 @@
 <?php
 /**
- * Integration tests for the Subscription data meta box.
+ * Integration tests for the Subscription details meta box.
  *
- * Contracts are seeded through the real checkout path, so the plan snapshot the
- * box reads (cadence, length, trial) is frozen exactly as production freezes it.
+ * Contracts are seeded through the real checkout path. The box is the compact
+ * status summary: status, recurring total, payment method and origin order. The
+ * cadence and the schedule dates live in the side Schedule box, so they are
+ * asserted absent here and present in {@see ScheduleTest}.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Tests
  */
@@ -18,51 +20,37 @@ use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTe
 
 /**
  * @covers \Automattic\WooCommerce\SubscriptionsLite\Admin\MetaBoxes\SubscriptionData
- * @covers \Automattic\WooCommerce\SubscriptionsLite\Admin\Formatting::billing_cadence
  */
 final class SubscriptionDataTest extends LiteIntegrationTestCase {
 
-	public function test_output_renders_billing_cadence_and_length(): void {
+	public function test_output_renders_the_summary_rows(): void {
 		$customer = $this->create_customer();
-		$id       = $this->create_contract(
-			$customer,
-			[
-				'period'     => 'month',
-				'interval'   => 3,
-				'max_cycles' => 12,
-			]
-		);
+		$id       = $this->create_contract( $customer );
 
 		$html = $this->render( $id );
 
-		$this->assertStringContainsString( 'Every 3 months', $html );
-		$this->assertStringContainsString( '12 cycles', $html );
 		$this->assertStringContainsString( 'Recurring total', $html );
+		$this->assertStringContainsString( 'Payment method', $html );
+		$this->assertStringContainsString( 'Original order', $html );
 	}
 
-	public function test_output_renders_singular_cadence(): void {
+	public function test_cadence_and_schedule_dates_are_not_in_the_data_box(): void {
+		// The cadence and the schedule dates moved to the side Schedule box; the
+		// data box must no longer render them.
 		$customer = $this->create_customer();
 		$id       = $this->create_contract(
 			$customer,
 			[
 				'period'   => 'month',
-				'interval' => 1,
+				'interval' => 3,
 			]
 		);
 
 		$html = $this->render( $id );
 
-		$this->assertStringContainsString( 'Every 1 month', $html );
-	}
-
-	public function test_open_ended_plan_shows_no_cycles_row(): void {
-		$customer = $this->create_customer();
-		// No max_cycles -> open-ended, so no "cycles" length row is rendered.
-		$id   = $this->create_contract( $customer, [ 'period' => 'week' ] );
-		$html = $this->render( $id );
-
-		$this->assertStringContainsString( 'Every 1 week', $html );
-		$this->assertStringNotContainsString( 'cycles', $html );
+		$this->assertStringNotContainsString( 'Every 3 months', $html );
+		$this->assertStringNotContainsString( 'Start date', $html );
+		$this->assertStringNotContainsString( 'Next payment', $html );
 	}
 
 	/**

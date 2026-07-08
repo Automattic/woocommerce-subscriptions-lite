@@ -54,25 +54,17 @@ $status-pending-cancellation-fg: #b45917;
 }
 
 /*
- * Inline row actions ("View | Renew now | Cancel"). View is a GET link; the
- * mutating actions are POST forms rendered inline. wp-admin's `.button-link`
- * already resets padding/border/background, so only the inline layout, the
- * separators, and the destructive colour live here.
+ * Row actions are native WP_List_Table hover actions under the Subscription
+ * column ("Renew now | Cancel"). The mutating actions are POST forms rendered
+ * inline so they read as links; WP_List_Table supplies the " | " separators.
+ * wp-admin's `.button-link` already resets the button chrome to a link. This
+ * stylesheet only loads on the subscriptions screen, so `.row-actions` is our
+ * list's without further scoping.
  */
-.wc-subs-lite-row-actions {
-	display: inline;
-
-	a {
-		text-decoration: none;
-	}
+.row-actions {
 
 	.wc-subs-lite-action-form {
 		display: inline;
-
-		&::before {
-			content: "| ";
-			color: $gray-400;
-		}
 	}
 
 	.button-link {
@@ -109,9 +101,13 @@ $status-pending-cancellation-fg: #b45917;
 	clear: both;
 }
 
-/* List table: keep the ID, Status, and Next payment columns compact. */
+/* List table: keep the compact columns from ballooning. */
 .wc-subs-lite-subscriptions-list .wp-list-table .column-id {
-	width: 80px;
+	width: 140px;
+}
+
+.wc-subs-lite-subscriptions-list .wp-list-table .column-items {
+	width: 90px;
 }
 
 .wc-subs-lite-subscriptions-list .wp-list-table .column-status {
@@ -122,9 +118,60 @@ $status-pending-cancellation-fg: #b45917;
 	width: 130px;
 }
 
-/* Detail page: cap the label column so values are not pushed far right. */
-.wc-subs-lite-subscription-detail .wc-subs-lite-detail-table th {
+/*
+ * Detail page: cap the main-column label column so values are not pushed far
+ * right. The side Schedule box keeps its natural (narrower) label width.
+ */
+.wc-subs-lite-subscription-detail #postbox-container-2 .wc-subs-lite-detail-table th {
 	width: 200px;
+}
+
+/*
+ * Detail meta boxes are a fixed order, not a draggable dashboard: hide the
+ * reorder handles and drop the drag cursor. Collapse is left intact.
+ */
+.wc-subs-lite-subscription-detail {
+
+	.postbox .handle-order-higher,
+	.postbox .handle-order-lower {
+		display: none;
+	}
+
+	.postbox-header .hndle {
+		cursor: default;
+	}
+}
+
+/*
+ * Addresses box: billing and shipping side by side when there is room, stacked
+ * when narrow; each block reads like the order screen's address column.
+ */
+.wc-subs-lite-addresses {
+	display: flex;
+	flex-wrap: wrap;
+	gap: $grid-unit-20;
+
+	.wc-subs-lite-address {
+		flex: 1 1 180px;
+	}
+
+	h4 {
+		margin: 0 0 $grid-unit-05;
+	}
+
+	address {
+		font-style: normal;
+	}
+}
+
+/* Customer box: name over email, tight spacing. */
+.wc-subs-lite-customer-name {
+	margin: 0 0 $grid-unit-05;
+	font-weight: 600;
+}
+
+.wc-subs-lite-customer-email {
+	margin: 0;
 }
 
 /* Billing-history table spacing below the details block. */
@@ -133,9 +180,10 @@ $status-pending-cancellation-fg: #b45917;
 }
 
 /*
- * Items table: the quantity and total columns read compact and right-aligned,
- * like the order-items box on the WooCommerce order edit screen.
+ * Items table: the price, quantity and total columns read compact and
+ * right-aligned, like the order-items box on the WooCommerce order edit screen.
  */
+.wc-subs-lite-items-table .wc-subs-lite-col-price,
 .wc-subs-lite-items-table .wc-subs-lite-col-qty,
 .wc-subs-lite-items-table .wc-subs-lite-col-total {
 	width: 100px;

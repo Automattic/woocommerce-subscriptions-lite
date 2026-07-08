@@ -28,7 +28,7 @@ final class ItemsTest extends LiteIntegrationTestCase {
 		wp_set_current_user( self::factory()->user->create( [ 'role' => 'administrator' ] ) );
 	}
 
-	public function test_output_lists_line_items_with_quantity_and_total(): void {
+	public function test_output_lists_line_items_with_price_quantity_and_total(): void {
 		$customer = $this->create_customer();
 		$id       = $this->create_contract(
 			$customer,
@@ -43,7 +43,10 @@ final class ItemsTest extends LiteIntegrationTestCase {
 
 		$this->assertStringContainsString( 'wc-subs-lite-items-table', $html );
 		$this->assertStringContainsString( 'Monthly Coffee Box', $html );
-		// Quantity 2 and the line total (2 x 19.99).
+		// The Price column carries the per-unit price (19.99), separate from the
+		// line total (2 x 19.99 = 39.98).
+		$this->assertStringContainsString( 'wc-subs-lite-col-price', $html );
+		$this->assertStringContainsString( '19.99', $html );
 		$this->assertStringContainsString( '39.98', $html );
 	}
 

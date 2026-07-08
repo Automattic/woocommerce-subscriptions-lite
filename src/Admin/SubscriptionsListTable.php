@@ -4,10 +4,13 @@
  *
  * An Orders-like `WP_List_Table` reading subscriptions through the engine's
  * public {@see \Automattic\WooCommerce\SubscriptionsEngine\Api\Subscriptions}
- * facade. Six columns (ID, Status, Customer, Next payment, Total, Actions),
- * status views with counts, sortable columns, and a search box - the merchant
- * inbox modelled on the WooCommerce orders list. Paging, filtering, ordering and
- * search are all resolved by the facade's `list()`/`count()`/`count_by_status()`.
+ * facade. Columns (Subscription, Customer, Items, Status, Next payment, Total)
+ * follow the design order, with the Renew now / Cancel actions as native hover
+ * row-actions under the Subscription column. Status views with counts, sortable
+ * columns, and a search box round out the merchant inbox modelled on the
+ * WooCommerce orders list. Paging, filtering, ordering and search are all resolved
+ * by the facade's `list()`/`count()`/`count_by_status()`, and the per-row items
+ * count by `item_counts()` in one batched read.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Admin
  */
@@ -42,6 +45,13 @@ final class SubscriptionsListTable extends WP_List_Table {
 	private $load_error = false;
 
 	/**
+	 * Line-item count per contract id for the current page, from one batched read.
+	 *
+	 * @var array<int, int>
+	 */
+	private $item_counts = [];
+
+	/**
 	 * Construct the table.
 	 */
 	public function __construct() {
@@ -61,17 +71,18 @@ final class SubscriptionsListTable extends WP_List_Table {
 	 */
 	public function get_columns(): array {
 		return [
-			'id'           => __( 'ID', 'woocommerce-subscriptions-lite' ),
-			'status'       => __( 'Status', 'woocommerce-subscriptions-lite' ),
+			'id'           => __( 'Subscription', 'woocommerce-subscriptions-lite' ),
 			'customer'     => __( 'Customer', 'woocommerce-subscriptions-lite' ),
+			'items'        => __( 'Items', 'woocommerce-subscriptions-lite' ),
+			'status'       => __( 'Status', 'woocommerce-subscriptions-lite' ),
 			'next_payment' => __( 'Next payment', 'woocommerce-subscriptions-lite' ),
 			'total'        => __( 'Total', 'woocommerce-subscriptions-lite' ),
-			'actions'      => __( 'Actions', 'woocommerce-subscriptions-lite' ),
 		];
 	}
 
 	/**
-	 * Make ID the primary column (the responsive "show details" anchor).
+	 * Make the Subscription column primary - the responsive "show details" anchor
+	 * and the column the Renew now / Cancel row-actions hang under.
 	 */
 	protected function get_default_primary_column_name(): string {
 		return 'id';
@@ -127,6 +138,21 @@ final class SubscriptionsListTable extends WP_List_Table {
 		}
 
 		$this->items = $rows;
+
+		// One batched read for the whole page's items counts; a failure degrades to
+		// no counts (rendered as 0) rather than a fatal or a per-row query.
+		$this->item_counts = [];
+		if ( ! empty( $rows ) ) {
+			try {
+				$ids = [];
+				foreach ( $rows as $row ) {
+					$ids[] = (int) $row->get_id();
+				}
+				$this->item_counts = Subscriptions::item_counts( $ids );
+			} catch ( Throwable $e ) {
+				$this->item_counts = [];
+			}
+		}
 
 		$this->set_pagination_args(
 			[
@@ -325,6 +351,24 @@ final class SubscriptionsListTable extends WP_List_Table {
 	}
 
 	/**
+	 * Items cell: the line-item count, from the page's batched `item_counts` read
+	 * (0 when the count is unavailable).
+	 *
+	 * @param Contract $item Current row.
+	 */
+	public function column_items( $item ): string {
+		$count = $this->item_counts[ (int) $item->get_id() ] ?? 0;
+
+		return esc_html(
+			sprintf(
+				/* translators: %s: number of line items on the subscription. */
+				_n( '%s item', '%s items', (int) $count, 'woocommerce-subscriptions-lite' ),
+				number_format_i18n( (int) $count )
+			)
+		);
+	}
+
+	/**
 	 * Next-payment cell: localized date, or a dash when none is scheduled.
 	 *
 	 * @param Contract $item Current row.
@@ -343,33 +387,40 @@ final class SubscriptionsListTable extends WP_List_Table {
 	}
 
 	/**
-	 * Actions cell: View, then Renew now / Cancel where the status allows.
+	 * Native hover row-actions under the primary (Subscription) column: Renew now /
+	 * Cancel where the status allows. The subscription number itself links to the
+	 * detail view, so there is no separate "View" action - matching the orders list.
 	 *
-	 * View is a plain GET link; the state-mutating actions are POST forms (see
-	 * {@see PageController::action_form()}) so no nonce rides in the URL.
+	 * The state-mutating actions are POST forms (see {@see PageController::action_form()})
+	 * so no nonce rides in the URL; they render inside the table cell, never inside
+	 * the search GET form, which sits above and closes before the table.
+	 *
+	 * @param Contract $item        Current row.
+	 * @param string   $column_name Column being rendered.
+	 * @param string   $primary     The primary column slug.
+	 */
+	protected function handle_row_actions( $item, $column_name, $primary ): string {
+		if ( $column_name !== $primary ) {
+			return '';
+		}
+
+		return $this->row_actions( $this->row_action_links( $item ) );
+	}
+
+	/**
+	 * The status-gated row actions for a subscription, keyed by action slug so
+	 * `WP_List_Table::row_actions()` renders them "Renew now | Cancel".
 	 *
 	 * @param Contract $item Current row.
+	 * @return array<string, string> Action slug => markup.
 	 */
-	public function column_actions( $item ): string {
-		$id     = (int) $item->get_id();
-		$status = $item->get_status();
-		$parts  = [];
-
-		$parts[] = sprintf(
-			'<a href="%s">%s</a>',
-			esc_url(
-				PageController::page_url(
-					[
-						'action' => 'view',
-						'id'     => $id,
-					]
-				)
-			),
-			esc_html__( 'View', 'woocommerce-subscriptions-lite' )
-		);
+	private function row_action_links( $item ): array {
+		$id      = (int) $item->get_id();
+		$status  = $item->get_status();
+		$actions = [];
 
 		if ( StatusLabels::is_renewable( $status ) ) {
-			$parts[] = PageController::action_form(
+			$actions['renew'] = PageController::action_form(
 				PageController::ACTION_RENEW_NOW,
 				$id,
 				__( 'Renew now', 'woocommerce-subscriptions-lite' )
@@ -377,7 +428,7 @@ final class SubscriptionsListTable extends WP_List_Table {
 		}
 
 		if ( StatusLabels::is_cancellable( $status ) ) {
-			$parts[] = PageController::action_form(
+			$actions['cancel'] = PageController::action_form(
 				PageController::ACTION_CANCEL,
 				$id,
 				__( 'Cancel', 'woocommerce-subscriptions-lite' ),
@@ -386,7 +437,7 @@ final class SubscriptionsListTable extends WP_List_Table {
 			);
 		}
 
-		return '<span class="wc-subs-lite-row-actions">' . implode( ' ', $parts ) . '</span>';
+		return $actions;
 	}
 
 	/**

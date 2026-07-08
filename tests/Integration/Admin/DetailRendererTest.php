@@ -3,8 +3,8 @@
  * Integration tests for the detail-screen meta-box registration.
  *
  * Asserts the screen registers the section boxes in the order-edit arrangement:
- * data -> items -> billing history in the main column, actions + customer on the
- * side.
+ * details -> items -> addresses -> billing history in the main column, actions +
+ * schedule + customer on the side.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Tests
  */
@@ -43,14 +43,17 @@ final class DetailRendererTest extends LiteIntegrationTestCase {
 		$normal_high = array_keys( $boxes['normal']['high'] ?? [] );
 		$this->assertContains( 'wc-subs-lite-data', $normal_high );
 		$this->assertContains( 'wc-subs-lite-items', $normal_high );
-		$this->assertLessThan(
-			array_search( 'wc-subs-lite-items', $normal_high, true ),
-			array_search( 'wc-subs-lite-data', $normal_high, true ),
-			'Subscription data box should register before the items box so the main column reads data -> items.'
-		);
+		$this->assertContains( 'wc-subs-lite-addresses', $normal_high );
+
+		$data_pos      = array_search( 'wc-subs-lite-data', $normal_high, true );
+		$items_pos     = array_search( 'wc-subs-lite-items', $normal_high, true );
+		$addresses_pos = array_search( 'wc-subs-lite-addresses', $normal_high, true );
+		$this->assertLessThan( $items_pos, $data_pos, 'Details register before items.' );
+		$this->assertLessThan( $addresses_pos, $items_pos, 'Items register before addresses, so the column reads details -> items -> addresses.' );
 
 		$this->assertArrayHasKey( 'wc-subs-lite-history', $boxes['normal']['default'] ?? [] );
 		$this->assertArrayHasKey( 'wc-subs-lite-actions', $boxes['side']['high'] ?? [] );
+		$this->assertArrayHasKey( 'wc-subs-lite-schedule', $boxes['side']['default'] ?? [] );
 		$this->assertArrayHasKey( 'wc-subs-lite-customer', $boxes['side']['default'] ?? [] );
 	}
 }
