@@ -21,6 +21,7 @@ use Throwable;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\MetaBoxes\Actions;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\MetaBoxes\BillingHistory;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\MetaBoxes\Customer;
+use Automattic\WooCommerce\SubscriptionsLite\Admin\MetaBoxes\Items;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\MetaBoxes\SubscriptionData;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Subscriptions;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Contract;
@@ -68,6 +69,16 @@ final class DetailRenderer {
 			'wc-subs-lite-data',
 			__( 'Subscription data', 'woocommerce-subscriptions-lite' ),
 			[ SubscriptionData::class, 'output' ],
+			$screen_id,
+			'normal',
+			'high'
+		);
+		// Registered right after the data box, both normal/high, so the main
+		// column reads data -> items -> billing history like the order edit screen.
+		add_meta_box(
+			'wc-subs-lite-items',
+			__( 'Items', 'woocommerce-subscriptions-lite' ),
+			[ Items::class, 'output' ],
 			$screen_id,
 			'normal',
 			'high'
