@@ -15,10 +15,10 @@
  *  3. `woocommerce_before_calculate_totals` - price the line at the plan's
  *     cycle-1 recurring amount so cart, checkout, and the order total reflect
  *     what the picker promised.
- *  4. `woocommerce_get_item_data` - a plan-name row under the line (relayed to
+ *  4. `woocommerce_get_item_data` - a plan-label row under the line (relayed to
  *     the Blocks cart automatically). Frequency lives on the price, not here.
  *  5. `woocommerce_cart_item_price` / `_subtotal` - append the cadence to the
- *     classic price/subtotal ("$21.60 every 1 month").
+ *     classic price/subtotal ("$21.60 / month").
  *  6. `woocommerce_checkout_create_order_line_item` - copy `_selling_plan_id`
  *     onto the order line item; `Checkout\ContractCreationHandler` (WOOSUBS-1774)
  *     reads it. Fires for both classic and Blocks checkout.
@@ -64,31 +64,32 @@ final class CartPlanHooks {
 	private $resolver;
 
 	/**
-	 * Plan finder by id, for pricing/display of a line already in the cart.
-	 * Scoped to Lite's slug.
+	 * Reads Lite's selling plans by id, for pricing/display of a line already in
+	 * the cart.
 	 *
-	 * @var callable(int): ?Plan
+	 * @var PlanRepository
 	 */
-	private $plan_finder;
+	private PlanRepository $plans;
 
 	/**
-	 * Construct the module with its lookup seams.
+	 * Construct the module with the collaborators it resolves plans through.
 	 *
-	 * @param ProductPlanResolver|null    $resolver    Applicability resolver; defaults to a real one.
-	 * @param (callable(int): ?Plan)|null $plan_finder Plan-by-id finder; defaults to `PlanRepository::find()` scoped to Lite.
+	 * @param ProductPlanResolver|null $resolver Applicability resolver; defaults to a real one.
+	 * @param PlanRepository|null      $plans    Plan store; defaults to a new repository.
 	 */
-	public function __construct( ?ProductPlanResolver $resolver = null, ?callable $plan_finder = null ) {
-		$this->resolver    = $resolver ?? new ProductPlanResolver();
-		$this->plan_finder = $plan_finder ?? static function ( int $plan_id ): ?Plan {
-			return ( new PlanRepository() )->find( $plan_id, Package::EXTENSION_SLUG );
-		};
+	public function __construct( ?ProductPlanResolver $resolver = null, ?PlanRepository $plans = null ) {
+		$this->resolver = $resolver ?? new ProductPlanResolver();
+		$this->plans    = $plans ?? new PlanRepository();
 	}
 
 	/**
-	 * Wire the cart-side hooks. Called once from the Lite bootstrap.
+	 * Wire the cart-side hooks. Called once from the Lite bootstrap. Constructs a
+	 * default instance unless the caller supplies one.
+	 *
+	 * @param self|null $instance Pre-built module; defaults to a new instance.
 	 */
-	public static function register(): void {
-		$instance = new self();
+	public static function register( ?self $instance = null ): void {
+		$instance = $instance ?? new self();
 		add_filter( 'woocommerce_add_to_cart_validation', [ $instance, 'validate_plan' ], 10, 6 );
 		add_filter( 'woocommerce_add_cart_item_data', [ $instance, 'add_cart_item_data' ], 10, 2 );
 		add_action( 'woocommerce_before_calculate_totals', [ $instance, 'apply_plan_pricing' ], 10, 1 );
@@ -168,7 +169,7 @@ final class CartPlanHooks {
 	 */
 	public function apply_plan_pricing( WC_Cart $cart ): void {
 		foreach ( $cart->get_cart() as $cart_item ) {
-			$plan = $this->line_plan( $cart_item );
+			$plan = $this->resolve_line_plan( $cart_item );
 			if ( ! $plan instanceof Plan ) {
 				continue;
 			}
@@ -196,7 +197,7 @@ final class CartPlanHooks {
 	 * @return array<int, array{key:string,value:string,display?:string}>
 	 */
 	public function get_item_data( array $item_data, array $cart_item ): array {
-		$plan = $this->line_plan( $cart_item );
+		$plan = $this->resolve_line_plan( $cart_item );
 		if ( ! $plan instanceof Plan ) {
 			return $item_data;
 		}
@@ -236,7 +237,7 @@ final class CartPlanHooks {
 	 * Copy `_selling_plan_id` onto the order line item. Same key as the cart
 	 * item; consumed by `ContractCreationHandler`.
 	 *
-	 * Gated on the same {@see self::line_plan()} resolution the pricing and
+	 * Gated on the same {@see self::resolve_line_plan()} resolution the pricing and
 	 * display use: a line whose plan no longer resolves is priced as one-time,
 	 * so it must not carry plan meta either (else the order would look like a
 	 * subscription the shopper was not charged for). The three consumers of a
@@ -248,7 +249,7 @@ final class CartPlanHooks {
 	 * @param array<string, mixed>   $values        Cart item row.
 	 */
 	public function copy_to_line_item_meta( $order_item, string $cart_item_key, array $values ): void {
-		$plan = $this->line_plan( $values );
+		$plan = $this->resolve_line_plan( $values );
 		if ( ! $plan instanceof Plan ) {
 			return;
 		}
@@ -263,7 +264,7 @@ final class CartPlanHooks {
 	 * @return string
 	 */
 	private function append_cadence( string $html, array $cart_item ): string {
-		$plan = $this->line_plan( $cart_item );
+		$plan = $this->resolve_line_plan( $cart_item );
 		if ( ! $plan instanceof Plan ) {
 			return $html;
 		}
@@ -277,12 +278,12 @@ final class CartPlanHooks {
 	 * @param array<string, mixed> $cart_item Cart item row.
 	 * @return Plan|null
 	 */
-	private function line_plan( array $cart_item ): ?Plan {
+	private function resolve_line_plan( array $cart_item ): ?Plan {
 		$plan_id = isset( $cart_item[ self::CART_ITEM_KEY ] ) ? (int) $cart_item[ self::CART_ITEM_KEY ] : 0;
 		if ( $plan_id <= 0 ) {
 			return null;
 		}
-		return ( $this->plan_finder )( $plan_id );
+		return $this->plans->find( $plan_id, Package::EXTENSION_SLUG );
 	}
 
 	/**

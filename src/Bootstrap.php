@@ -72,7 +72,7 @@ final class Bootstrap {
 		// Cart/Checkout Blocks: expose per-item plan data on core's Store API and
 		// enqueue the checkout filters (frequency suffix + "Total due today").
 		// Guarded so Lite still loads on WooCommerce builds without Blocks.
-		( new Cart\Blocks\StoreApiExtension() )->register();
+		Cart\Blocks\StoreApiExtension::register();
 		Cart\Blocks\Integration::register();
 
 		// Checkout: turn a completed order into a subscription contract via the

@@ -55,19 +55,23 @@ final class StoreApiExtension {
 
 	/**
 	 * Register the per-item and cart-level endpoint data, if core's Store API is
-	 * present.
+	 * present. Constructs a default instance unless the caller supplies one.
+	 *
+	 * @param self|null $instance Pre-built extension; defaults to a new instance.
 	 */
-	public function register(): void {
+	public static function register( ?self $instance = null ): void {
 		if ( ! function_exists( 'woocommerce_store_api_register_endpoint_data' ) ) {
 			return;
 		}
+
+		$instance = $instance ?? new self();
 
 		woocommerce_store_api_register_endpoint_data(
 			[
 				'endpoint'        => \Automattic\WooCommerce\StoreApi\Schemas\V1\CartItemSchema::IDENTIFIER,
 				'namespace'       => self::DATA_NAMESPACE,
-				'data_callback'   => [ $this, 'get_item_data' ],
-				'schema_callback' => [ $this, 'get_item_schema' ],
+				'data_callback'   => [ $instance, 'get_item_data' ],
+				'schema_callback' => [ $instance, 'get_item_schema' ],
 				'schema_type'     => ARRAY_A,
 			]
 		);
@@ -76,8 +80,8 @@ final class StoreApiExtension {
 			[
 				'endpoint'        => \Automattic\WooCommerce\StoreApi\Schemas\V1\CartSchema::IDENTIFIER,
 				'namespace'       => self::DATA_NAMESPACE,
-				'data_callback'   => [ $this, 'get_cart_data' ],
-				'schema_callback' => [ $this, 'get_cart_schema' ],
+				'data_callback'   => [ $instance, 'get_cart_data' ],
+				'schema_callback' => [ $instance, 'get_cart_schema' ],
 				'schema_type'     => ARRAY_A,
 			]
 		);
