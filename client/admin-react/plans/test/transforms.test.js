@@ -117,6 +117,60 @@ describe( 'registry transforms', () => {
 		expect( payload.name ).toBe( '1 month' );
 	} );
 
+	describe( 'BOGO pricing', () => {
+		const bogoPlan = {
+			id: 7,
+			name: 'Monthly BOGO',
+			billing_policy: { period: 'month', interval: 1 },
+			pricing_policy: {
+				// The engine stores BOGO value-less, normalized to 0.
+				policies: [ { type: 'bogo', value: 0, duration_cycles: 1 } ],
+				one_time_fees: [],
+			},
+			status: 'active',
+		};
+
+		it( 'maps a value-less BOGO plan to empty form value', () => {
+			const registry = buildFieldRegistry();
+			const formData = planToFormData( registry, bogoPlan );
+			expect( formData ).toMatchObject( {
+				pricingType: 'bogo',
+				pricingValue: '',
+				pricingScope: 'first',
+			} );
+		} );
+
+		it( 'writes a value-less BOGO entry with its cycle scope', () => {
+			const registry = buildFieldRegistry();
+			const formData = planToFormData( registry, bogoPlan );
+			const payload = formDataToPayload( registry, formData, bogoPlan );
+			expect( payload.pricing_policy.policies ).toEqual( [
+				{ type: 'bogo', duration_cycles: 1 },
+			] );
+			// BOGO carries no numeric amount.
+			expect( payload.pricing_policy.policies[ 0 ] ).not.toHaveProperty(
+				'value'
+			);
+		} );
+
+		it( 'writes BOGO even though the amount field is empty', () => {
+			const registry = buildFieldRegistry();
+			const payload = formDataToPayload(
+				registry,
+				{
+					...makeDefaultFormData( registry ),
+					pricingType: 'bogo',
+					pricingValue: '',
+					pricingScope: 'all',
+				},
+				null
+			);
+			expect( payload.pricing_policy.policies ).toEqual( [
+				{ type: 'bogo' },
+			] );
+		} );
+	} );
+
 	describe( 'injected fields', () => {
 		const NAMESPACE = 'test/min-cycles';
 

@@ -89,43 +89,71 @@ export function DiscountEdit( {
 		value: scope.value,
 	} ) );
 
+	// BOGO is value-less: it grants one free unit per purchased unit, so the
+	// amount input is hidden and only the type and cycle scope are editable.
+	const isBogo = data.pricingType === 'bogo';
+
 	return (
 		<div className="wc-subscriptions-lite-plans__field">
 			<div className="wc-subscriptions-lite-plans__field-row">
-				<InputControl
-					__next40pxDefaultSize
-					type="number"
-					label={ __( 'Discount', 'woocommerce-subscriptions-lite' ) }
-					aria-label={ sprintf(
-						/* translators: %s: discount unit - "%" for percentage discounts, the store currency code (e.g. "USD") otherwise. */
-						__( 'Discount (%s)', 'woocommerce-subscriptions-lite' ),
-						data.pricingType === 'percentage'
-							? '%'
-							: config.currency.code
-					) }
-					value={ String( data.pricingValue ) }
-					onChange={ ( value ) =>
-						onChange( { pricingValue: value ?? '' } )
-					}
-					onBlur={ onBlur }
-					min={ 0 }
-					max={ data.pricingType === 'percentage' ? 100 : undefined }
-					step={ 0.01 }
-					aria-describedby={
-						errors.pricingValue ? valueErrorId : undefined
-					}
-					aria-invalid={ errors.pricingValue ? 'true' : undefined }
-					{ ...discountAffixes( data.pricingType, config.currency ) }
-				/>
+				{ ! isBogo && (
+					<InputControl
+						__next40pxDefaultSize
+						type="number"
+						label={ __(
+							'Discount',
+							'woocommerce-subscriptions-lite'
+						) }
+						aria-label={ sprintf(
+							/* translators: %s: discount unit - "%" for percentage discounts, the store currency code (e.g. "USD") otherwise. */
+							__(
+								'Discount (%s)',
+								'woocommerce-subscriptions-lite'
+							),
+							data.pricingType === 'percentage'
+								? '%'
+								: config.currency.code
+						) }
+						value={ String( data.pricingValue ) }
+						onChange={ ( value ) =>
+							onChange( { pricingValue: value ?? '' } )
+						}
+						onBlur={ onBlur }
+						min={ 0 }
+						max={
+							data.pricingType === 'percentage' ? 100 : undefined
+						}
+						step={ 0.01 }
+						aria-describedby={
+							errors.pricingValue ? valueErrorId : undefined
+						}
+						aria-invalid={
+							errors.pricingValue ? 'true' : undefined
+						}
+						{ ...discountAffixes(
+							data.pricingType,
+							config.currency
+						) }
+					/>
+				) }
 				<SelectControl
 					__next40pxDefaultSize
-					aria-label={ __(
+					label={ __(
 						'Pricing type',
 						'woocommerce-subscriptions-lite'
 					) }
+					hideLabelFromVision={ ! isBogo }
 					value={ data.pricingType }
 					options={ typeOptions }
 					onChange={ ( value ) => onChange( { pricingType: value } ) }
+					help={
+						isBogo
+							? __(
+									'Grants one free unit for every unit purchased. No amount required.',
+									'woocommerce-subscriptions-lite'
+							  )
+							: undefined
+					}
 				/>
 			</div>
 			<FormErrorMessage

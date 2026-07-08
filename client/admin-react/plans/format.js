@@ -106,6 +106,8 @@ export function formatDiscount( plan, currency = config.currency ) {
 		firstPolicy.type === 'price'
 	) {
 		label = formatCurrency( value, currency );
+	} else if ( firstPolicy.type === 'bogo' ) {
+		label = __( 'Buy one, get one', 'woocommerce-subscriptions-lite' );
 	}
 
 	if ( Number( firstPolicy.duration_cycles ) === 1 ) {

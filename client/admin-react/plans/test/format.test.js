@@ -84,6 +84,21 @@ describe( 'formatDiscount', () => {
 		).toBe( '$5.50' );
 	} );
 
+	it( 'renders a value-less BOGO discount', () => {
+		expect(
+			formatDiscount( plan( { type: 'bogo', value: 0 } ), USD )
+		).toBe( 'Buy one, get one' );
+	} );
+
+	it( 'appends the scope suffix to BOGO', () => {
+		expect(
+			formatDiscount(
+				plan( { type: 'bogo', value: 0, duration_cycles: 1 } ),
+				USD
+			)
+		).toBe( 'Buy one, get one (first cycle)' );
+	} );
+
 	it( 'appends the scope suffix', () => {
 		expect(
 			formatDiscount(

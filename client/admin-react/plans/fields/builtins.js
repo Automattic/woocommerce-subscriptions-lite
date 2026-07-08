@@ -89,9 +89,12 @@ export function builtInFields() {
 				} else if ( Number( durationCycles ) > 1 ) {
 					pricingScope = 'n_cycles';
 				}
+				// BOGO is value-less; the engine normalizes its value to 0, so
+				// keep the value field empty rather than surfacing a stray "0".
+				const isBogo = firstPolicy?.type === 'bogo';
 				return {
 					pricingType: firstPolicy?.type || 'percentage',
-					pricingValue: firstPolicy?.value ?? '',
+					pricingValue: isBogo ? '' : firstPolicy?.value ?? '',
 					pricingScope,
 					durationCycles,
 				};
@@ -105,14 +108,19 @@ export function builtInFields() {
 						: [],
 				};
 
-				if ( formData.pricingValue === '' ) {
+				// BOGO is a value-less policy, so it is written even though the
+				// value field is empty; every other type needs a value to apply.
+				const isBogo = formData.pricingType === 'bogo';
+				if ( ! isBogo && formData.pricingValue === '' ) {
 					return { ...payload, pricing_policy: pricing };
 				}
 
-				const entry = {
-					type: formData.pricingType,
-					value: Number( formData.pricingValue ),
-				};
+				const entry = isBogo
+					? { type: 'bogo' }
+					: {
+							type: formData.pricingType,
+							value: Number( formData.pricingValue ),
+					  };
 				if ( formData.pricingScope === 'first' ) {
 					entry.duration_cycles = 1;
 				} else if ( formData.pricingScope === 'n_cycles' ) {
