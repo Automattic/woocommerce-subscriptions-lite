@@ -94,6 +94,14 @@
 
 		.wc-subscriptions-lite-plans-table-check {
 			width: $grid-unit-40;
+
+			// wp-admin gives header checkboxes an 8px left margin (`.widefat th
+			// input`) that body-cell checkboxes never get, so the select-all box
+			// lands 8px right of the column. Zero it so the header and row
+			// checkboxes stack in one line.
+			input {
+				margin-left: 0;
+			}
 		}
 
 		// All-scope: every plan applies, so there is nothing to pick - the
