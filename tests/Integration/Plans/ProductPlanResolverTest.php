@@ -160,7 +160,7 @@ final class ProductPlanResolverTest extends LiteIntegrationTestCase {
 		$this->assertSame( [ $first_id, $last_id ], self::plan_ids( $plans ) );
 	}
 
-	public function test_plan_applies_to_product_tracks_resolution(): void {
+	public function test_is_plan_applicable_to_product_tracks_resolution(): void {
 		$product_id = $this->make_product();
 		$applicable = (int) $this->make_plan()->get_id();
 		$other      = (int) $this->make_plan( 'week' )->get_id();
@@ -170,8 +170,8 @@ final class ProductPlanResolverTest extends LiteIntegrationTestCase {
 		);
 
 		$resolver = new ProductPlanResolver();
-		$this->assertTrue( $resolver->plan_applies_to_product( $applicable, $product_id ) );
-		$this->assertFalse( $resolver->plan_applies_to_product( $other, $product_id ), 'A plan not attached to the product does not apply.' );
-		$this->assertFalse( $resolver->plan_applies_to_product( $applicable, 999999 ), 'No plan applies to an unknown product.' );
+		$this->assertTrue( $resolver->is_plan_applicable_to_product( $applicable, $product_id ) );
+		$this->assertFalse( $resolver->is_plan_applicable_to_product( $other, $product_id ), 'A plan not attached to the product does not apply.' );
+		$this->assertFalse( $resolver->is_plan_applicable_to_product( $applicable, 999999 ), 'No plan applies to an unknown product.' );
 	}
 }

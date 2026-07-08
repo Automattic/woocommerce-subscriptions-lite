@@ -121,7 +121,7 @@ final class CartPlanHooks {
 		if ( null === $plan_id ) {
 			return $passed;
 		}
-		if ( ! $this->resolver->plan_applies_to_product( $plan_id, $product_id ) ) {
+		if ( ! $this->resolver->is_plan_applicable_to_product( $plan_id, $product_id ) ) {
 			wc_add_notice(
 				__( 'The selected subscription plan is not available for this product.', 'woocommerce-subscriptions-lite' ),
 				'error'
@@ -151,7 +151,7 @@ final class CartPlanHooks {
 	public function add_cart_item_data( array $cart_item_data, int $product_id ): array {
 		$plan_id = $this->get_candidate_plan_id_for_cart_item( $cart_item_data );
 		unset( $cart_item_data[ self::SELLING_PLAN_ID_KEY ] );
-		if ( null !== $plan_id && $this->resolver->plan_applies_to_product( $plan_id, $product_id ) ) {
+		if ( null !== $plan_id && $this->resolver->is_plan_applicable_to_product( $plan_id, $product_id ) ) {
 			$cart_item_data[ self::SELLING_PLAN_ID_KEY ] = $plan_id;
 		}
 		return $cart_item_data;
@@ -293,7 +293,7 @@ final class CartPlanHooks {
 	 * The selected plan id for this add-to-cart, from `$_POST` (classic + AJAX)
 	 * or, failing that, the Store API `cart_item_data` body. Null when neither
 	 * carries a positive id. Whichever source it comes from, the value is only
-	 * ever trusted after `ProductPlanResolver::plan_applies_to_product()` - this
+	 * ever trusted after `ProductPlanResolver::is_plan_applicable_to_product()` - this
 	 * method just reads and sanitizes the candidate.
 	 *
 	 * @param array<string, mixed> $cart_item_data Store API cart item data body.

@@ -90,7 +90,7 @@ final class ProductPlanResolver {
 	 * @param int $plan_id    Plan id to check.
 	 * @param int $product_id Product (or variation) id.
 	 */
-	public function plan_applies_to_product( int $plan_id, int $product_id ): bool {
+	public function is_plan_applicable_to_product( int $plan_id, int $product_id ): bool {
 		foreach ( $this->get_plans_for_product( $product_id ) as $plan ) {
 			if ( $plan->get_id() === $plan_id ) {
 				return true;
