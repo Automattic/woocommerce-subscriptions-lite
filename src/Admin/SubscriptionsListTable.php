@@ -2,11 +2,12 @@
 /**
  * SubscriptionsListTable - the WooCommerce > Subscriptions admin list.
  *
- * A trimmed `WP_List_Table` showing the most recent subscriptions read through
- * the engine's public {@see \Automattic\WooCommerce\SubscriptionsEngine\Api\Subscriptions}
- * facade. Six columns (ID, Status, Customer, Next payment, Total, Actions), no
- * filters, no sorting, no bulk actions - the basic merchant inbox. Paging is a
- * single forward/back window over the facade's `list()`.
+ * An Orders-like `WP_List_Table` reading subscriptions through the engine's
+ * public {@see \Automattic\WooCommerce\SubscriptionsEngine\Api\Subscriptions}
+ * facade. Six columns (ID, Status, Customer, Next payment, Total, Actions),
+ * status views with counts, sortable columns, and a search box - the merchant
+ * inbox modelled on the WooCommerce orders list. Paging, filtering, ordering and
+ * search are all resolved by the facade's `list()`/`count()`/`count_by_status()`.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Admin
  */
@@ -20,6 +21,7 @@ use WP_List_Table;
 use WP_User;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Subscriptions;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Contract;
+use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -78,21 +80,39 @@ final class SubscriptionsListTable extends WP_List_Table {
 	/**
 	 * Fetch the current page of subscriptions via the facade.
 	 *
-	 * One forward/back window: `list( PER_PAGE + 1 )` peeks one row past the
-	 * page to decide whether a "next" link is warranted, without a count query
-	 * the facade does not expose. The peeked row is trimmed before display.
+	 * Reads the active status view, search term and sort from the request and
+	 * resolves them through the facade: `list()` for the page, `count()` for the
+	 * matching total (real pagination). An engine read failure degrades to an
+	 * empty list plus a notice rather than a fatal.
 	 */
 	public function prepare_items(): void {
-		$this->_column_headers = [ $this->get_columns(), [], [] ];
+		$this->_column_headers = [ $this->get_columns(), [], $this->get_sortable_columns(), $this->get_default_primary_column_name() ];
 
 		$per_page = PageController::PER_PAGE;
 		$page     = max( 1, (int) $this->get_pagenum() );
 		$offset   = ( $page - 1 ) * $per_page;
 
-		// Peek one extra row to know whether a further page exists. An engine
-		// failure degrades to an empty list plus a notice rather than a fatal.
+		$status = $this->current_status();
+		$search = $this->current_search();
+		$sort   = $this->current_sort();
+
 		try {
-			$rows = Subscriptions::list( $per_page + 1, $offset );
+			$rows  = Subscriptions::list(
+				[
+					'limit'   => $per_page,
+					'offset'  => $offset,
+					'status'  => $status,
+					'search'  => $search,
+					'orderby' => $sort['orderby'],
+					'order'   => $sort['order'],
+				]
+			);
+			$total = Subscriptions::count(
+				[
+					'status' => $status,
+					'search' => $search,
+				]
+			);
 		} catch ( Throwable $e ) {
 			$this->load_error = true;
 			wc_get_logger()->error(
@@ -102,22 +122,127 @@ final class SubscriptionsListTable extends WP_List_Table {
 					'exception' => $e,
 				]
 			);
-			$rows = [];
+			$rows  = [];
+			$total = 0;
 		}
 
-		$has_next    = count( $rows ) > $per_page;
-		$this->items = array_slice( $rows, 0, $per_page );
-
-		// `total_items` is unknown without a count query; report a lower bound so
-		// the pager renders a Next link while a full page (plus the peek) came back.
-		$total_items = $offset + count( $this->items ) + ( $has_next ? 1 : 0 );
+		$this->items = $rows;
 
 		$this->set_pagination_args(
 			[
-				'total_items' => $total_items,
+				'total_items' => $total,
 				'per_page'    => $per_page,
-				'total_pages' => $has_next ? $page + 1 : $page,
+				'total_pages' => (int) ceil( $total / $per_page ),
 			]
+		);
+	}
+
+	/**
+	 * Status views (All + one per contract status) with counts, modelled on the
+	 * orders list. Counts come from the facade's `count_by_status()` in a single
+	 * read and are global (independent of the active search), so a view link
+	 * resets the search and paging and filters by status alone.
+	 *
+	 * @return array<string, string> View slug => link markup.
+	 */
+	protected function get_views(): array {
+		try {
+			$counts = Subscriptions::count_by_status();
+		} catch ( Throwable $e ) {
+			return [];
+		}
+
+		$current = $this->current_status();
+		$views   = [
+			'all' => $this->view_link( '', __( 'All', 'woocommerce-subscriptions-lite' ), (int) array_sum( $counts ), '' === $current ),
+		];
+
+		foreach ( ContractStatus::all() as $status ) {
+			$views[ $status ] = $this->view_link(
+				$status,
+				StatusLabels::contract_label( $status ),
+				isset( $counts[ $status ] ) ? (int) $counts[ $status ] : 0,
+				$status === $current
+			);
+		}
+
+		return $views;
+	}
+
+	/**
+	 * Sortable columns mapped to the facade's `orderby` keys. ID sorts descending
+	 * first (newest); the date and amount columns ascending first.
+	 *
+	 * @return array<string, array{0: string, 1: bool}>
+	 */
+	protected function get_sortable_columns(): array {
+		return [
+			'id'           => [ 'id', true ],
+			'next_payment' => [ 'next_payment', false ],
+			'total'        => [ 'total', false ],
+		];
+	}
+
+	/**
+	 * The active status view from the request, or '' for All. An unknown status
+	 * falls back to All rather than an empty list. Public so the page chrome can
+	 * carry the current view through the search form.
+	 */
+	public function current_status(): string {
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only list filter.
+		$status = isset( $_GET['status'] ) ? sanitize_key( wp_unslash( (string) $_GET['status'] ) ) : '';
+
+		return ContractStatus::is_valid( $status ) ? $status : '';
+	}
+
+	/**
+	 * The active search term from the request (trimmed), or ''.
+	 */
+	private function current_search(): string {
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only list search.
+		return isset( $_GET['s'] ) ? trim( sanitize_text_field( wp_unslash( (string) $_GET['s'] ) ) ) : '';
+	}
+
+	/**
+	 * The active sort from the request: a whitelisted `orderby` key (empty falls
+	 * back to the engine default id) and an `order` direction (default DESC). The
+	 * whitelist is the sortable-column map, so an unknown key never reaches SQL.
+	 *
+	 * @return array{orderby: string, order: string}
+	 */
+	private function current_sort(): array {
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only list sort.
+		$orderby = isset( $_GET['orderby'] ) ? sanitize_key( wp_unslash( (string) $_GET['orderby'] ) ) : '';
+		if ( ! array_key_exists( $orderby, $this->get_sortable_columns() ) ) {
+			$orderby = '';
+		}
+
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only list sort.
+		$order_raw = isset( $_GET['order'] ) ? strtoupper( sanitize_key( wp_unslash( (string) $_GET['order'] ) ) ) : '';
+
+		return [
+			'orderby' => $orderby,
+			'order'   => 'ASC' === $order_raw ? 'ASC' : 'DESC',
+		];
+	}
+
+	/**
+	 * Build a single status-view link.
+	 *
+	 * @param string $status  Status slug, or '' for All.
+	 * @param string $label   Human label.
+	 * @param int    $count   Count badge.
+	 * @param bool   $current Whether this is the active view.
+	 */
+	private function view_link( string $status, string $label, int $count, bool $current ): string {
+		$url = PageController::page_url( '' === $status ? [] : [ 'status' => $status ] );
+
+		return sprintf(
+			'<a href="%1$s"%2$s>%3$s <span class="count">(%4$s)</span></a>',
+			esc_url( $url ),
+			$current ? ' class="current" aria-current="page"' : '',
+			esc_html( $label ),
+			esc_html( number_format_i18n( $count ) )
 		);
 	}
 

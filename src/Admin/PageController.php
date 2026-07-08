@@ -237,12 +237,25 @@ final class PageController {
 				</div>
 			<?php endif; ?>
 
+			<?php $table->views(); ?>
+
 			<?php
-			// No enclosing <form>: the table has no search box or bulk actions, and
-			// each row action is its own POST form - a wrapping form would nest them
-			// (invalid HTML). Pagination uses plain query-arg links, so it needs none.
-			$table->display();
+			// The search box is its own GET form ABOVE the table, carrying the page
+			// slug and the active status view. The table is left unwrapped so the
+			// per-row Renew now / Cancel POST forms are never nested inside a GET form
+			// (invalid HTML). Sort, pagination and view links are query-arg links, so
+			// they carry the search/status state without a wrapping form.
+			$status = $table->current_status();
 			?>
+			<form method="get" class="wc-subs-lite-search-form">
+				<input type="hidden" name="page" value="<?php echo esc_attr( self::PAGE_SLUG ); ?>" />
+				<?php if ( '' !== $status ) : ?>
+					<input type="hidden" name="status" value="<?php echo esc_attr( $status ); ?>" />
+				<?php endif; ?>
+				<?php $table->search_box( __( 'Search subscriptions', 'woocommerce-subscriptions-lite' ), 'subscription' ); ?>
+			</form>
+
+			<?php $table->display(); ?>
 		</div>
 		<?php
 	}
