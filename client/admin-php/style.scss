@@ -95,6 +95,20 @@ $status-pending-cancellation-fg: #b45917;
 	}
 }
 
+/*
+ * The search box sits in its own GET form above the table - kept out of the
+ * table so the per-row POST action forms are never nested in it. Floating it
+ * right reads like the native list-screen search placement (beside the status
+ * views); the table clears both so it drops below them.
+ */
+.wc-subs-lite-subscriptions-list .wc-subs-lite-search-form .search-box {
+	float: right;
+}
+
+.wc-subs-lite-subscriptions-list .wp-list-table {
+	clear: both;
+}
+
 /* List table: keep the ID, Status, and Next payment columns compact. */
 .wc-subs-lite-subscriptions-list .wp-list-table .column-id {
 	width: 80px;
