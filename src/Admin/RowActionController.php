@@ -7,7 +7,8 @@
  * the request (capability and a POST nonce verified with `check_admin_referer()`),
  * drives the engine through its public
  * {@see \Automattic\WooCommerce\SubscriptionsEngine\Api\Subscriptions} facade,
- * queues a flash notice, and redirects back.
+ * queues a flash notice, and redirects back to the page the action was triggered
+ * from (the detail page or the list), not a fixed destination.
  *
  * The decision logic ({@see self::handle_renew_now()}, {@see self::handle_cancel()})
  * is separated from the request plumbing ({@see self::renew_now_request()},
@@ -119,7 +120,7 @@ final class RowActionController {
 
 		$this->guard_or_flash( $result );
 
-		wp_safe_redirect( PageController::page_url() );
+		wp_safe_redirect( $this->redirect_target( wp_get_referer() ) );
 		exit;
 	}
 
@@ -135,7 +136,7 @@ final class RowActionController {
 
 		$this->guard_or_flash( $result );
 
-		wp_safe_redirect( PageController::page_url() );
+		wp_safe_redirect( $this->redirect_target( wp_get_referer() ) );
 		exit;
 	}
 
@@ -291,5 +292,21 @@ final class RowActionController {
 		}
 
 		PageController::set_flash_notice( $result->type(), $result->message() );
+	}
+
+	/**
+	 * Where to send the merchant back after an action: the page the action was
+	 * triggered from - the detail page or the list - so a Renew now / Cancel on the
+	 * detail page returns there instead of bouncing to the list. The origin is the
+	 * `_wp_http_referer` the action form carries (added by `wp_nonce_field()`), read
+	 * via `wp_get_referer()`; it falls back to the list when no local referer is
+	 * available. The caller passes the result through `wp_safe_redirect()`, which
+	 * enforces the same-host restriction.
+	 *
+	 * @param string|false $referer The submitted referer (from `wp_get_referer()`).
+	 * @return string The redirect URL.
+	 */
+	private function redirect_target( $referer ): string {
+		return is_string( $referer ) && '' !== $referer ? $referer : PageController::page_url();
 	}
 }
