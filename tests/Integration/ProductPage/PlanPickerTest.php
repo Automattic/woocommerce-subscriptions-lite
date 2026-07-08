@@ -109,7 +109,7 @@ final class PlanPickerTest extends LiteIntegrationTestCase {
 		);
 		$this->assertMatchesRegularExpression( '/^\s*hidden\s*$/m', $html, 'The plans block starts server-painted hidden.' );
 		$this->assertStringContainsString(
-			'$24.00 every 1 month',
+			'$24.00 / month',
 			html_entity_decode( wp_strip_all_tags( $html ), ENT_QUOTES ),
 			'The option text carries the plan price at the product price.'
 		);
