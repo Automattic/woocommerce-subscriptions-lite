@@ -38,11 +38,21 @@ $wcsl_mode_name = '_wcsl_picker_mode_' . $wcsl_product_id;
 
 $wcsl_picker_classes = 'wc-subscriptions-lite-plan-picker'
 	. ( $is_variable ? ' wc-subscriptions-lite-plan-picker--variable' : '' );
+
+// Variable products keep the picker hidden until a variation is chosen; simple
+// products seed variationChosen true and have nothing to wait for.
+$wcsl_context = (string) wp_json_encode(
+	[
+		'mode'            => $one_time_allowed ? 'one-time' : 'subscribe',
+		'isVariable'      => $is_variable,
+		'variationChosen' => ! $is_variable,
+	]
+);
 ?>
 <fieldset
 	class="<?php echo esc_attr( $wcsl_picker_classes ); ?>"
 	data-wp-interactive="woocommerce-subscriptions-lite/plan-picker"
-	data-wp-context="<?php echo esc_attr( (string) wp_json_encode( [ 'mode' => $one_time_allowed ? 'one-time' : 'subscribe' ] ) ); ?>"
+	data-wp-context="<?php echo esc_attr( $wcsl_context ); ?>"
 	<?php if ( $is_variable ) : ?>
 		data-wp-init="callbacks.initVariationBridge"
 	<?php endif; ?>
@@ -63,6 +73,18 @@ $wcsl_picker_classes = 'wc-subscriptions-lite-plan-picker'
 		</p>
 	</noscript>
 
+	<?php
+	// On a variable product the picker stays hidden until a variation is
+	// chosen (the view module flips `variationChosen` on `found_variation`);
+	// this mirrors WooCommerce hiding its own add-to-cart controls until then.
+	?>
+	<div
+		class="wc-subscriptions-lite-plan-picker__body"
+		data-wp-bind--hidden="state.isPickerHidden"
+		<?php if ( $is_variable ) : ?>
+			hidden
+		<?php endif; ?>
+	>
 	<?php if ( $one_time_allowed ) : ?>
 		<ul class="wc-subscriptions-lite-plan-picker__modes">
 			<li class="wc-subscriptions-lite-plan-picker__mode">
@@ -130,5 +152,6 @@ $wcsl_picker_classes = 'wc-subscriptions-lite-plan-picker'
 				</option>
 			<?php endforeach; ?>
 		</select>
+	</div>
 	</div>
 </fieldset>

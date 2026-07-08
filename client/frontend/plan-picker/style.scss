@@ -12,8 +12,8 @@
 
 	&__modes {
 		display: flex;
-		flex-wrap: wrap;
-		gap: $grid-unit-20;
+		flex-direction: column;
+		gap: $grid-unit-05;
 		list-style: none;
 		margin: 0 0 $grid-unit-10;
 		padding: 0;

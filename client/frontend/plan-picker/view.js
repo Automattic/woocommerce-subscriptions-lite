@@ -19,6 +19,14 @@ store( 'woocommerce-subscriptions-lite/plan-picker', {
 		get isOneTime() {
 			return getContext().mode === 'one-time';
 		},
+		/**
+		 * Variable products keep the whole picker hidden until a variation is
+		 * chosen; simple products seed `variationChosen` true and never hide.
+		 */
+		get isPickerHidden() {
+			const context = getContext();
+			return context.isVariable && ! context.variationChosen;
+		},
 	},
 	actions: {
 		setMode() {
@@ -57,6 +65,8 @@ store( 'woocommerce-subscriptions-lite/plan-picker', {
 				return;
 			}
 
+			const context = getContext();
+
 			const options = Array.from(
 				ref.querySelectorAll( 'option[data-wcsl-plan-id]' )
 			);
@@ -67,6 +77,9 @@ store( 'woocommerce-subscriptions-lite/plan-picker', {
 			const $form = window.jQuery( form );
 
 			$form.on( 'found_variation.wcslPlanPicker', ( _, variation ) => {
+				// A variation is now selected: reveal the picker.
+				context.variationChosen = true;
+
 				const optionHtml =
 					variation &&
 					variation.subscriptions_lite &&
@@ -85,11 +98,18 @@ store( 'woocommerce-subscriptions-lite/plan-picker', {
 				} );
 			} );
 
-			$form.on( 'reset_data.wcslPlanPicker', () => {
-				options.forEach( ( option ) => {
-					option.innerHTML = initialHtml.get( option );
-				} );
-			} );
+			// `reset_data` fires on a cleared selection, `hide_variation` when
+			// the chosen attributes match nothing: hide the picker again and
+			// restore the seed option strings.
+			$form.on(
+				'reset_data.wcslPlanPicker hide_variation.wcslPlanPicker',
+				() => {
+					context.variationChosen = false;
+					options.forEach( ( option ) => {
+						option.innerHTML = initialHtml.get( option );
+					} );
+				}
+			);
 
 			return () => $form.off( '.wcslPlanPicker' );
 		},

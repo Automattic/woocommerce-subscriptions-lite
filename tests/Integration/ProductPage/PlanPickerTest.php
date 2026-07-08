@@ -138,6 +138,43 @@ final class PlanPickerTest extends LiteIntegrationTestCase {
 		$this->assertStringContainsString( 'data-wp-init="callbacks.initVariationBridge"', $html );
 	}
 
+	public function test_variable_product_hides_the_picker_until_a_variation_is_chosen(): void {
+		$this->make_plan();
+		$product = $this->subscribable_product( WC_Product_Variable::class );
+
+		$html = ( new PlanPicker() )->render( $product );
+
+		// The body wrapper binds its visibility to the variation-chosen state,
+		// is server-painted hidden, and seeds variationChosen false; the view
+		// module reveals it on found_variation. The `\s+hidden\s*>` guard
+		// matches only the standalone boolean attribute, not the "hidden" inside
+		// data-wp-bind--hidden.
+		$this->assertStringContainsString( 'data-wp-bind--hidden="state.isPickerHidden"', $html );
+		$this->assertMatchesRegularExpression(
+			'/class="wc-subscriptions-lite-plan-picker__body"[^>]*?\s+hidden\s*>/s',
+			$html,
+			'A variable product paints the picker body hidden until a variation is chosen.'
+		);
+		$this->assertStringContainsString( '&quot;variationChosen&quot;:false', $html, 'Variable products start with no variation chosen.' );
+	}
+
+	public function test_simple_product_never_hides_the_picker_body(): void {
+		$this->make_plan();
+		$product = $this->subscribable_product();
+
+		$html = ( new PlanPicker() )->render( $product );
+
+		// The body wrapper exists but is not server-painted hidden, and the
+		// picker seeds variationChosen true so nothing waits on a variation.
+		$this->assertStringContainsString( 'wc-subscriptions-lite-plan-picker__body', $html );
+		$this->assertDoesNotMatchRegularExpression(
+			'/class="wc-subscriptions-lite-plan-picker__body"[^>]*?\s+hidden\s*>/s',
+			$html,
+			'A simple product never hides the picker body.'
+		);
+		$this->assertStringContainsString( '&quot;variationChosen&quot;:true', $html );
+	}
+
 	public function test_render_labels_the_plan_select_deliver_for_physical_products(): void {
 		$this->make_plan();
 		$product = $this->subscribable_product();
