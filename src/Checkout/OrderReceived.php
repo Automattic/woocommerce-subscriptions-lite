@@ -30,7 +30,7 @@ use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Plan;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Checkout\OrderLinkage;
 use Automattic\WooCommerce\SubscriptionsLite\CustomerPortal\Endpoints;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
-use Automattic\WooCommerce\SubscriptionsLite\ProductPage\PlanOptionFormatter;
+use Automattic\WooCommerce\SubscriptionsLite\Utilities\Formatter;
 use WC_Order;
 
 defined( 'ABSPATH' ) || exit;
@@ -91,7 +91,7 @@ final class OrderReceived {
 		$status       = (string) $contract->get_status();
 		$url          = ( new Endpoints() )->detail_url( $contract_id );
 		$plan         = $this->find_plan( $contract->get_selling_plan_id() );
-		$cadence      = $plan instanceof Plan ? PlanOptionFormatter::cadence_suffix( $plan ) : '';
+		$cadence      = $this->plan_cadence( $plan );
 		$amount       = wc_price( (float) $contract->get_billing_total(), [ 'currency' => $contract->get_currency() ] );
 		$next_gmt     = $contract->get_next_payment_gmt();
 		$next_ts      = null !== $next_gmt ? strtotime( $next_gmt . ' UTC' ) : false;
@@ -156,6 +156,24 @@ final class OrderReceived {
 		$plan  = reset( $plans );
 
 		return $plan instanceof Plan ? $plan : null;
+	}
+
+	/**
+	 * The price cadence suffix (`/ month`) for a plan, or '' when there is no
+	 * plan. Reads the shared wording off {@see Formatter} so the checkout
+	 * summary matches the cart and portal without reaching into another surface's
+	 * formatter.
+	 *
+	 * @param Plan|null $plan The contract's plan, or null if gone.
+	 */
+	private function plan_cadence( ?Plan $plan ): string {
+		if ( ! $plan instanceof Plan ) {
+			return '';
+		}
+
+		$policy = $plan->get_billing_policy();
+
+		return Formatter::price_cadence( $policy->get_period(), $policy->get_interval() );
 	}
 
 	/**

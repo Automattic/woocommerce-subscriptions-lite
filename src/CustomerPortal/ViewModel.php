@@ -20,6 +20,7 @@ declare( strict_types=1 );
 namespace Automattic\WooCommerce\SubscriptionsLite\CustomerPortal;
 
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
+use Automattic\WooCommerce\SubscriptionsLite\Utilities\Formatter;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -485,48 +486,8 @@ final class ViewModel {
 			return $price;
 		}
 
-		$cadence = $this->format_cadence( $period, $interval );
+		$cadence = Formatter::price_cadence( $period, $interval );
 		return '' === $cadence ? $price : $price . ' ' . $cadence;
-	}
-
-	/**
-	 * Build the cadence suffix for the recurring summary.
-	 *
-	 * @param string $period   Period slug: day/week/month/year.
-	 * @param int    $interval Interval count.
-	 */
-	private function format_cadence( string $period, int $interval ): string {
-		if ( 1 === $interval ) {
-			switch ( $period ) {
-				case 'day':
-					return __( '/ day', 'woocommerce-subscriptions-lite' );
-				case 'week':
-					return __( '/ week', 'woocommerce-subscriptions-lite' );
-				case 'month':
-					return __( '/ month', 'woocommerce-subscriptions-lite' );
-				case 'year':
-					return __( '/ year', 'woocommerce-subscriptions-lite' );
-				default:
-					return '';
-			}
-		}
-
-		switch ( $period ) {
-			case 'day':
-				/* translators: %d: interval count */
-				return sprintf( _n( 'every %d day', 'every %d days', $interval, 'woocommerce-subscriptions-lite' ), $interval );
-			case 'week':
-				/* translators: %d: interval count */
-				return sprintf( _n( 'every %d week', 'every %d weeks', $interval, 'woocommerce-subscriptions-lite' ), $interval );
-			case 'month':
-				/* translators: %d: interval count */
-				return sprintf( _n( 'every %d month', 'every %d months', $interval, 'woocommerce-subscriptions-lite' ), $interval );
-			case 'year':
-				/* translators: %d: interval count */
-				return sprintf( _n( 'every %d year', 'every %d years', $interval, 'woocommerce-subscriptions-lite' ), $interval );
-			default:
-				return '';
-		}
 	}
 
 	/**

@@ -28,7 +28,7 @@ namespace Automattic\WooCommerce\SubscriptionsLite\ProductPage;
 
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Plan;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\ValueObject\BillingPolicy;
-use Automattic\WooCommerce\SubscriptionsLite\Admin\Formatting;
+use Automattic\WooCommerce\SubscriptionsLite\Utilities\Formatter;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -91,15 +91,9 @@ final class PlanOptionFormatter {
 	 * @param Plan $plan Plan being formatted.
 	 */
 	public static function format_frequency( Plan $plan ): string {
-		$policy   = $plan->get_billing_policy();
-		$interval = $policy->get_interval();
+		$policy = $plan->get_billing_policy();
 
-		return sprintf(
-			/* translators: 1: billing interval count, 2: pluralized billing period (e.g. "month", "months"). */
-			__( 'Every %1$d %2$s', 'woocommerce-subscriptions-lite' ),
-			$interval,
-			self::period_label( $policy->get_period(), $interval )
-		);
+		return Formatter::explicit_cadence( $policy->get_period(), $policy->get_interval() );
 	}
 
 	/**
@@ -114,7 +108,7 @@ final class PlanOptionFormatter {
 	public static function format_discount( Plan $plan, float $base_price ): string {
 		$suffix = self::discount_suffix( $plan, $base_price );
 
-		return '' === $suffix ? Formatting::PLACEHOLDER : $suffix;
+		return '' === $suffix ? Formatter::PLACEHOLDER : $suffix;
 	}
 
 	/**
@@ -125,38 +119,7 @@ final class PlanOptionFormatter {
 	 * @param BillingPolicy $policy Billing policy carrying the period + interval.
 	 */
 	private static function price_cadence( BillingPolicy $policy ): string {
-		$period   = $policy->get_period();
-		$interval = $policy->get_interval();
-
-		if ( 1 === $interval ) {
-			switch ( $period ) {
-				case 'day':
-					return __( '/ day', 'woocommerce-subscriptions-lite' );
-				case 'week':
-					return __( '/ week', 'woocommerce-subscriptions-lite' );
-				case 'month':
-					return __( '/ month', 'woocommerce-subscriptions-lite' );
-				case 'year':
-					return __( '/ year', 'woocommerce-subscriptions-lite' );
-			}
-		}
-
-		switch ( $period ) {
-			case 'day':
-				/* translators: %d: interval count. */
-				return sprintf( _n( 'every %d day', 'every %d days', $interval, 'woocommerce-subscriptions-lite' ), $interval );
-			case 'week':
-				/* translators: %d: interval count. */
-				return sprintf( _n( 'every %d week', 'every %d weeks', $interval, 'woocommerce-subscriptions-lite' ), $interval );
-			case 'month':
-				/* translators: %d: interval count. */
-				return sprintf( _n( 'every %d month', 'every %d months', $interval, 'woocommerce-subscriptions-lite' ), $interval );
-			case 'year':
-				/* translators: %d: interval count. */
-				return sprintf( _n( 'every %d year', 'every %d years', $interval, 'woocommerce-subscriptions-lite' ), $interval );
-			default:
-				return '';
-		}
+		return Formatter::price_cadence( $policy->get_period(), $policy->get_interval() );
 	}
 
 	/**
@@ -187,31 +150,8 @@ final class PlanOptionFormatter {
 			/* translators: 1: billing interval count, 2: pluralized billing period (e.g. "month", "months"). */
 			__( 'Every %1$d %2$s', 'woocommerce-subscriptions-lite' ),
 			$interval,
-			self::period_label( $period, $interval )
+			Formatter::period_label( $period, $interval )
 		);
-	}
-
-	/**
-	 * Pluralized period label for a cadence via _n(), so locales with
-	 * non-trivial plural rules translate each unit independently. Unknown
-	 * periods fall through to the raw value.
-	 *
-	 * @param string $period   One of 'day' | 'week' | 'month' | 'year'.
-	 * @param int    $interval Interval count driving pluralization.
-	 */
-	private static function period_label( string $period, int $interval ): string {
-		switch ( $period ) {
-			case 'day':
-				return _n( 'day', 'days', $interval, 'woocommerce-subscriptions-lite' );
-			case 'week':
-				return _n( 'week', 'weeks', $interval, 'woocommerce-subscriptions-lite' );
-			case 'month':
-				return _n( 'month', 'months', $interval, 'woocommerce-subscriptions-lite' );
-			case 'year':
-				return _n( 'year', 'years', $interval, 'woocommerce-subscriptions-lite' );
-			default:
-				return $period;
-		}
 	}
 
 	/**
