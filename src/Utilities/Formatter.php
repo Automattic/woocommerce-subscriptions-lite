@@ -1,14 +1,19 @@
 <?php
 /**
- * PlanFormatter - surface-neutral billing-period wording.
+ * Formatter - shared, surface-neutral string formatting.
  *
- * The single home for the plan-cadence phrasings the admin, product, cart, and
- * customer-portal surfaces all render, so a period reads the same everywhere and
- * each phrase carries one translatable string. Surfaces keep their own formatter
- * (admin `Formatting`, product/cart `PlanOptionFormatter`, portal `ViewModel`)
- * for their surface-specific wording and delegate these shared primitives here.
+ * A single home for formatting logic that more than one surface renders, so the
+ * output reads the same everywhere and each phrase carries one translatable
+ * string. It currently owns the billing-period wording (cadence and period
+ * labels) plus the absent-value placeholder; other cross-surface formatting can
+ * live here as it arises. Every member takes primitives and returns a plain
+ * string - it has no `Plan` or other domain-entity dependency.
  *
- * All methods are plain text; escape with esc_html() when rendering.
+ * Surfaces keep their own formatter (admin `Formatting`, product/cart
+ * `PlanOptionFormatter`, portal `ViewModel`) for their surface-specific wording
+ * and delegate these shared primitives here.
+ *
+ * All methods return plain text; escape with esc_html() when rendering.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Utilities
  */
@@ -20,9 +25,9 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Utilities;
 defined( 'ABSPATH' ) || exit;
 
 /**
- * Static formatter for shared billing-period wording.
+ * Static formatter for shared, cross-surface string formatting.
  */
-final class PlanFormatter {
+final class Formatter {
 
 	/**
 	 * The em-dash-free placeholder shown when a value is absent. Lives here (not

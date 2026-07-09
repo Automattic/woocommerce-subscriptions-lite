@@ -17,7 +17,7 @@ declare( strict_types=1 );
 namespace Automattic\WooCommerce\SubscriptionsLite\Admin\MetaBoxes;
 
 use Automattic\WooCommerce\SubscriptionsLite\Admin\Formatting;
-use Automattic\WooCommerce\SubscriptionsLite\Utilities\PlanFormatter;
+use Automattic\WooCommerce\SubscriptionsLite\Utilities\Formatter;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\OrderLinks;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\StatusLabels;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Contract;
@@ -54,7 +54,7 @@ final class SubscriptionData {
 		$origin_order_id = $contract->get_origin_order_id();
 		$origin_value    = null !== $origin_order_id
 			? sprintf( '<a href="%s">#%d</a>', esc_url( OrderLinks::edit_url( $origin_order_id ) ), $origin_order_id )
-			: PlanFormatter::PLACEHOLDER;
+			: Formatter::PLACEHOLDER;
 
 		return [
 			[
@@ -84,6 +84,6 @@ final class SubscriptionData {
 	 */
 	private static function payment_method_label( Contract $contract ): string {
 		$instrument = $contract->get_payment_instrument();
-		return $instrument->get_title() ?? $instrument->get_gateway() ?? PlanFormatter::PLACEHOLDER;
+		return $instrument->get_title() ?? $instrument->get_gateway() ?? Formatter::PLACEHOLDER;
 	}
 }

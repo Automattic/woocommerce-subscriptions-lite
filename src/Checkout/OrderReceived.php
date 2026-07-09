@@ -30,7 +30,7 @@ use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Plan;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Checkout\OrderLinkage;
 use Automattic\WooCommerce\SubscriptionsLite\CustomerPortal\Endpoints;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
-use Automattic\WooCommerce\SubscriptionsLite\Utilities\PlanFormatter;
+use Automattic\WooCommerce\SubscriptionsLite\Utilities\Formatter;
 use WC_Order;
 
 defined( 'ABSPATH' ) || exit;
@@ -160,7 +160,7 @@ final class OrderReceived {
 
 	/**
 	 * The price cadence suffix (`/ month`) for a plan, or '' when there is no
-	 * plan. Reads the shared wording off {@see PlanFormatter} so the checkout
+	 * plan. Reads the shared wording off {@see Formatter} so the checkout
 	 * summary matches the cart and portal without reaching into another surface's
 	 * formatter.
 	 *
@@ -173,7 +173,7 @@ final class OrderReceived {
 
 		$policy = $plan->get_billing_policy();
 
-		return PlanFormatter::price_cadence( $policy->get_period(), $policy->get_interval() );
+		return Formatter::price_cadence( $policy->get_period(), $policy->get_interval() );
 	}
 
 	/**

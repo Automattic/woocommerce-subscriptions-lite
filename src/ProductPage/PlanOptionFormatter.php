@@ -28,7 +28,7 @@ namespace Automattic\WooCommerce\SubscriptionsLite\ProductPage;
 
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Plan;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\ValueObject\BillingPolicy;
-use Automattic\WooCommerce\SubscriptionsLite\Utilities\PlanFormatter;
+use Automattic\WooCommerce\SubscriptionsLite\Utilities\Formatter;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -93,7 +93,7 @@ final class PlanOptionFormatter {
 	public static function format_frequency( Plan $plan ): string {
 		$policy = $plan->get_billing_policy();
 
-		return PlanFormatter::explicit_cadence( $policy->get_period(), $policy->get_interval() );
+		return Formatter::explicit_cadence( $policy->get_period(), $policy->get_interval() );
 	}
 
 	/**
@@ -108,7 +108,7 @@ final class PlanOptionFormatter {
 	public static function format_discount( Plan $plan, float $base_price ): string {
 		$suffix = self::discount_suffix( $plan, $base_price );
 
-		return '' === $suffix ? PlanFormatter::PLACEHOLDER : $suffix;
+		return '' === $suffix ? Formatter::PLACEHOLDER : $suffix;
 	}
 
 	/**
@@ -119,7 +119,7 @@ final class PlanOptionFormatter {
 	 * @param BillingPolicy $policy Billing policy carrying the period + interval.
 	 */
 	private static function price_cadence( BillingPolicy $policy ): string {
-		return PlanFormatter::price_cadence( $policy->get_period(), $policy->get_interval() );
+		return Formatter::price_cadence( $policy->get_period(), $policy->get_interval() );
 	}
 
 	/**
@@ -150,7 +150,7 @@ final class PlanOptionFormatter {
 			/* translators: 1: billing interval count, 2: pluralized billing period (e.g. "month", "months"). */
 			__( 'Every %1$d %2$s', 'woocommerce-subscriptions-lite' ),
 			$interval,
-			PlanFormatter::period_label( $period, $interval )
+			Formatter::period_label( $period, $interval )
 		);
 	}
 

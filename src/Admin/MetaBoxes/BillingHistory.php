@@ -15,7 +15,7 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Admin\MetaBoxes;
 
 use Throwable;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\Formatting;
-use Automattic\WooCommerce\SubscriptionsLite\Utilities\PlanFormatter;
+use Automattic\WooCommerce\SubscriptionsLite\Utilities\Formatter;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\OrderLinks;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\PageController;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\StatusLabels;
@@ -95,11 +95,11 @@ final class BillingHistory {
 
 		$order_value = null !== $order_id
 			? sprintf( '<a href="%s">#%d</a>', esc_url( OrderLinks::edit_url( $order_id ) ), $order_id )
-			: PlanFormatter::PLACEHOLDER;
+			: Formatter::PLACEHOLDER;
 		?>
 		<tr>
 			<td><?php echo esc_html( (string) $cycle->get_sequence_no() ); ?></td>
-			<td><?php echo esc_html( null === $count ? PlanFormatter::PLACEHOLDER : (string) $count ); ?></td>
+			<td><?php echo esc_html( null === $count ? Formatter::PLACEHOLDER : (string) $count ); ?></td>
 			<td><?php echo esc_html( StatusLabels::cycle_label( $cycle->get_status()->get_value() ) ); ?></td>
 			<td><?php echo esc_html( $period ); ?></td>
 			<td><?php echo Formatting::price( $cycle->get_expected_total(), $cycle->get_currency() ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- price markup escaped at source. ?></td>

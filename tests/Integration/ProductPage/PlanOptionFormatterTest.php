@@ -18,7 +18,7 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\ProductPage
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Plan;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\ValueObject\BillingPolicy;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\ValueObject\PricingPolicy;
-use Automattic\WooCommerce\SubscriptionsLite\Utilities\PlanFormatter;
+use Automattic\WooCommerce\SubscriptionsLite\Utilities\Formatter;
 use Automattic\WooCommerce\SubscriptionsLite\ProductPage\PlanOptionFormatter;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
 
@@ -204,8 +204,8 @@ final class PlanOptionFormatterTest extends LiteIntegrationTestCase {
 	}
 
 	public function test_format_discount_returns_the_placeholder_when_there_is_nothing_to_show(): void {
-		$this->assertSame( PlanFormatter::PLACEHOLDER, PlanOptionFormatter::format_discount( $this->make_priced_plan( null ), 24.0 ) );
-		$this->assertSame( PlanFormatter::PLACEHOLDER, PlanOptionFormatter::format_discount( $this->make_priced_plan( [] ), 24.0 ) );
+		$this->assertSame( Formatter::PLACEHOLDER, PlanOptionFormatter::format_discount( $this->make_priced_plan( null ), 24.0 ) );
+		$this->assertSame( Formatter::PLACEHOLDER, PlanOptionFormatter::format_discount( $this->make_priced_plan( [] ), 24.0 ) );
 	}
 
 	public function test_format_discount_returns_the_discount_string(): void {

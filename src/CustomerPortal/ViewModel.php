@@ -20,7 +20,7 @@ declare( strict_types=1 );
 namespace Automattic\WooCommerce\SubscriptionsLite\CustomerPortal;
 
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
-use Automattic\WooCommerce\SubscriptionsLite\Utilities\PlanFormatter;
+use Automattic\WooCommerce\SubscriptionsLite\Utilities\Formatter;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -486,7 +486,7 @@ final class ViewModel {
 			return $price;
 		}
 
-		$cadence = PlanFormatter::price_cadence( $period, $interval );
+		$cadence = Formatter::price_cadence( $period, $interval );
 		return '' === $cadence ? $price : $price . ' ' . $cadence;
 	}
 

@@ -44,7 +44,7 @@ final class OrderReceivedTest extends LiteIntegrationTestCase {
 
 		$this->assertStringContainsString( 'Related subscriptions', $html, 'The related-subscriptions section renders.' );
 		$this->assertStringContainsString( 'woocommerce-orders-table', $html, 'It reuses the WooCommerce orders-table markup so the theme styles it.' );
-		$this->assertStringContainsString( '/ month', $html, 'The amount carries the plan cadence, read from the shared PlanFormatter.' );
+		$this->assertStringContainsString( '/ month', $html, 'The amount carries the plan cadence, read from the shared Formatter.' );
 		$this->assertStringContainsString( 'wc-subscriptions-lite-manage-subscription', $html, 'The View link renders.' );
 		$this->assertStringContainsString( '#' . $contract_id, $html, 'The row shows the contract number.' );
 		$this->assertStringContainsString( (string) $contract_id, $html, 'The View link targets the contract.' );
