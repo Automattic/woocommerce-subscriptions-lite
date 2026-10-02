@@ -69,6 +69,10 @@ final class Bootstrap {
 		// the recurring amount, and write the plan onto the order line item.
 		Cart\CartPlanHooks::register();
 
+		// Pricing: validate and normalize Lite's pricing terms on plan writes through
+		// the engine's plans REST route (REST requests are not is_admin()).
+		Pricing\PlanWriteValidation::register();
+
 		// Cart/Checkout Blocks: expose per-item plan data on core's Store API and
 		// enqueue the checkout filters (frequency suffix + "Total due today").
 		// Guarded so Lite still loads on WooCommerce builds without Blocks.
@@ -81,6 +85,10 @@ final class Bootstrap {
 		Checkout\ContractCreationHandler::register();
 		Checkout\AccountRequirement::register();
 		Checkout\OrderReceived::register();
+
+		// Renewal: grant BOGO bonus units on engine-built renewal orders. Renewals run
+		// from Action Scheduler, so this registers on every request.
+		Renewal\BogoRenewalBonus::register();
 
 		// Customer portal (My Account): the subscriptions list + single
 		// subscription detail, with the lifecycle actions (cancel / hold /
