@@ -4,9 +4,8 @@
  *
  * The single source of truth for how a selling plan reads on the product
  * surfaces: the PDP picker option text (`$21.60 / month (10% off)`) and the
- * admin product-panel table's Frequency and Discount columns. The price math
- * lives on the engine's Plan entity (PricingPolicy::calculate_price()); this
- * class owns only formatting and i18n.
+ * admin product-panel table's Frequency and Discount columns. Price math lives
+ * in {@see PriceCalculator}; this class owns formatting and i18n.
  *
  * Two cadence phrasings, both keyed off the billing interval:
  *  - price cadence (customer price strings): `/ month` at interval 1, else
@@ -28,6 +27,8 @@ namespace Automattic\WooCommerce\SubscriptionsLite\ProductPage;
 
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Plan;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\ValueObject\BillingPolicy;
+use Automattic\WooCommerce\SubscriptionsLite\Pricing\PriceCalculator;
+use Automattic\WooCommerce\SubscriptionsLite\Pricing\PricingTerms;
 use Automattic\WooCommerce\SubscriptionsLite\Utilities\Formatter;
 
 defined( 'ABSPATH' ) || exit;
@@ -35,7 +36,7 @@ defined( 'ABSPATH' ) || exit;
 /**
  * Static formatter for plan option and column strings.
  *
- * Discount strings inspect only the FIRST pricing-policy entry: Lite's plan
+ * Discount strings inspect only the FIRST valid pricing entry: Lite's plan
  * UI writes one adjustment per plan, so multi-policy plans render the lead
  * entry's discount only (the price itself always reflects the full chain).
  */
@@ -50,9 +51,10 @@ final class PlanOptionFormatter {
 	 * @return string Option text; escape with wp_kses_post() when rendering.
 	 */
 	public static function format( Plan $plan, float $base_price ): string {
-		$price    = wc_price( $plan->calculate_price( $base_price, 1 ) );
-		$cadence  = self::price_cadence( $plan->get_billing_policy() );
-		$discount = self::discount_suffix( $plan, $base_price );
+		$calculator = PriceCalculator::for_plan( $plan );
+		$price      = wc_price( $calculator->unit_price( $base_price, 1 ) );
+		$cadence    = self::price_cadence( $plan->get_billing_policy() );
+		$discount   = self::discount_suffix( $calculator->get_terms(), $base_price );
 
 		if ( '' === $discount ) {
 			return sprintf( '%s %s', $price, $cadence );
@@ -106,7 +108,7 @@ final class PlanOptionFormatter {
 	 * @return string Discount text; escape with wp_kses_post() when rendering.
 	 */
 	public static function format_discount( Plan $plan, float $base_price ): string {
-		$suffix = self::discount_suffix( $plan, $base_price );
+		$suffix = self::discount_suffix( PricingTerms::from_plan( $plan ), $base_price );
 
 		return '' === $suffix ? Formatter::PLACEHOLDER : $suffix;
 	}
@@ -155,40 +157,34 @@ final class PlanOptionFormatter {
 	}
 
 	/**
-	 * Discount string from the first pricing-policy entry, or '' when there is
-	 * nothing to show (no policy, zero adjustment, or a price increase).
+	 * Discount string from the first valid pricing entry, or '' when there is
+	 * nothing to show (no entry, zero adjustment, or a price increase).
 	 *
 	 * Shapes: percentage -> `10% off`; fixed_amount -> `$5.00 off`; price ->
 	 * `$8.00 off` only when the replacement price undercuts the base. A
 	 * `starting_cycle > 1` appends the `(from cycle N)` qualifier.
 	 *
-	 * @param Plan  $plan       Plan being formatted.
-	 * @param float $base_price Base price the plan applies to.
+	 * @param PricingTerms $terms      The plan's pricing terms.
+	 * @param float        $base_price Base price the plan applies to.
 	 */
-	private static function discount_suffix( Plan $plan, float $base_price ): string {
-		$pricing_policy = $plan->get_pricing_policy();
-		if ( null === $pricing_policy ) {
-			return '';
-		}
-
-		$policies = $pricing_policy->get_policies();
+	private static function discount_suffix( PricingTerms $terms, float $base_price ): string {
+		$policies = $terms->get_policies();
 		if ( empty( $policies ) ) {
 			return '';
 		}
 
 		$first          = $policies[0];
-		$type           = (string) ( $first['type'] ?? '' );
-		$value          = (float) ( $first['value'] ?? 0.0 );
-		$starting_cycle = isset( $first['starting_cycle'] ) ? (int) $first['starting_cycle'] : 1;
+		$value          = $first['value'];
+		$starting_cycle = $first['starting_cycle'] ?? 1;
 
-		switch ( $type ) {
-			case 'percentage':
+		switch ( $first['type'] ) {
+			case PricingTerms::TYPE_PERCENTAGE:
 				$suffix = self::percentage_off( $value );
 				break;
-			case 'fixed_amount':
+			case PricingTerms::TYPE_FIXED_AMOUNT:
 				$suffix = self::amount_off( $value );
 				break;
-			case 'price':
+			case PricingTerms::TYPE_PRICE:
 				// A replacement price only reads as a discount when it undercuts
 				// the base; an increase gets no suffix.
 				$suffix = self::amount_off( $base_price - $value );

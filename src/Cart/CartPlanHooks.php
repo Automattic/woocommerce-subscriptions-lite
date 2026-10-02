@@ -39,6 +39,7 @@ use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Plan;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\PlanRepository;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ProductPlanResolver;
+use Automattic\WooCommerce\SubscriptionsLite\Pricing\PriceCalculator;
 use Automattic\WooCommerce\SubscriptionsLite\ProductPage\PlanOptionFormatter;
 
 defined( 'ABSPATH' ) || exit;
@@ -181,7 +182,7 @@ final class CartPlanHooks {
 			}
 
 			$base_price = (float) $product->get_regular_price();
-			$discounted = $plan->calculate_price( $base_price, 1 );
+			$discounted = PriceCalculator::for_plan( $plan )->unit_price( $base_price, 1 );
 			if ( $discounted !== $base_price ) {
 				$product->set_price( (string) $discounted );
 			}

@@ -78,7 +78,8 @@ final class BogoRoundTripTest extends LiteIntegrationTestCase {
 
 		$fetched_policy = $this->first_policy( $fetched->get_data() );
 		$this->assertSame( 'bogo', $fetched_policy['type'] );
-		$this->assertSame( 0.0, $fetched_policy['value'] );
+		// JSON storage reads a whole-number float back as an int; the wire value is 0 either way.
+		$this->assertSame( 0, $fetched_policy['value'] );
 		$this->assertSame( 1, $fetched_policy['duration_cycles'] );
 	}
 

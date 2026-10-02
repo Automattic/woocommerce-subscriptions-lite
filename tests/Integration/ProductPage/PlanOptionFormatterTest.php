@@ -17,7 +17,6 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\ProductPage
 
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Plan;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\ValueObject\BillingPolicy;
-use Automattic\WooCommerce\SubscriptionsEngine\Core\ValueObject\PricingPolicy;
 use Automattic\WooCommerce\SubscriptionsLite\Utilities\Formatter;
 use Automattic\WooCommerce\SubscriptionsLite\ProductPage\PlanOptionFormatter;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
@@ -40,7 +39,10 @@ final class PlanOptionFormatterTest extends LiteIntegrationTestCase {
 			[
 				'name'           => 'Test plan',
 				'billing_policy' => new BillingPolicy( $period, $interval, null, null, null ),
-				'pricing_policy' => null === $policies ? null : new PricingPolicy( $policies, [] ),
+				'pricing_policy' => null === $policies ? null : [
+					'policies'      => $policies,
+					'one_time_fees' => [],
+				],
 				'extension_slug' => 'woocommerce-subscriptions-lite',
 			]
 		);
@@ -125,6 +127,24 @@ final class PlanOptionFormatterTest extends LiteIntegrationTestCase {
 		);
 
 		$this->assertSame( '$15.00 / month', self::as_text( PlanOptionFormatter::format( $plan, 10.0 ) ) );
+	}
+
+	public function test_an_unknown_lead_entry_is_skipped_and_the_next_valid_entry_leads(): void {
+		$plan = $this->make_priced_plan(
+			[
+				[
+					'type'  => 'tiered',
+					'value' => 50.0,
+				],
+				[
+					'type'  => 'percentage',
+					'value' => 10.0,
+				],
+			]
+		);
+
+		$this->assertSame( '$21.60 / month (10% off)', self::as_text( PlanOptionFormatter::format( $plan, 24.0 ) ) );
+		$this->assertSame( '10% off', self::as_text( PlanOptionFormatter::format_discount( $plan, 24.0 ) ) );
 	}
 
 	public function test_no_pricing_policy_renders_price_and_frequency_only(): void {

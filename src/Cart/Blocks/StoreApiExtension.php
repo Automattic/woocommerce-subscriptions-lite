@@ -22,6 +22,7 @@ use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Plan;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\PlanRepository;
 use Automattic\WooCommerce\SubscriptionsLite\Cart\CartPlanHooks;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
+use Automattic\WooCommerce\SubscriptionsLite\Pricing\PriceCalculator;
 use Automattic\WooCommerce\SubscriptionsLite\ProductPage\PlanOptionFormatter;
 
 defined( 'ABSPATH' ) || exit;
@@ -107,7 +108,7 @@ final class StoreApiExtension {
 			'price_cadence'    => PlanOptionFormatter::cadence_suffix( $plan ),
 			'billing_period'   => $policy->get_period(),
 			'billing_interval' => $policy->get_interval(),
-			'recurring_amount' => $plan->calculate_price( $base, 1 ),
+			'recurring_amount' => PriceCalculator::for_plan( $plan )->unit_price( $base, 1 ),
 		];
 	}
 
