@@ -15,7 +15,7 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Pricing;
 
-use Automattic\WooCommerce\SubscriptionsEngine\Api\Rest\PlansController;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\SellingPlans;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 use WP_Error;
 
@@ -32,7 +32,7 @@ final class PlanWriteValidation {
 	 * Register the engine plan validation filter.
 	 */
 	public static function register(): void {
-		add_filter( PlansController::VALIDATE_PLAN_FILTER, [ new self(), 'validate_plan' ], 10, 2 );
+		add_filter( SellingPlans::VALIDATE_PLAN_FILTER, [ new self(), 'validate_plan' ], 10, 2 );
 	}
 
 	/**

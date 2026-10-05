@@ -10,7 +10,7 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Pricing;
 
-use Automattic\WooCommerce\SubscriptionsEngine\Api\Rest\PlansController;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\SellingPlans;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Pricing\PlanWriteValidation;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
@@ -270,11 +270,11 @@ final class PlanWriteValidationTest extends LiteIntegrationTestCase {
 		$earlier = static function () {
 			return new WP_Error( 'earlier_error', 'Earlier.', [ 'status' => 418 ] );
 		};
-		add_filter( PlansController::VALIDATE_PLAN_FILTER, $earlier, 5 );
+		add_filter( SellingPlans::VALIDATE_PLAN_FILTER, $earlier, 5 );
 
 		$response = $this->create_plan( [ 'policies' => [ [ 'type' => 'mystery' ] ] ] );
 
-		remove_filter( PlansController::VALIDATE_PLAN_FILTER, $earlier, 5 );
+		remove_filter( SellingPlans::VALIDATE_PLAN_FILTER, $earlier, 5 );
 		$this->assertSame( 418, $response->get_status() );
 		$this->assertSame( 'earlier_error', $this->error_code( $response ) );
 	}
@@ -291,7 +291,7 @@ final class PlanWriteValidationTest extends LiteIntegrationTestCase {
 
 	public function test_a_fees_only_patch_validates_the_merged_stored_policies(): void {
 		// Store invalid policies with Lite's validation unhooked, as a pre-existing row would be.
-		remove_all_filters( PlansController::VALIDATE_PLAN_FILTER );
+		remove_all_filters( SellingPlans::VALIDATE_PLAN_FILTER );
 		$id = $this->plan_id( $this->create_plan( [ 'policies' => [ [ 'type' => 'mystery' ] ] ] ) );
 		PlanWriteValidation::register();
 

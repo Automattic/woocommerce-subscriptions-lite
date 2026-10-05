@@ -14,7 +14,7 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration;
 
-use Automattic\WooCommerce\SubscriptionsEngine\Api\Rest\PlansController;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\SellingPlans;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\ProductPlansPanel;
 use Automattic\WooCommerce\SubscriptionsLite\Bootstrap;
 use Automattic\WooCommerce\SubscriptionsLite\CustomerPortal\Endpoints;
@@ -74,7 +74,7 @@ final class BootstrapTest extends LiteIntegrationTestCase {
 
 	public function test_the_pricing_and_renewal_modules_are_wired(): void {
 		$this->assertTrue(
-			$this->hook_has_callback_on( PlansController::VALIDATE_PLAN_FILTER, PlanWriteValidation::class ),
+			$this->hook_has_callback_on( SellingPlans::VALIDATE_PLAN_FILTER, PlanWriteValidation::class ),
 			'Engine plan writes validate Lite pricing terms.'
 		);
 		$this->assertTrue(
