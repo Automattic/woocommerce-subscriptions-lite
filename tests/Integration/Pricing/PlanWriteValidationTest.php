@@ -10,7 +10,8 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Pricing;
 
-use Automattic\WooCommerce\SubscriptionsEngine\Api\SellingPlans;
+use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Plan;
+use Automattic\WooCommerce\SubscriptionsEngine\Core\ValueObject\BillingPolicy;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Pricing\PlanWriteValidation;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
@@ -270,28 +271,60 @@ final class PlanWriteValidationTest extends LiteIntegrationTestCase {
 		$earlier = static function () {
 			return new WP_Error( 'earlier_error', 'Earlier.', [ 'status' => 418 ] );
 		};
-		add_filter( SellingPlans::VALIDATE_PLAN_FILTER, $earlier, 5 );
+		add_filter( 'woocommerce_subscriptions_engine_validate_plan', $earlier, 5 );
 
 		$response = $this->create_plan( [ 'policies' => [ [ 'type' => 'mystery' ] ] ] );
 
-		remove_filter( SellingPlans::VALIDATE_PLAN_FILTER, $earlier, 5 );
+		remove_filter( 'woocommerce_subscriptions_engine_validate_plan', $earlier, 5 );
 		$this->assertSame( 418, $response->get_status() );
 		$this->assertSame( 'earlier_error', $this->error_code( $response ) );
 	}
 
-	public function test_a_foreign_extension_payload_passes_the_filter_untouched(): void {
-		$payload = [
-			'pricing_policy' => [
-				'policies' => [ [ 'type' => 'mystery' ] ],
-			],
-		];
+	public function test_an_earlier_error_passes_the_filter_untouched(): void {
+		$error = new WP_Error( 'earlier_error', 'Earlier.' );
 
-		$this->assertSame( $payload, ( new PlanWriteValidation() )->validate_plan( $payload, 'other-extension' ) );
+		$this->assertSame( $error, ( new PlanWriteValidation() )->validate_plan( $error, Package::EXTENSION_SLUG ) );
+	}
+
+	public function test_a_foreign_extension_plan_passes_the_filter_untouched(): void {
+		$pricing_policy = [ 'policies' => [ [ 'type' => 'mystery' ] ] ];
+		$plan           = $this->unsaved_plan( $pricing_policy, 'other-extension' );
+
+		$this->assertSame( $plan, ( new PlanWriteValidation() )->validate_plan( $plan, 'other-extension' ) );
+		$this->assertSame( $pricing_policy, $plan->get_pricing_policy() );
+	}
+
+	public function test_a_lite_plan_is_normalized_in_place(): void {
+		$plan = $this->unsaved_plan(
+			[
+				'policies'   => [
+					[
+						'type'  => 'percentage',
+						'value' => 10,
+					],
+				],
+				'custom_key' => 'kept',
+			]
+		);
+
+		$this->assertSame( $plan, ( new PlanWriteValidation() )->validate_plan( $plan, Package::EXTENSION_SLUG ) );
+		$this->assertSame(
+			[
+				'policies'   => [
+					[
+						'type'  => 'percentage',
+						'value' => 10.0,
+					],
+				],
+				'custom_key' => 'kept',
+			],
+			$plan->get_pricing_policy()
+		);
 	}
 
 	public function test_a_fees_only_patch_validates_the_merged_stored_policies(): void {
 		// Store invalid policies with Lite's validation unhooked, as a pre-existing row would be.
-		remove_all_filters( SellingPlans::VALIDATE_PLAN_FILTER );
+		remove_all_filters( 'woocommerce_subscriptions_engine_validate_plan' );
 		$id = $this->plan_id( $this->create_plan( [ 'policies' => [ [ 'type' => 'mystery' ] ] ] ) );
 		PlanWriteValidation::register();
 
@@ -325,6 +358,28 @@ final class PlanWriteValidationTest extends LiteIntegrationTestCase {
 		);
 
 		$this->assertSame( 200, rest_do_request( $request )->get_status() );
+	}
+
+	/**
+	 * An unsaved plan with the given pricing payload.
+	 *
+	 * @param array<string, mixed> $pricing_policy Pricing payload.
+	 * @param string               $extension_slug Owner slug.
+	 */
+	private function unsaved_plan( array $pricing_policy, string $extension_slug = Package::EXTENSION_SLUG ): Plan {
+		return Plan::create(
+			[
+				'name'           => 'Monthly',
+				'billing_policy' => BillingPolicy::from_array(
+					[
+						'period'   => 'month',
+						'interval' => 1,
+					]
+				),
+				'pricing_policy' => $pricing_policy,
+				'extension_slug' => $extension_slug,
+			]
+		);
 	}
 
 	/**

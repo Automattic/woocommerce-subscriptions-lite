@@ -14,7 +14,6 @@ use Automattic\WooCommerce\SubscriptionsEngine\Api\Subscriptions;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Plan;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Gateway\GatewayCapabilities;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Checkout\ContractFactory;
-use Automattic\WooCommerce\SubscriptionsEngine\Integration\Renewal\RenewalEngine;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\PlanRepository;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\SchemaInstaller;
 use Automattic\WooCommerce\SubscriptionsLite\Renewal\BogoRenewalBonus;
@@ -54,7 +53,7 @@ final class BogoRenewalBonusTest extends LiteIntegrationTestCase {
 		global $wp_filter;
 
 		$count = 0;
-		foreach ( $wp_filter[ RenewalEngine::RENEWAL_ORDER_CREATED_ACTION ]->callbacks as $callbacks ) {
+		foreach ( $wp_filter['woocommerce_subscriptions_engine_renewal_order_created']->callbacks as $callbacks ) {
 			foreach ( $callbacks as $callback ) {
 				if ( is_array( $callback['function'] ) && $callback['function'][0] instanceof BogoRenewalBonus ) {
 					++$count;

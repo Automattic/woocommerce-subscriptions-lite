@@ -21,7 +21,6 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Renewal;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\SellingPlans;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Subscriptions;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Contract;
-use Automattic\WooCommerce\SubscriptionsEngine\Integration\Renewal\RenewalEngine;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Pricing\PriceCalculator;
 use Automattic\WooCommerce\SubscriptionsLite\Pricing\PricingTerms;
@@ -39,7 +38,7 @@ final class BogoRenewalBonus {
 	 * Register the renewal listener.
 	 */
 	public static function register(): void {
-		add_action( RenewalEngine::RENEWAL_ORDER_CREATED_ACTION, [ new self(), 'apply_bonus' ], 10, 2 );
+		add_action( 'woocommerce_subscriptions_engine_renewal_order_created', [ new self(), 'apply_bonus' ], 10, 2 );
 	}
 
 	/**
