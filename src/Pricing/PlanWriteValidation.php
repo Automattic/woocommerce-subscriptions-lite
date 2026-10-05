@@ -1,16 +1,12 @@
 <?php
 /**
- * PlanWriteValidation - validates and normalizes Lite's pricing terms on plan
- * writes through the engine's plans REST controller.
+ * PlanWriteValidation - validates and normalizes Lite's pricing terms when the
+ * engine asks a Lite-owned plan's owner to validate a write.
  *
- * Hooks core's `rest_dispatch_request`, which fires after the route's
- * permission callback, and acts only when the matched handler is the engine
- * `PlansController` create or update callback, the request's `extension_slug`
- * is Lite's (the controller scopes updates by that slug, so a Lite-slug write
- * only ever touches a Lite plan) and it carries a `pricing_policy` object. Only
- * the provided top-level keys (`policies`, `one_time_fees`) are validated and
- * normalized; omitted keys keep their stored value through the controller's
- * merge. A non-object payload is left for the controller to reject.
+ * Hooks the engine's plan validation filter, which runs on every plan create
+ * and update with the full merged payload. Only Lite-owned payloads are
+ * touched: the present term keys (`policies`, `one_time_fees`) are validated
+ * and normalized; other top-level keys pass through unchanged.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Pricing
  */
@@ -22,48 +18,38 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Pricing;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Rest\PlansController;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 use WP_Error;
-use WP_REST_Request;
 
 defined( 'ABSPATH' ) || exit;
 
 /**
- * REST write-path validation for Lite-owned plans.
+ * Write-path validation for Lite-owned plans.
  */
 final class PlanWriteValidation {
-
-	private const WRITE_CALLBACKS = [ 'create_item', 'update_item' ];
 
 	private const TERM_KEYS = [ 'policies', 'one_time_fees' ];
 
 	/**
-	 * Register the REST filter.
+	 * Register the engine plan validation filter.
 	 */
 	public static function register(): void {
-		add_filter( 'rest_dispatch_request', [ new self(), 'validate_plan_write' ], 10, 4 );
+		add_filter( PlansController::VALIDATE_PLAN_FILTER, [ new self(), 'validate_plan' ], 10, 2 );
 	}
 
 	/**
-	 * Validate and normalize a Lite plan write's pricing terms.
+	 * Validate and normalize a Lite plan's pricing terms.
 	 *
-	 * @param mixed                $result  Earlier dispatch result: null, or a value that short-circuits.
-	 * @param WP_REST_Request      $request Request.
-	 * @param string               $route   Matched route pattern.
-	 * @param array<string, mixed> $handler Matched route handler.
-	 * @return mixed The earlier result, or a 400 WP_Error for invalid terms.
+	 * @param mixed  $payload        Plan payload, or an earlier handler's WP_Error.
+	 * @param string $extension_slug Owning extension slug.
+	 * @return mixed The payload with normalized terms, a 400 WP_Error for invalid terms, or the input untouched.
 	 */
-	public function validate_plan_write( $result, WP_REST_Request $request, string $route, array $handler ) {
-		if ( null !== $result || ! self::is_plan_write_handler( $handler ) ) {
-			return $result;
+	public function validate_plan( $payload, string $extension_slug ) {
+		if ( ! is_array( $payload ) || Package::EXTENSION_SLUG !== $extension_slug ) {
+			return $payload;
 		}
 
-		$slug = $request->get_param( 'extension_slug' );
-		if ( ! is_string( $slug ) || Package::EXTENSION_SLUG !== trim( $slug ) ) {
-			return $result;
-		}
-
-		$pricing_policy = $request->get_param( 'pricing_policy' );
-		if ( ! is_array( $pricing_policy ) || ! self::is_object_shaped( $pricing_policy ) ) {
-			return $result;
+		$pricing_policy = $payload['pricing_policy'] ?? null;
+		if ( ! is_array( $pricing_policy ) ) {
+			return $payload;
 		}
 
 		$provided = array_intersect_key( $pricing_policy, array_flip( self::TERM_KEYS ) );
@@ -72,41 +58,9 @@ final class PlanWriteValidation {
 			return new WP_Error( 'rest_invalid_param', $errors[0], [ 'status' => 400 ] );
 		}
 
-		$normalized = PricingTerms::from_array( $provided )->to_array();
-		foreach ( array_keys( $provided ) as $key ) {
-			$pricing_policy[ $key ] = $normalized[ $key ];
-		}
-		$request->set_param( 'pricing_policy', $pricing_policy );
+		$normalized                = array_intersect_key( PricingTerms::from_array( $provided )->to_array(), $provided );
+		$payload['pricing_policy'] = array_merge( $pricing_policy, $normalized );
 
-		return $result;
-	}
-
-	/**
-	 * Whether the handler is the engine plans controller's create or update callback.
-	 *
-	 * @param array<string, mixed> $handler Matched route handler.
-	 */
-	private static function is_plan_write_handler( array $handler ): bool {
-		$callback = $handler['callback'] ?? null;
-
-		return is_array( $callback )
-			&& isset( $callback[0], $callback[1] )
-			&& $callback[0] instanceof PlansController
-			&& in_array( $callback[1], self::WRITE_CALLBACKS, true );
-	}
-
-	/**
-	 * Whether an array is object-shaped: empty, or with no integer keys.
-	 *
-	 * @param array<array-key, mixed> $value Value.
-	 */
-	private static function is_object_shaped( array $value ): bool {
-		foreach ( array_keys( $value ) as $key ) {
-			if ( is_int( $key ) ) {
-				return false;
-			}
-		}
-
-		return true;
+		return $payload;
 	}
 }

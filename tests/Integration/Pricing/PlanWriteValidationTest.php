@@ -1,7 +1,7 @@
 <?php
 /**
  * Integration tests for Lite's pricing validation on plan writes, dispatched
- * through the real engine plans REST route.
+ * through the real engine plans REST route and its plan validation filter.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Tests
  */
@@ -10,7 +10,9 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Pricing;
 
+use Automattic\WooCommerce\SubscriptionsEngine\Api\Rest\PlansController;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
+use Automattic\WooCommerce\SubscriptionsLite\Pricing\PlanWriteValidation;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
 use WP_Error;
 use WP_REST_Request;
@@ -264,17 +266,50 @@ final class PlanWriteValidationTest extends LiteIntegrationTestCase {
 		$this->assertNotSame( 'rest_invalid_param', $this->error_code( $response ) );
 	}
 
-	public function test_an_earlier_dispatch_result_is_returned_untouched(): void {
+	public function test_an_earlier_handler_error_is_returned_untouched(): void {
 		$earlier = static function () {
 			return new WP_Error( 'earlier_error', 'Earlier.', [ 'status' => 418 ] );
 		};
-		add_filter( 'rest_dispatch_request', $earlier, 5 );
+		add_filter( PlansController::VALIDATE_PLAN_FILTER, $earlier, 5 );
 
 		$response = $this->create_plan( [ 'policies' => [ [ 'type' => 'mystery' ] ] ] );
 
-		remove_filter( 'rest_dispatch_request', $earlier, 5 );
+		remove_filter( PlansController::VALIDATE_PLAN_FILTER, $earlier, 5 );
 		$this->assertSame( 418, $response->get_status() );
 		$this->assertSame( 'earlier_error', $this->error_code( $response ) );
+	}
+
+	public function test_a_foreign_extension_payload_passes_the_filter_untouched(): void {
+		$payload = [
+			'pricing_policy' => [
+				'policies' => [ [ 'type' => 'mystery' ] ],
+			],
+		];
+
+		$this->assertSame( $payload, ( new PlanWriteValidation() )->validate_plan( $payload, 'other-extension' ) );
+	}
+
+	public function test_a_fees_only_patch_validates_the_merged_stored_policies(): void {
+		// Store invalid policies with Lite's validation unhooked, as a pre-existing row would be.
+		remove_all_filters( PlansController::VALIDATE_PLAN_FILTER );
+		$id = $this->plan_id( $this->create_plan( [ 'policies' => [ [ 'type' => 'mystery' ] ] ] ) );
+		PlanWriteValidation::register();
+
+		$response = $this->patch_plan(
+			$id,
+			[
+				'one_time_fees' => [
+					[
+						'kind'   => 'setup',
+						'amount' => 5,
+					],
+				],
+			]
+		);
+
+		$this->assertSame( 400, $response->get_status() );
+		$this->assertStringStartsWith( 'pricing_policy.policies[0]:', $this->error_message( $response ) );
+		$this->assertArrayNotHasKey( 'one_time_fees', $this->fetch_pricing_policy( $id ) );
 	}
 
 	public function test_the_reorder_route_is_not_validated(): void {
