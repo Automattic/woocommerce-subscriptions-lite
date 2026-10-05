@@ -69,7 +69,7 @@ final class Bootstrap {
 		// the recurring amount, and write the plan onto the order line item.
 		Cart\CartPlanHooks::register();
 
-		// Pricing: validate and normalize Lite's pricing terms on plan writes through
+		// Pricing: validate Lite's pricing terms on plan writes through
 		// the engine's plans REST route (REST requests are not is_admin()).
 		Pricing\PlanWriteValidation::register();
 

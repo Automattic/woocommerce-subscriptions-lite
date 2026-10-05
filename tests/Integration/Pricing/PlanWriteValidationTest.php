@@ -1,7 +1,7 @@
 <?php
 /**
  * Integration tests for Lite's pricing validation on plan writes, dispatched
- * through the real engine plans REST route and its plan validation filter.
+ * through the real engine plans REST route and its plan validation action.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Tests
  */
@@ -106,42 +106,31 @@ final class PlanWriteValidationTest extends LiteIntegrationTestCase {
 		];
 	}
 
-	public function test_a_valid_create_is_stored_normalized(): void {
+	public function test_a_valid_create_is_stored_as_sent(): void {
+		$policies = [
+			[
+				'type'           => 'percentage',
+				'value'          => 10,
+				'starting_cycle' => '2',
+			],
+			[ 'type' => 'bogo' ],
+		];
 		$response = $this->create_plan(
 			[
-				'policies'           => [
-					[
-						'type'           => 'percentage',
-						'value'          => 10,
-						'starting_cycle' => '2',
-					],
-					[ 'type' => 'bogo' ],
-				],
+				'policies'           => $policies,
 				'currency_overrides' => [ 'EUR' => 5 ],
 			]
 		);
 
-		$normalized = [
-			[
-				'type'           => 'percentage',
-				'value'          => 10.0,
-				'starting_cycle' => 2,
-			],
-			[
-				'type'  => 'bogo',
-				'value' => 0.0,
-			],
-		];
 		$this->assertSame( 201, $response->get_status() );
 		$created = $response->get_data();
 		$this->assertIsArray( $created );
-		$this->assertSame( $normalized, $created['pricing_policy']['policies'] );
+		$this->assertSame( $policies, $created['pricing_policy']['policies'] );
 
-		// Read back as the client receives it (JSON): whole-number floats carry no fraction.
 		$stored = $this->fetch_pricing_policy( $this->plan_id( $response ) );
-		$this->assertSame( self::as_json( $normalized ), $stored['policies'] );
+		$this->assertSame( $policies, $stored['policies'], 'Whole numbers stay integers and BOGO stays value-less.' );
 		$this->assertSame( [ 'EUR' => 5 ], $stored['currency_overrides'], 'Keys Lite does not own pass through untouched.' );
-		$this->assertArrayNotHasKey( 'one_time_fees', $stored, 'Only provided keys are normalized.' );
+		$this->assertArrayNotHasKey( 'one_time_fees', $stored );
 	}
 
 	public function test_a_fees_only_patch_validates_the_fees_and_keeps_the_stored_policies(): void {
@@ -178,27 +167,22 @@ final class PlanWriteValidationTest extends LiteIntegrationTestCase {
 
 		$stored = $this->fetch_pricing_policy( $id );
 		$this->assertSame(
-			self::as_json(
+			[
 				[
-					[
-						'type'  => 'percentage',
-						'value' => 10.0,
-					],
-				]
-			),
+					'type'  => 'percentage',
+					'value' => 10,
+				],
+			],
 			$stored['policies']
 		);
 		$this->assertSame(
-			self::as_json(
+			[
 				[
-					[
-						'kind'      => 'setup',
-						'amount'    => 5.0,
-						'taxable'   => true,
-						'tax_class' => null,
-					],
-				]
-			),
+					'kind'    => 'setup',
+					'amount'  => 5,
+					'taxable' => 'true',
+				],
+			],
 			$stored['one_time_fees']
 		);
 	}
@@ -267,64 +251,78 @@ final class PlanWriteValidationTest extends LiteIntegrationTestCase {
 		$this->assertNotSame( 'rest_invalid_param', $this->error_code( $response ) );
 	}
 
-	public function test_an_earlier_handler_error_is_returned_untouched(): void {
-		$earlier = static function () {
-			return new WP_Error( 'earlier_error', 'Earlier.', [ 'status' => 418 ] );
+	public function test_an_earlier_callback_error_accumulates_with_lite_errors(): void {
+		$earlier = static function ( WP_Error $errors ): void {
+			$errors->add( 'earlier_error', 'Earlier.', [ 'status' => 418 ] );
 		};
-		add_filter( 'woocommerce_subscriptions_engine_validate_plan', $earlier, 5 );
+		add_action( 'woocommerce_subscriptions_engine_validate_plan', $earlier, 5 );
 
 		$response = $this->create_plan( [ 'policies' => [ [ 'type' => 'mystery' ] ] ] );
 
-		remove_filter( 'woocommerce_subscriptions_engine_validate_plan', $earlier, 5 );
+		remove_action( 'woocommerce_subscriptions_engine_validate_plan', $earlier, 5 );
 		$this->assertSame( 418, $response->get_status() );
 		$this->assertSame( 'earlier_error', $this->error_code( $response ) );
+		$data = $response->get_data();
+		$this->assertIsArray( $data );
+		$this->assertSame( [ 'rest_invalid_param' ], array_column( $data['additional_errors'], 'code' ) );
+		$this->assertSame( [], $this->list_plans() );
 	}
 
-	public function test_an_earlier_error_passes_the_filter_untouched(): void {
-		$error = new WP_Error( 'earlier_error', 'Earlier.' );
+	public function test_a_foreign_extension_plan_adds_no_errors(): void {
+		$errors = new WP_Error();
 
-		$this->assertSame( $error, ( new PlanWriteValidation() )->validate_plan( $error, Package::EXTENSION_SLUG ) );
+		( new PlanWriteValidation() )->validate_plan( $errors, $this->unsaved_plan( [ 'policies' => [ [ 'type' => 'mystery' ] ] ], 'other-extension' ), 'other-extension' );
+
+		$this->assertFalse( $errors->has_errors() );
 	}
 
-	public function test_a_foreign_extension_plan_passes_the_filter_untouched(): void {
-		$pricing_policy = [ 'policies' => [ [ 'type' => 'mystery' ] ] ];
-		$plan           = $this->unsaved_plan( $pricing_policy, 'other-extension' );
+	public function test_a_valid_lite_plan_adds_no_errors_and_is_not_changed(): void {
+		$pricing_policy = [
+			'policies'   => [
+				[
+					'type'  => 'percentage',
+					'value' => 10,
+				],
+				[ 'type' => 'bogo' ],
+			],
+			'custom_key' => 'kept',
+		];
+		$plan           = $this->unsaved_plan( $pricing_policy );
+		$errors         = new WP_Error();
 
-		$this->assertSame( $plan, ( new PlanWriteValidation() )->validate_plan( $plan, 'other-extension' ) );
+		( new PlanWriteValidation() )->validate_plan( $errors, $plan, Package::EXTENSION_SLUG );
+
+		$this->assertFalse( $errors->has_errors() );
 		$this->assertSame( $pricing_policy, $plan->get_pricing_policy() );
 	}
 
-	public function test_a_lite_plan_is_normalized_in_place(): void {
-		$plan = $this->unsaved_plan(
+	public function test_each_invalid_term_adds_an_error_and_keeps_earlier_ones(): void {
+		$errors = new WP_Error( 'earlier_error', 'Earlier.' );
+		$plan   = $this->unsaved_plan(
 			[
-				'policies'   => [
+				'policies'      => [ [ 'type' => 'mystery' ] ],
+				'one_time_fees' => [
 					[
-						'type'  => 'percentage',
-						'value' => 10,
+						'kind'   => 'setup',
+						'amount' => -5,
 					],
 				],
-				'custom_key' => 'kept',
 			]
 		);
 
-		$this->assertSame( $plan, ( new PlanWriteValidation() )->validate_plan( $plan, Package::EXTENSION_SLUG ) );
-		$this->assertSame(
-			[
-				'policies'   => [
-					[
-						'type'  => 'percentage',
-						'value' => 10.0,
-					],
-				],
-				'custom_key' => 'kept',
-			],
-			$plan->get_pricing_policy()
-		);
+		( new PlanWriteValidation() )->validate_plan( $errors, $plan, Package::EXTENSION_SLUG );
+
+		$this->assertSame( [ 'earlier_error', 'rest_invalid_param' ], $errors->get_error_codes() );
+		$messages = $errors->get_error_messages( 'rest_invalid_param' );
+		$this->assertCount( 2, $messages );
+		$this->assertStringStartsWith( 'pricing_policy.policies[0]:', $messages[0] );
+		$this->assertStringStartsWith( 'pricing_policy.one_time_fees[0]:', $messages[1] );
+		$this->assertSame( [ 'status' => 400 ], $errors->get_error_data( 'rest_invalid_param' ) );
 	}
 
 	public function test_a_fees_only_patch_validates_the_merged_stored_policies(): void {
 		// Store invalid policies with Lite's validation unhooked, as a pre-existing row would be.
-		remove_all_filters( 'woocommerce_subscriptions_engine_validate_plan' );
+		remove_all_actions( 'woocommerce_subscriptions_engine_validate_plan' );
 		$id = $this->plan_id( $this->create_plan( [ 'policies' => [ [ 'type' => 'mystery' ] ] ] ) );
 		PlanWriteValidation::register();
 
@@ -457,16 +455,6 @@ final class PlanWriteValidationTest extends LiteIntegrationTestCase {
 		$this->assertIsArray( $data );
 
 		return $data;
-	}
-
-	/**
-	 * A value as it reads back after a JSON round-trip.
-	 *
-	 * @param array<array-key, mixed> $value Value.
-	 * @return array<array-key, mixed>
-	 */
-	private static function as_json( array $value ): array {
-		return (array) json_decode( (string) wp_json_encode( $value ), true );
 	}
 
 	/**

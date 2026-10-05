@@ -153,7 +153,7 @@ final class PriceCalculatorTest extends LiteIntegrationTestCase {
 					'value' => 0.0,
 				],
 			],
-			$calculator->get_terms()->to_array()['policies']
+			$calculator->get_terms()->get_policies()
 		);
 
 		// Money-neutral: neither the unit price nor the line total moves.

@@ -260,7 +260,7 @@ final class PricingTermsTest extends LiteIntegrationTestCase {
 					'value' => 0.0,
 				],
 			],
-			$terms->to_array()['policies']
+			$terms->get_policies()
 		);
 		$this->assertTrue( $terms->has_type( PricingTerms::TYPE_BOGO ) );
 		$this->assertFalse( $terms->has_type( PricingTerms::TYPE_PERCENTAGE ) );
@@ -335,13 +335,8 @@ final class PricingTermsTest extends LiteIntegrationTestCase {
 	public function test_from_plan_without_payload_is_empty(): void {
 		$terms = PricingTerms::from_plan( $this->make_plan() );
 
-		$this->assertSame(
-			[
-				'policies'      => [],
-				'one_time_fees' => [],
-			],
-			$terms->to_array()
-		);
+		$this->assertSame( [], $terms->get_policies() );
+		$this->assertSame( [], $terms->get_one_time_fees() );
 	}
 
 	public function test_from_snapshot_distinguishes_absent_null_and_present_payloads(): void {

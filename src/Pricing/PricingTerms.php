@@ -154,18 +154,6 @@ final class PricingTerms {
 	}
 
 	/**
-	 * Normalized payload shape: values float, gates int, BOGO `value: 0.0`.
-	 *
-	 * @return array{policies: array<int, array{type: string, value: float, starting_cycle?: int, duration_cycles?: int}>, one_time_fees: array<int, array{kind: string, amount: float, taxable: bool, tax_class: string|null}>}
-	 */
-	public function to_array(): array {
-		return [
-			'policies'      => $this->policies,
-			'one_time_fees' => $this->one_time_fees,
-		];
-	}
-
-	/**
 	 * Recurring price adjustments, in application order.
 	 *
 	 * @return array<int, array{type: string, value: float, starting_cycle?: int, duration_cycles?: int}>
