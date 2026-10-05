@@ -66,9 +66,10 @@ final class EndpointsRenderTest extends LiteIntegrationTestCase {
 	}
 
 	/**
-	 * Set (or clear) a contract's next payment date directly. Holding a contract
-	 * clears it (the on-hold "admin action" shape, no missed charge pending), so
-	 * the failed-payment retry shape - on hold WITH a next payment - is seeded here.
+	 * Set (or clear) a contract's next payment date directly, so each on-hold shape is
+	 * seeded explicitly rather than depending on what the engine's hold does with the
+	 * date: no next payment is the "admin action" shape (no missed charge pending); a
+	 * next payment is the failed-payment retry shape.
 	 *
 	 * @param int         $contract_id      Contract id.
 	 * @param string|null $next_payment_gmt GMT next payment date, or null to clear.
@@ -234,8 +235,7 @@ final class EndpointsRenderTest extends LiteIntegrationTestCase {
 	}
 
 	public function test_on_hold_admin_path_shows_reactivate(): void {
-		// The admin-action shape: on hold with no next payment date. Current engines
-		// clear the date on hold; clearing it here keeps the seed explicit.
+		// The admin-action shape: on hold with no next payment date, seeded explicitly.
 		$contract_id = $this->create_contract( $this->customer_id, [ 'status' => 'on-hold' ] );
 		$this->set_next_payment( $contract_id, null );
 
@@ -253,8 +253,7 @@ final class EndpointsRenderTest extends LiteIntegrationTestCase {
 
 	public function test_on_hold_retry_path_shows_needs_payment_notice(): void {
 		// On hold with a next payment date: the failed-payment retry shape, where
-		// reactivating without a payment fix is unsafe. Holding clears the date,
-		// so it is restored directly.
+		// reactivating without a payment fix is unsafe. Seeded explicitly.
 		$contract_id = $this->create_contract( $this->customer_id, [ 'status' => 'on-hold' ] );
 		$this->set_next_payment( $contract_id, '2099-02-01 00:00:00' );
 
