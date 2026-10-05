@@ -125,7 +125,7 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 		$product->save();
 
 		$order = wc_create_order( [ 'customer_id' => $customer_id ] );
-		$order->add_product( $product, (int) ( $args['quantity'] ?? 1 ) );
+		$order->add_product( $product, $args['quantity'] ?? 1 );
 		$order->set_address( array_merge( self::BILLING_ADDRESS, (array) ( $args['billing'] ?? [] ) ), 'billing' );
 		$order->set_address( array_merge( self::SHIPPING_ADDRESS, (array) ( $args['shipping'] ?? [] ) ), 'shipping' );
 		$order->set_currency( 'USD' );

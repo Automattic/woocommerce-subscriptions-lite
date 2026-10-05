@@ -69,7 +69,7 @@ final class BogoRenewalBonus {
 				continue;
 			}
 			$paid  = $item->get_quantity();
-			$bonus = (int) round( $calculator->bonus_quantity( (float) $paid, $cycle ) );
+			$bonus = $calculator->bonus_quantity( (float) $paid, $cycle );
 			if ( $bonus > 0 ) {
 				$item->set_quantity( $paid + $bonus );
 				$item->save();

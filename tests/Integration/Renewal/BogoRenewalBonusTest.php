@@ -83,6 +83,16 @@ final class BogoRenewalBonusTest extends LiteIntegrationTestCase {
 		$this->assertSame( 4, $this->only_line( $reloaded )->get_quantity() );
 	}
 
+	public function test_a_fractional_paid_quantity_earns_a_fractional_bonus(): void {
+		remove_filter( 'woocommerce_stock_amount', 'intval' );
+		add_filter( 'woocommerce_stock_amount', 'floatval' );
+		$contract_id = $this->sign_up( [ 'policies' => [ [ 'type' => 'bogo' ] ] ], 'woocommerce-subscriptions-lite', 1.5 );
+
+		$item = $this->only_line( $this->renew( $contract_id ) );
+
+		$this->assertSame( 3.0, $item->get_quantity(), '1.5 paid units earn 1.5 bonus units, not a rounded 2.' );
+	}
+
 	public function test_a_first_cycle_only_bogo_grants_nothing_on_the_cycle_two_renewal(): void {
 		$contract_id = $this->sign_up(
 			[
@@ -212,13 +222,14 @@ final class BogoRenewalBonusTest extends LiteIntegrationTestCase {
 	}
 
 	/**
-	 * Sign up a contract for 2 x 19.99 on a monthly plan with the given terms.
+	 * Sign up a contract for `$quantity` x 19.99 on a monthly plan with the given terms.
 	 *
 	 * @param array<string, mixed>|null $pricing_policy Plan pricing payload.
 	 * @param string                    $extension_slug Plan owner.
+	 * @param int|float                 $quantity       Origin line quantity.
 	 * @return int Contract id.
 	 */
-	private function sign_up( ?array $pricing_policy, string $extension_slug = 'woocommerce-subscriptions-lite' ): int {
+	private function sign_up( ?array $pricing_policy, string $extension_slug = 'woocommerce-subscriptions-lite', $quantity = 2 ): int {
 		$plan  = $this->make_plan(
 			'month',
 			1,
@@ -231,7 +242,7 @@ final class BogoRenewalBonusTest extends LiteIntegrationTestCase {
 		$order = $this->create_subscription_order(
 			$this->create_customer(),
 			[
-				'quantity'       => 2,
+				'quantity'       => $quantity,
 				'price'          => '19.99',
 				'payment_method' => self::GATEWAY,
 			]
