@@ -135,6 +135,41 @@ final class PricingTermsTest extends LiteIntegrationTestCase {
 		$this->assertSame( 'service', $fees[0]['kind'] );
 	}
 
+	public function test_tolerant_parse_drops_non_finite_policy_values(): void {
+		$terms = PricingTerms::from_array(
+			[
+				'policies' => [
+					[
+						'type'  => 'fixed_amount',
+						'value' => INF,
+					],
+					[
+						'type'  => 'price',
+						'value' => -INF,
+					],
+					[
+						'type'  => 'percentage',
+						'value' => NAN,
+					],
+					[
+						'type'  => 'percentage',
+						'value' => 5,
+					],
+				],
+			]
+		);
+
+		$this->assertSame(
+			[
+				[
+					'type'  => 'percentage',
+					'value' => 5.0,
+				],
+			],
+			$terms->get_policies()
+		);
+	}
+
 	public function test_a_stored_bogo_value_reads_as_zero_and_keeps_the_entry(): void {
 		$terms = PricingTerms::from_array(
 			[
@@ -339,17 +374,17 @@ final class PricingTermsTest extends LiteIntegrationTestCase {
 		$this->assertSame( [], $terms->get_one_time_fees() );
 	}
 
-	public function test_from_snapshot_distinguishes_absent_null_and_present_payloads(): void {
-		$this->assertNull( PricingTerms::from_snapshot( PlanSnapshot::from_array( [ 'selling_plan_id' => 1 ] ) ) );
+	public function test_from_snapshot_reads_absent_or_null_payloads_as_empty_terms(): void {
+		$absent = PricingTerms::from_snapshot( PlanSnapshot::from_array( [ 'selling_plan_id' => 1 ] ) );
+		$this->assertSame( [], $absent->get_policies() );
+		$this->assertSame( [], $absent->get_one_time_fees() );
 
 		$explicit_null = PricingTerms::from_snapshot( PlanSnapshot::from_array( [ 'pricing_policy' => null ] ) );
-		$this->assertInstanceOf( PricingTerms::class, $explicit_null );
 		$this->assertSame( [], $explicit_null->get_policies() );
 
 		$present = PricingTerms::from_snapshot(
 			PlanSnapshot::from_array( [ 'pricing_policy' => [ 'policies' => [ [ 'type' => 'bogo' ] ] ] ] )
 		);
-		$this->assertInstanceOf( PricingTerms::class, $present );
 		$this->assertTrue( $present->has_type( PricingTerms::TYPE_BOGO ) );
 	}
 

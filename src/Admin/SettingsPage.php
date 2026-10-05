@@ -11,6 +11,7 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Admin;
 
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Plan;
+use Automattic\WooCommerce\SubscriptionsLite\Pricing\PricingTerms;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -218,19 +219,19 @@ final class SettingsPage {
 			],
 			'pricing_types'  => [
 				[
-					'value' => 'percentage',
+					'value' => PricingTerms::TYPE_PERCENTAGE,
 					'label' => __( 'Percentage', 'woocommerce-subscriptions-lite' ),
 				],
 				[
-					'value' => 'fixed_amount',
+					'value' => PricingTerms::TYPE_FIXED_AMOUNT,
 					'label' => __( 'Fixed amount', 'woocommerce-subscriptions-lite' ),
 				],
 				[
-					'value' => 'price',
+					'value' => PricingTerms::TYPE_PRICE,
 					'label' => __( 'Fixed price', 'woocommerce-subscriptions-lite' ),
 				],
 				[
-					'value' => 'bogo',
+					'value' => PricingTerms::TYPE_BOGO,
 					'label' => __( 'Buy one, get one', 'woocommerce-subscriptions-lite' ),
 				],
 			],

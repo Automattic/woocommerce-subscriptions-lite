@@ -5,9 +5,9 @@
  *
  * Hooks the engine's plan validation action, which fires on every plan create
  * and update with an error collector and a copy of the plan. Only Lite-owned
- * plans are checked: the present pricing term keys (`policies`, `one_time_fees`)
- * are validated and each problem is added to the collector. The plan is stored
- * exactly as sent.
+ * plans are checked: the pricing terms (`policies`, `one_time_fees`; other keys
+ * are ignored) are validated and each problem is added to the collector. The
+ * plan is stored exactly as sent.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Pricing
  */
@@ -26,8 +26,6 @@ defined( 'ABSPATH' ) || exit;
  * Write-path validation for Lite-owned plans.
  */
 final class PlanWriteValidation {
-
-	private const TERM_KEYS = [ 'policies', 'one_time_fees' ];
 
 	/**
 	 * Register the engine plan validation action.
@@ -53,8 +51,7 @@ final class PlanWriteValidation {
 			return;
 		}
 
-		$provided = array_intersect_key( $pricing_policy, array_flip( self::TERM_KEYS ) );
-		foreach ( PricingTerms::validate( $provided ) as $message ) {
+		foreach ( PricingTerms::validate( $pricing_policy ) as $message ) {
 			$errors->add( 'rest_invalid_param', $message, [ 'status' => 400 ] );
 		}
 	}

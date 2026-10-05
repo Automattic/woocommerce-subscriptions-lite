@@ -6,10 +6,7 @@
  * contract whose terms carry an in-scope `bogo` entry for the renewal's cycle,
  * each product line's quantity grows by its bonus units. Money-neutral: line
  * and order totals are never touched, so the cycle's expected total stays the
- * price authority.
- *
- * Terms come from the contract's plan snapshot, falling back to the live plan
- * when the snapshot predates the `pricing_policy` key.
+ * price authority. Terms come only from the contract's frozen plan snapshot.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Renewal
  */
@@ -18,7 +15,6 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Renewal;
 
-use Automattic\WooCommerce\SubscriptionsEngine\Api\SellingPlans;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Subscriptions;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Contract;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
@@ -52,8 +48,13 @@ final class BogoRenewalBonus {
 			return;
 		}
 
-		$terms = self::resolve_terms( $contract );
-		if ( null === $terms || ! $terms->has_type( PricingTerms::TYPE_BOGO ) ) {
+		$snapshot = $contract->get_plan_snapshot();
+		if ( null === $snapshot ) {
+			return;
+		}
+
+		$terms = PricingTerms::from_snapshot( $snapshot );
+		if ( ! $terms->has_type( PricingTerms::TYPE_BOGO ) ) {
 			return;
 		}
 
@@ -74,28 +75,6 @@ final class BogoRenewalBonus {
 				$item->save();
 			}
 		}
-	}
-
-	/**
-	 * Terms from the contract's plan snapshot, else from its live plan.
-	 *
-	 * @param Contract $contract Contract.
-	 */
-	private static function resolve_terms( Contract $contract ): ?PricingTerms {
-		$snapshot = $contract->get_plan_snapshot();
-		if ( null === $snapshot && null !== $contract->get_id() ) {
-			$stored   = Subscriptions::get( (int) $contract->get_id() );
-			$snapshot = null === $stored ? null : $stored->get_plan_snapshot();
-		}
-
-		$terms = null === $snapshot ? null : PricingTerms::from_snapshot( $snapshot );
-		if ( null !== $terms ) {
-			return $terms;
-		}
-
-		$plans = ( new SellingPlans( [ Package::EXTENSION_SLUG ] ) )->get_plans( [ $contract->get_selling_plan_id() ] );
-
-		return isset( $plans[0] ) ? PricingTerms::from_plan( $plans[0] ) : null;
 	}
 
 	/**

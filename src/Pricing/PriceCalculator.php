@@ -94,12 +94,12 @@ final class PriceCalculator {
 	/**
 	 * Line total from the effective unit price, clamped at zero.
 	 *
-	 * @param float $unit_price Base unit price.
+	 * @param float $base_price Base unit price, before the plan's adjustments.
 	 * @param float $quantity   Line quantity.
 	 * @param int   $cycle      1-indexed billing cycle.
 	 */
-	public function line_total( float $unit_price, float $quantity, int $cycle = 1 ): float {
-		return max( 0.0, $this->unit_price( $unit_price, $cycle ) * $quantity );
+	public function line_total( float $base_price, float $quantity, int $cycle = 1 ): float {
+		return max( 0.0, $this->unit_price( $base_price, $cycle ) * $quantity );
 	}
 
 	/**

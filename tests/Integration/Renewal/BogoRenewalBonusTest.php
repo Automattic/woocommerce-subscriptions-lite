@@ -15,7 +15,6 @@ use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Plan;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Gateway\GatewayCapabilities;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Checkout\ContractFactory;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\PlanRepository;
-use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\SchemaInstaller;
 use Automattic\WooCommerce\SubscriptionsLite\Renewal\BogoRenewalBonus;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
 use WC_Order;
@@ -149,53 +148,6 @@ final class BogoRenewalBonusTest extends LiteIntegrationTestCase {
 		$this->assertSame( 2, $this->only_line( $this->renew( $contract_id ) )->get_quantity() );
 	}
 
-	public function test_a_snapshot_without_the_pricing_key_falls_back_to_the_live_plan(): void {
-		$contract_id = $this->sign_up( [ 'policies' => [ [ 'type' => 'bogo' ] ] ] );
-		$this->strip_snapshot_pricing_key( $contract_id );
-
-		$order = $this->renew( $contract_id );
-
-		$this->assertSame( 4, $this->only_line( $order )->get_quantity(), 'The live plan BOGO grants the bonus.' );
-		$this->assertSame( 39.98, (float) $order->get_total() );
-	}
-
-	/**
-	 * @dataProvider provide_unavailable_live_plans
-	 *
-	 * @param string $how How the live plan becomes unavailable: `archived` or `deleted`.
-	 */
-	public function test_a_snapshot_without_the_pricing_key_and_no_active_live_plan_grants_nothing( string $how ): void {
-		$contract_id = $this->sign_up( [ 'policies' => [ [ 'type' => 'bogo' ] ] ] );
-		$this->strip_snapshot_pricing_key( $contract_id );
-
-		$contract = Subscriptions::get( $contract_id );
-		$this->assertNotNull( $contract );
-		$plans = new PlanRepository();
-		if ( 'deleted' === $how ) {
-			$this->assertTrue( $plans->delete( $contract->get_selling_plan_id() ) );
-		} else {
-			$plan = $plans->find( $contract->get_selling_plan_id() );
-			$this->assertInstanceOf( Plan::class, $plan );
-			$plan->set_status( Plan::STATUS_ARCHIVED );
-			$this->assertTrue( $plans->update( $plan ) );
-		}
-
-		$order = $this->renew( $contract_id );
-
-		$this->assertSame( 2, $this->only_line( $order )->get_quantity() );
-		$this->assertSame( 39.98, (float) $order->get_total() );
-	}
-
-	/**
-	 * @return array<string, array{0: string}>
-	 */
-	public function provide_unavailable_live_plans(): array {
-		return [
-			'archived' => [ 'archived' ],
-			'deleted'  => [ 'deleted' ],
-		];
-	}
-
 	public function test_a_contract_owned_by_another_extension_is_left_alone(): void {
 		$contract_id = $this->sign_up( [ 'policies' => [ [ 'type' => 'bogo' ] ] ], 'other-extension' );
 
@@ -248,37 +200,6 @@ final class BogoRenewalBonusTest extends LiteIntegrationTestCase {
 		);
 
 		return (int) ( new ContractFactory() )->create_from_order( $order, $plan )->get_id();
-	}
-
-	/**
-	 * Rewrite the contract's stored plan snapshot without the `pricing_policy`
-	 * key, as a snapshot frozen before the key existed reads.
-	 *
-	 * @param int $contract_id Contract id.
-	 */
-	private function strip_snapshot_pricing_key( int $contract_id ): void {
-		global $wpdb;
-
-		$contract = Subscriptions::get( $contract_id );
-		$this->assertNotNull( $contract );
-		$snapshot_id = $contract->get_plan_snapshot_id();
-		$this->assertNotNull( $snapshot_id );
-
-		$table = SchemaInstaller::get_table_name( SchemaInstaller::TABLE_SNAPSHOTS );
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-		$payload = json_decode( (string) $wpdb->get_var( $wpdb->prepare( "SELECT payload FROM {$table} WHERE id = %d", $snapshot_id ) ), true );
-		$this->assertIsArray( $payload );
-		$this->assertArrayHasKey( 'pricing_policy', $payload );
-		unset( $payload['pricing_policy'] );
-
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
-		$wpdb->update( $table, [ 'payload' => wp_json_encode( $payload ) ], [ 'id' => $snapshot_id ] );
-
-		$stored = Subscriptions::get( $contract_id );
-		$this->assertNotNull( $stored );
-		$snapshot = $stored->get_plan_snapshot();
-		$this->assertNotNull( $snapshot );
-		$this->assertArrayNotHasKey( 'pricing_policy', $snapshot->to_array() );
 	}
 
 	/**

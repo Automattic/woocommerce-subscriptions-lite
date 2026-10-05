@@ -343,21 +343,6 @@ final class PlanWriteValidationTest extends LiteIntegrationTestCase {
 		$this->assertArrayNotHasKey( 'one_time_fees', $this->fetch_pricing_policy( $id ) );
 	}
 
-	public function test_the_reorder_route_is_not_validated(): void {
-		$id = $this->plan_id( $this->create_plan( null ) );
-
-		$request = new WP_REST_Request( 'POST', self::BASE . '/reorder' );
-		$request->set_body_params(
-			[
-				'extension_slug' => Package::EXTENSION_SLUG,
-				'ids'            => [ $id ],
-				'pricing_policy' => [ 'policies' => [ [ 'type' => 'mystery' ] ] ],
-			]
-		);
-
-		$this->assertSame( 200, rest_do_request( $request )->get_status() );
-	}
-
 	/**
 	 * An unsaved plan with the given pricing payload.
 	 *

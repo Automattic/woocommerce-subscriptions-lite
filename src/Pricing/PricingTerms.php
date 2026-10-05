@@ -9,11 +9,13 @@
  *     one_time_fees: [ { kind: string, amount: float, taxable: bool, tax_class: string|null }, ... ]
  *   }
  *
- * Reads are tolerant ({@see self::from_array()} drops entries a write would
- * reject and never throws); writes are strict ({@see self::validate()}). A `bogo` entry is
- * value-less (always `value: 0.0`): its benefit is a bonus unit, never a price
- * change. Fee `tax_class` keeps `''` (the store's Standard class) distinct from
- * `null` (untaxed).
+ * Reads are tolerant and never throw ({@see self::from_array()}): entries that
+ * break the type or range rules are dropped, but structure is coerced rather
+ * than rejected (a non-numeric fee amount reads as 0, an unreadable `taxable` as
+ * false). Writes are strict on both ({@see self::validate()}). A `bogo` entry is
+ * value-less: writes accept only 0 or an omitted value, the payload is stored as
+ * sent, and reads treat any value as 0. Fee `tax_class` keeps `''` (the store's
+ * Standard class) distinct from `null` (untaxed).
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Pricing
  */
@@ -103,19 +105,15 @@ final class PricingTerms {
 	}
 
 	/**
-	 * Terms frozen in a plan snapshot. Null when the snapshot has no
-	 * `pricing_policy` key (the caller falls back to the live plan); empty terms
-	 * when the key is explicitly null or not an object.
+	 * Terms frozen in a plan snapshot; empty terms when its `pricing_policy` is
+	 * absent, null or not an object.
 	 *
 	 * @param PlanSnapshot $snapshot Plan snapshot.
 	 */
-	public static function from_snapshot( PlanSnapshot $snapshot ): ?self {
-		$data = $snapshot->to_array();
-		if ( ! array_key_exists( 'pricing_policy', $data ) ) {
-			return null;
-		}
+	public static function from_snapshot( PlanSnapshot $snapshot ): self {
+		$data = $snapshot->to_array()['pricing_policy'] ?? null;
 
-		return is_array( $data['pricing_policy'] ) ? self::from_array( $data['pricing_policy'] ) : new self( [], [] );
+		return self::from_array( is_array( $data ) ? $data : [] );
 	}
 
 	/**
@@ -135,7 +133,7 @@ final class PricingTerms {
 		$errors = [];
 
 		foreach ( [ 'policies', 'one_time_fees' ] as $key ) {
-			if ( isset( $data[ $key ] ) && ! self::is_list( $data[ $key ] ) ) {
+			if ( isset( $data[ $key ] ) && ! ( is_array( $data[ $key ] ) && array_is_list( $data[ $key ] ) ) ) {
 				$errors[] = sprintf( 'pricing_policy.%s: must be a list.', $key );
 			}
 		}
@@ -381,14 +379,5 @@ final class PricingTerms {
 		}
 
 		return null;
-	}
-
-	/**
-	 * Whether a value is a list (sequential int keys from 0).
-	 *
-	 * @param mixed $value Value.
-	 */
-	private static function is_list( $value ): bool {
-		return is_array( $value ) && array_values( $value ) === $value;
 	}
 }
