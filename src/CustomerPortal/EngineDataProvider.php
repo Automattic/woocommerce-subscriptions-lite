@@ -31,6 +31,7 @@ use DateTimeInterface;
 use WC_Order;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Subscriptions;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
+use Automattic\WooCommerce\SubscriptionsLite\Contracts\AddressFields;
 use Automattic\WooCommerce\SubscriptionsLite\Contracts\CustomerVisibility;
 use Automattic\WooCommerce\SubscriptionsLite\Pricing\BillingTerms;
 
@@ -183,12 +184,10 @@ final class EngineDataProvider {
 	 * @return array<string, array<string, string>>
 	 */
 	private function addresses( ContractView $contract ): array {
-		$fields = [ 'first_name', 'last_name', 'company', 'address_1', 'address_2', 'city', 'state', 'postcode', 'country', 'email', 'phone' ];
-
 		$addresses = [];
 		foreach ( $contract->get_addresses() ?? [] as $type => $row ) {
 			$address = [];
-			foreach ( $fields as $field ) {
+			foreach ( AddressFields::FIELDS as $field ) {
 				$value = $row[ $field ] ?? null;
 				if ( null !== $value && '' !== (string) $value ) {
 					$address[ $field ] = (string) $value;

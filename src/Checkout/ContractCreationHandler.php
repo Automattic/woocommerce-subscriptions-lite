@@ -33,6 +33,7 @@ use Automattic\WooCommerce\SubscriptionsEngine\Api\Subscriptions;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\CycleStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Plan;
+use Automattic\WooCommerce\SubscriptionsLite\Contracts\AddressFields;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ProductPlanResolver;
 use Automattic\WooCommerce\SubscriptionsLite\Renewal\RenewalWiring;
@@ -71,11 +72,6 @@ final class ContractCreationHandler {
 	 * unresolvable) line. Mixed carts are WOOSUBS-1775.
 	 */
 	public const REASON_MIXED_CART = 'mixed_cart';
-
-	/**
-	 * Address fields carried onto the contract.
-	 */
-	private const ADDRESS_FIELDS = [ 'first_name', 'last_name', 'company', 'address_1', 'address_2', 'city', 'state', 'postcode', 'country', 'email', 'phone' ];
 
 	/**
 	 * Logger source tag.
@@ -331,7 +327,7 @@ final class ContractCreationHandler {
 	 * @return array<string, mixed>
 	 */
 	private function map_address( WC_Order $order, string $type ): array {
-		return array_intersect_key( (array) $order->get_address( $type ), array_flip( self::ADDRESS_FIELDS ) );
+		return array_intersect_key( (array) $order->get_address( $type ), array_flip( AddressFields::FIELDS ) );
 	}
 
 	/**
