@@ -4,8 +4,9 @@
  *
  * The portal's one data source. It consumes engine functionality through the engine's
  * public {@see Subscriptions} facade ONLY - never the engine's `Integration\` internals -
- * and reduces the facade's interim return types ({@see Contract}, `WC_Order`) to the
- * domain-ish arrays {@see ViewModel} and the templates consume.
+ * and reduces the facade's return types ({@see ContractView}, `WC_Order`) to the
+ * domain-ish arrays {@see ViewModel} and the templates consume. Draft contracts are
+ * hidden from customers: they are left out of the list and read as not found.
  *
  * Ownership / not-found: {@see self::get_contract()} delegates the asymmetric not-found
  * rule to the facade's ownership-checked read - an unknown id and a contract owned by
@@ -16,7 +17,7 @@
  * order read runs and no orders can leak across customers.
  *
  * Cadence (`billing_period` / `billing_interval`) is read off the contract's own frozen
- * plan snapshot ({@see Contract::get_plan_snapshot()}), not a live plan read, and degrades
+ * plan snapshot ({@see ContractView::get_plan_snapshot()}), not a live plan read, and degrades
  * to an empty period / zero interval when the snapshot or its billing policy is absent.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\CustomerPortal
@@ -29,8 +30,9 @@ namespace Automattic\WooCommerce\SubscriptionsLite\CustomerPortal;
 use DateTimeInterface;
 use WC_Order;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Subscriptions;
-use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Contract;
-use Automattic\WooCommerce\SubscriptionsEngine\Core\ValueObject\BillingPolicy;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
+use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
+use Automattic\WooCommerce\SubscriptionsLite\Pricing\BillingTerms;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -43,7 +45,8 @@ final class EngineDataProvider {
 	 * Return the customer's contracts as domain-ish list-row arrays.
 	 *
 	 * Reads the customer-scoped contract list off the facade and reduces each contract to
-	 * the row shape {@see ViewModel} consumes. The empty array means "no subscriptions".
+	 * the row shape {@see ViewModel} consumes, skipping drafts (so a page can hold fewer
+	 * than `$limit` rows). The empty array means "no subscriptions".
 	 *
 	 * @param int $customer_id The logged-in customer id.
 	 * @param int $limit       Maximum contracts to return.
@@ -53,7 +56,9 @@ final class EngineDataProvider {
 	public function get_contracts_for_customer( int $customer_id, int $limit = 20, int $offset = 0 ): array {
 		$rows = [];
 		foreach ( Subscriptions::list_for_customer( $customer_id, $limit, $offset ) as $contract ) {
-			$rows[] = $this->contract_to_row( $contract );
+			if ( ContractStatus::DRAFT !== $contract->get_status() ) {
+				$rows[] = $this->contract_to_row( $contract );
+			}
 		}
 		return $rows;
 	}
@@ -64,7 +69,7 @@ final class EngineDataProvider {
 	 * The facade's ownership-checked read enforces the asymmetric not-found rule: a
 	 * contract the customer does not own - whether it does not exist, belongs to someone
 	 * else, or its row vanished under the guard - comes back null, and this returns null
-	 * before any detail mapping.
+	 * before any detail mapping. A draft also reads as null.
 	 *
 	 * @param int $contract_id The contract id from the URL.
 	 * @param int $customer_id The logged-in customer id (ownership check).
@@ -72,7 +77,7 @@ final class EngineDataProvider {
 	 */
 	public function get_contract( int $contract_id, int $customer_id ): ?array {
 		$contract = Subscriptions::get_for_customer( $contract_id, $customer_id );
-		if ( null === $contract ) {
+		if ( null === $contract || ContractStatus::DRAFT === $contract->get_status() ) {
 			return null;
 		}
 
@@ -106,10 +111,10 @@ final class EngineDataProvider {
 	/**
 	 * Reduce a contract to the domain-ish list-row array {@see ViewModel::build_row()} reads.
 	 *
-	 * @param Contract $contract The contract.
+	 * @param ContractView $contract The contract.
 	 * @return array<string, mixed>
 	 */
-	private function contract_to_row( Contract $contract ): array {
+	private function contract_to_row( ContractView $contract ): array {
 		$cadence = $this->billing_cadence( $contract );
 
 		return [
@@ -130,10 +135,10 @@ final class EngineDataProvider {
 	 * The detail array is the list row plus the contract's date stamps, recurring totals,
 	 * line items, and addresses.
 	 *
-	 * @param Contract $contract The contract.
+	 * @param ContractView $contract The contract.
 	 * @return array<string, mixed>
 	 */
-	private function contract_to_detail( Contract $contract ): array {
+	private function contract_to_detail( ContractView $contract ): array {
 		return array_merge(
 			$this->contract_to_row( $contract ),
 			[
@@ -155,12 +160,12 @@ final class EngineDataProvider {
 	 * (`name`, `quantity`, `subtotal`, `total` - raw amount strings, the view-model
 	 * formats).
 	 *
-	 * @param Contract $contract The contract.
+	 * @param ContractView $contract The contract.
 	 * @return array<int, array<string, mixed>>
 	 */
-	private function items( Contract $contract ): array {
+	private function items( ContractView $contract ): array {
 		$items = [];
-		foreach ( $contract->get_items() as $item ) {
+		foreach ( $contract->get_items() ?? [] as $item ) {
 			$items[] = [
 				'name'     => (string) ( $item['item_name'] ?? '' ),
 				'quantity' => (float) ( $item['quantity'] ?? 1 ),
@@ -176,14 +181,14 @@ final class EngineDataProvider {
 	 * (`billing` / `shipping`). Only the address
 	 * fields survive - storage bookkeeping keys (contract id, type) are dropped.
 	 *
-	 * @param Contract $contract The contract.
+	 * @param ContractView $contract The contract.
 	 * @return array<string, array<string, string>>
 	 */
-	private function addresses( Contract $contract ): array {
+	private function addresses( ContractView $contract ): array {
 		$fields = [ 'first_name', 'last_name', 'company', 'address_1', 'address_2', 'city', 'state', 'postcode', 'country', 'email', 'phone' ];
 
 		$addresses = [];
-		foreach ( $contract->get_addresses() as $type => $row ) {
+		foreach ( $contract->get_addresses() ?? [] as $type => $row ) {
 			$address = [];
 			foreach ( $fields as $field ) {
 				$value = $row[ $field ] ?? null;
@@ -224,15 +229,15 @@ final class EngineDataProvider {
 	/**
 	 * The contract's payment-method presentation fields (`title`, `expires`).
 	 *
-	 * `title` comes off the contract's stored instrument. Card expiry is not modelled on
+	 * `title` is the contract's stored payment method title. Card expiry is not modelled on
 	 * the contract row, so `expires` is left blank - a documented seam a payment-method
 	 * detail read can fill when that surface lands. Matches the engine read model.
 	 *
-	 * @param Contract $contract The contract.
+	 * @param ContractView $contract The contract.
 	 * @return array{title: string, expires: string}
 	 */
-	private function payment_method( Contract $contract ): array {
-		$title = $contract->get_payment_instrument()->get_title();
+	private function payment_method( ContractView $contract ): array {
+		$title = $contract->get_payment_method_title();
 
 		return [
 			'title'   => null === $title ? '' : $title,
@@ -249,19 +254,16 @@ final class EngineDataProvider {
 	 * degrades to an empty period and a zero interval, which the view-model renders as a
 	 * price with no cadence suffix rather than fataling - matching the engine read model.
 	 *
-	 * @param Contract $contract The contract.
+	 * @param ContractView $contract The contract.
 	 * @return array{period: string, interval: int}
 	 */
-	private function billing_cadence( Contract $contract ): array {
-		$snapshot = $contract->get_plan_snapshot();
-		if ( null !== $snapshot ) {
-			$policy = $snapshot->get_billing_policy();
-			if ( $policy instanceof BillingPolicy ) {
-				return [
-					'period'   => $policy->get_period(),
-					'interval' => $policy->get_interval(),
-				];
-			}
+	private function billing_cadence( ContractView $contract ): array {
+		$terms = BillingTerms::from_snapshot( $contract->get_plan_snapshot() );
+		if ( null !== $terms ) {
+			return [
+				'period'   => $terms->get_period(),
+				'interval' => $terms->get_interval(),
+			];
 		}
 
 		return [
@@ -279,15 +281,15 @@ final class EngineDataProvider {
 	 * string. The view-model uses it only as the on-hold (admin-action) date-row value -
 	 * the closest available proxy for "when the status flipped".
 	 *
-	 * @param Contract $contract The contract.
+	 * @param ContractView $contract The contract.
 	 * @return string
 	 */
-	private function resolve_last_updated_gmt( Contract $contract ): string {
+	private function resolve_last_updated_gmt( ContractView $contract ): string {
 		$last = $contract->get_last_payment_gmt();
 		if ( null !== $last && '' !== $last ) {
 			return $last;
 		}
 
-		return $contract->get_start_gmt();
+		return (string) $contract->get_start_gmt();
 	}
 }

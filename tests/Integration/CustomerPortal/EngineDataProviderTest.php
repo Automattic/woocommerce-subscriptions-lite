@@ -2,8 +2,8 @@
 /**
  * Integration tests for EngineDataProvider against the real engine.
  *
- * Contracts are seeded through the production checkout path (order -> engine
- * factory) and read back through the provider over the real facade - no seams,
+ * Contracts are seeded through the production checkout path (order -> Lite's
+ * checkout mapping -> engine contracts facade) and read back through the provider over the real facade - no seams,
  * no doubles. Restores the coverage retired with the stub-based suite.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Tests
@@ -13,7 +13,9 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\CustomerPortal;
 
+use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\SchemaInstaller;
+use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\CustomerPortal\EngineDataProvider;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
 
@@ -154,6 +156,24 @@ final class EngineDataProviderTest extends LiteIntegrationTestCase {
 
 		$this->assertSame( '', $detail['billing_period'] );
 		$this->assertSame( 0, $detail['billing_interval'] );
+	}
+
+	public function test_drafts_are_hidden_from_the_customer(): void {
+		$customer_id = $this->create_customer();
+		$active_id   = $this->create_contract( $customer_id );
+		$draft_id    = Contracts::create(
+			[
+				'owner'       => Package::EXTENSION_SLUG,
+				'customer_id' => $customer_id,
+				'status'      => 'draft',
+			]
+		);
+
+		$rows = $this->provider->get_contracts_for_customer( $customer_id );
+
+		$this->assertSame( [ $active_id ], array_column( $rows, 'id' ) );
+		$this->assertNull( $this->provider->get_contract( $draft_id, $customer_id ) );
+		$this->assertNotNull( $this->provider->get_contract( $active_id, $customer_id ) );
 	}
 
 	public function test_get_contract_is_ownership_asymmetric(): void {

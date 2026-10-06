@@ -13,7 +13,7 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\CustomerPortal;
 
-use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\SchemaInstaller;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsLite\CustomerPortal\Endpoints;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
 
@@ -75,13 +75,7 @@ final class EndpointsRenderTest extends LiteIntegrationTestCase {
 	 * @param string|null $next_payment_gmt GMT next payment date, or null to clear.
 	 */
 	private function set_next_payment( int $contract_id, ?string $next_payment_gmt ): void {
-		global $wpdb;
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
-		$wpdb->update(
-			SchemaInstaller::get_table_name( SchemaInstaller::TABLE_CONTRACTS ),
-			[ 'next_payment_gmt' => $next_payment_gmt ],
-			[ 'id' => $contract_id ]
-		);
+		Contracts::update( $contract_id, [ 'next_payment_gmt' => $next_payment_gmt ] );
 	}
 
 	public function test_list_renders_every_status_with_badges(): void {
