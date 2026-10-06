@@ -75,15 +75,16 @@ final class StatusLabels {
 	 * Whether a contract in `$status` may be cancelled from the admin UI.
 	 *
 	 * The facade's cancel is immediate; terminal statuses (cancelled, expired)
-	 * have nothing to cancel, so the action is hidden for them. Pure so the list
-	 * table and detail renderer agree on when to show the control.
+	 * have nothing to cancel, so the action is hidden for them. A draft (a contract
+	 * whose checkout activation failed) is cancellable so the merchant can resolve it.
+	 * Pure so the list table and detail renderer agree on when to show the control.
 	 *
 	 * @param string $status Contract status slug.
 	 */
 	public static function is_cancellable( string $status ): bool {
 		return in_array(
 			$status,
-			[ ContractStatus::ACTIVE, ContractStatus::ON_HOLD, ContractStatus::PENDING_CANCELLATION ],
+			[ ContractStatus::DRAFT, ContractStatus::ACTIVE, ContractStatus::ON_HOLD, ContractStatus::PENDING_CANCELLATION ],
 			true
 		);
 	}

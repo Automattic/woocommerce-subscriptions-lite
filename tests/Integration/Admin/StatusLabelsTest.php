@@ -43,7 +43,7 @@ final class StatusLabelsTest extends LiteIntegrationTestCase {
 		$this->assertTrue( StatusLabels::is_cancellable( ContractStatus::PENDING_CANCELLATION ) );
 		$this->assertFalse( StatusLabels::is_cancellable( ContractStatus::CANCELLED ) );
 		$this->assertFalse( StatusLabels::is_cancellable( ContractStatus::EXPIRED ) );
-		$this->assertFalse( StatusLabels::is_cancellable( ContractStatus::DRAFT ) );
+		$this->assertTrue( StatusLabels::is_cancellable( ContractStatus::DRAFT ), 'A stuck draft can be cancelled.' );
 	}
 
 	public function test_is_renewable_excludes_terminal_statuses_and_drafts(): void {
