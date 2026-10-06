@@ -102,8 +102,11 @@ export function builtInFields() {
 				};
 			},
 			toPayload: ( formData, payload, plan ) => {
+				// Seed from the stored payload, so top-level keys this field does
+				// not own survive the whole-payload write.
 				const existing = plan?.pricing_policy || {};
 				const pricing = payload.pricing_policy || {
+					...existing,
 					policies: [],
 					one_time_fees: Array.isArray( existing.one_time_fees )
 						? existing.one_time_fees

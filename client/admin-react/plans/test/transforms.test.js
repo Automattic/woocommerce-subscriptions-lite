@@ -114,6 +114,32 @@ describe( 'registry transforms', () => {
 		} );
 	} );
 
+	it( 'keeps pricing keys the form does not own when editing', () => {
+		const registry = buildFieldRegistry();
+		const plan = {
+			...samplePlan,
+			pricing_policy: {
+				...samplePlan.pricing_policy,
+				custom_key: { kept: true },
+			},
+		};
+		const formData = planToFormData( registry, plan );
+
+		const pricing = formDataToPayload(
+			registry,
+			formData,
+			plan
+		).pricing_policy;
+
+		expect( pricing.custom_key ).toEqual( { kept: true } );
+		expect( pricing.policies ).toEqual( [
+			{ type: 'percentage', value: 10, duration_cycles: 3 },
+		] );
+		expect( pricing.one_time_fees ).toEqual(
+			samplePlan.pricing_policy.one_time_fees
+		);
+	} );
+
 	it( 'sends only the edited billing keys for a new plan', () => {
 		const registry = buildFieldRegistry();
 		const payload = formDataToPayload(

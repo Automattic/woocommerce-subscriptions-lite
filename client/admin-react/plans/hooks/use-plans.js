@@ -13,7 +13,7 @@ import { useCallback, useEffect, useMemo, useState } from '@wordpress/element';
 import { __ } from '@wordpress/i18n';
 import { createPlan, fetchPlans, reorderPlans, updatePlan } from '../api';
 import { config } from '../config';
-import { sortByPlanOrder } from '../order';
+import { createReorderQueue, sortByPlanOrder } from '../order';
 import { viewToQuery } from '../transforms';
 
 /**
@@ -73,10 +73,10 @@ export function usePlans( view ) {
 		[]
 	);
 
-	const reorder = useCallback( async ( ids ) => {
-		const response = await reorderPlans( ids );
-		setPlanOrder( Array.isArray( response?.ids ) ? response.ids : ids );
-	}, [] );
+	const reorder = useMemo(
+		() => createReorderQueue( reorderPlans, setPlanOrder ),
+		[]
+	);
 
 	return {
 		plans,

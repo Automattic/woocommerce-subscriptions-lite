@@ -31,3 +31,27 @@ export function sortByPlanOrder( plans, order ) {
 		return a.id - b.id;
 	} );
 }
+
+/**
+ * Serialize plan order saves: each save starts after the previous one settles,
+ * and each saved order is applied in turn, so overlapping moves cannot leave the
+ * screen on an older order than the one stored. A failed save rejects its own
+ * call only; later saves still run.
+ *
+ * @param {Function} save  Saves ids; resolves to `{ ids }` (the saved order).
+ * @param {Function} apply Receives each saved order's ids.
+ * @return {Function} `( ids ) => Promise` resolving once that save is applied.
+ */
+export function createReorderQueue( save, apply ) {
+	let last = Promise.resolve();
+
+	return ( ids ) => {
+		const run = last
+			.catch( () => {} )
+			.then( () => save( ids ) )
+			.then( ( response ) => apply( response.ids ) );
+		last = run;
+
+		return run;
+	};
+}
