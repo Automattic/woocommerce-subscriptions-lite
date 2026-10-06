@@ -13,8 +13,9 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Renewal;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Subscriptions;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Plan;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Gateway\GatewayCapabilities;
-use Automattic\WooCommerce\SubscriptionsEngine\Integration\Checkout\ContractFactory;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\PlanRepository;
+use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\SchemaInstaller;
+use Automattic\WooCommerce\SubscriptionsLite\Checkout\ContractCreationHandler;
 use Automattic\WooCommerce\SubscriptionsLite\Renewal\BogoRenewalBonus;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
 use WC_Order;
@@ -173,10 +174,11 @@ final class BogoRenewalBonusTest extends LiteIntegrationTestCase {
 	}
 
 	/**
-	 * Sign up a contract for `$quantity` x 19.99 on a monthly plan with the given terms.
+	 * Sign up a contract for `$quantity` x 19.99 on a monthly plan with the given terms,
+	 * through Lite's checkout mapping.
 	 *
 	 * @param array<string, mixed>|null $pricing_policy Plan pricing payload.
-	 * @param string                    $extension_slug Plan owner.
+	 * @param string                    $extension_slug Plan and contract owner.
 	 * @param int|float                 $quantity       Origin line quantity.
 	 * @return int Contract id.
 	 */
@@ -199,7 +201,26 @@ final class BogoRenewalBonusTest extends LiteIntegrationTestCase {
 			]
 		);
 
-		return (int) ( new ContractFactory() )->create_from_order( $order, $plan )->get_id();
+		foreach ( $order->get_items() as $item ) {
+			$item->update_meta_data( '_wcsl_selling_plan_id', (string) $plan->get_id() );
+			$item->save();
+		}
+
+		$contract_id = ( new ContractCreationHandler() )->create_contract( $order, $plan );
+
+		if ( 'woocommerce-subscriptions-lite' !== $extension_slug ) {
+			// Lite's mapping always records Lite as the owner, and the facade has no owner
+			// update; reassign the row directly to model another extension's contract.
+			global $wpdb;
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Test seeding for a state the facade does not produce.
+			$wpdb->update(
+				SchemaInstaller::get_table_name( SchemaInstaller::TABLE_CONTRACTS ),
+				[ 'extension_slug' => $extension_slug ],
+				[ 'id' => $contract_id ]
+			);
+		}
+
+		return $contract_id;
 	}
 
 	/**

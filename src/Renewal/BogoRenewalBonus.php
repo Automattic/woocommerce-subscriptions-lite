@@ -6,7 +6,8 @@
  * contract whose terms carry an in-scope `bogo` entry for the renewal's cycle,
  * each product line's quantity grows by its bonus units. Money-neutral: line
  * and order totals are never touched, so the cycle's expected total stays the
- * price authority. Terms come only from the contract's frozen plan snapshot.
+ * price authority. Terms come only from the contract's frozen plan snapshot, read
+ * through the subscriptions facade; only the id is read off the hook's contract.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Renewal
  */
@@ -44,21 +45,21 @@ final class BogoRenewalBonus {
 	 * @param mixed $contract Contract being renewed.
 	 */
 	public function apply_bonus( $order, $contract ): void {
-		if ( ! $order instanceof WC_Order || ! $contract instanceof Contract || Package::EXTENSION_SLUG !== $contract->get_extension_slug() ) {
+		if ( ! $order instanceof WC_Order || ! $contract instanceof Contract || null === $contract->get_id() ) {
 			return;
 		}
 
-		$snapshot = $contract->get_plan_snapshot();
-		if ( null === $snapshot ) {
+		$view = Subscriptions::get( $contract->get_id() );
+		if ( null === $view || Package::EXTENSION_SLUG !== $view->get_owner() ) {
 			return;
 		}
 
-		$terms = PricingTerms::from_snapshot( $snapshot );
+		$terms = PricingTerms::from_snapshot( $view->get_plan_snapshot() );
 		if ( ! $terms->has_type( PricingTerms::TYPE_BOGO ) ) {
 			return;
 		}
 
-		$cycle = self::cycle_count( (int) $contract->get_id(), $order->get_id() );
+		$cycle = self::cycle_count( $view->get_id(), $order->get_id() );
 		if ( null === $cycle ) {
 			return;
 		}
