@@ -15,8 +15,10 @@ declare( strict_types=1 );
 namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Checkout;
 
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\Plans;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\PlanView;
+use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\PlanStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\SchemaInstaller;
 use Automattic\WooCommerce\SubscriptionsLite\Checkout\ContractCreationHandler;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
@@ -295,7 +297,7 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 		$this->assertSame( [], Contracts::list_for_customer( $customer_id ) );
 	}
 
-	public function test_a_plan_not_applicable_to_the_product_creates_nothing(): void {
+	public function test_a_plan_not_applicable_to_the_product_defers_without_a_contract(): void {
 		$customer_id = $this->create_customer();
 		$plan        = $this->make_plan();
 		$order       = $this->create_subscription_order( $customer_id );
@@ -309,6 +311,37 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 		$order->update_status( 'processing' );
 
 		$this->assertSame( [], Contracts::list_for_customer( $customer_id ), 'A non-applicable plan is excluded.' );
+		$this->assertSame( ContractCreationHandler::REASON_PLAN_UNAVAILABLE, $this->deferral_reason( $order ), 'The dropped plan line is recorded.' );
+	}
+
+	public function test_a_plan_archived_after_add_to_cart_still_creates_the_contract(): void {
+		$customer_id = $this->create_customer();
+		$plan        = $this->make_plan();
+		$order       = $this->create_subscription_order( $customer_id );
+		$this->apply_and_stamp( $order, $plan );
+
+		$this->assertTrue( Plans::update( $plan->get_id(), [ 'status' => PlanStatus::ARCHIVED ] ) );
+		$order->update_status( 'processing' );
+
+		$contracts = Contracts::list_for_customer( $customer_id );
+		$this->assertCount( 1, $contracts, 'The cart priced the line on the plan, so checkout honours it.' );
+		$this->assertSame( (int) $plan->get_id(), $contracts[0]->get_selling_plan_id() );
+		$this->assertSame( '', $this->deferral_reason( $order ) );
+	}
+
+	public function test_an_offline_order_confirmed_after_the_plan_is_archived_creates_the_contract(): void {
+		$customer_id = $this->create_customer();
+		$plan        = $this->make_plan();
+		$order       = $this->create_subscription_order( $customer_id );
+		$this->apply_and_stamp( $order, $plan );
+		$order->update_status( 'on-hold' ); // Awaiting the offline payment.
+
+		$this->assertTrue( Plans::update( $plan->get_id(), [ 'status' => PlanStatus::ARCHIVED ] ) );
+		$order->update_status( 'processing' ); // The merchant confirms the payment.
+
+		$contracts = Contracts::list_for_customer( $customer_id );
+		$this->assertCount( 1, $contracts );
+		$this->assertSame( 'active', $contracts[0]->get_status() );
 	}
 
 	public function test_an_order_that_never_reaches_a_paid_status_creates_nothing(): void {

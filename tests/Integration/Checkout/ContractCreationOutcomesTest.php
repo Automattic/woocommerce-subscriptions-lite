@@ -1,8 +1,8 @@
 <?php
 /**
  * Integration tests for ContractCreationHandler: recurring money facts of taxed,
- * discounted and multi-line orders, an activation write that fails, and a plan
- * billing payload that does not parse.
+ * discounted and multi-line orders, an activation write that fails, a contract
+ * insert that fails, and a plan billing payload that does not parse.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Tests
  */
@@ -169,13 +169,13 @@ final class ContractCreationOutcomesTest extends LiteIntegrationTestCase {
 		);
 	}
 
-	public function test_an_unparseable_plan_billing_payload_creates_no_contract(): void {
+	public function test_an_unparseable_plan_billing_payload_defers_the_order(): void {
 		$order = $this->create_subscription_order( $this->create_customer() );
 		$order->set_status( 'processing' );
 		$order->save();
 
-		// Readable as display terms (a digit-string interval), but the strict
-		// billing parser contract creation uses refuses it.
+		// A digit-string interval: the strict billing parser contract creation uses
+		// refuses it, so the line's plan does not resolve as billable.
 		$plan = $this->make_unvalidated_plan(
 			'month',
 			1,
@@ -188,14 +188,88 @@ final class ContractCreationOutcomesTest extends LiteIntegrationTestCase {
 			]
 		);
 		$this->stamp_plan( $order, $plan );
+		$this->make_lines_applicable( $order );
+
+		( new ContractCreationHandler() )->create_contracts_for_order( $order->get_id() );
+
+		$this->assertSame( [], Contracts::find_by_origin_order( $order->get_id() ) );
+		$this->assertSame( ContractCreationHandler::REASON_PLAN_UNAVAILABLE, $this->deferral_reason( $order ), 'The stamped line whose plan is not billable defers the order.' );
+		$this->assertNotEmpty( $this->notes_containing( $order, 'plan_unavailable' ), 'An order note records the deferral.' );
+	}
+
+	public function test_a_failed_contract_insert_defers_the_order_and_is_not_retried(): void {
+		global $wpdb;
+
+		$order = $this->create_subscription_order( $this->create_customer() );
+		$order->set_status( 'processing' );
+		$order->save();
+
+		$this->stamp_plan( $order, $this->make_plan() );
+		$this->make_lines_applicable( $order );
+
+		$table = SchemaInstaller::get_table_name( SchemaInstaller::TABLE_CONTRACTS );
+		$break = static function ( string $query ) use ( $table ): string {
+			return 0 === strpos( ltrim( $query ), "INSERT INTO `{$table}`" ) ? 'SELECT broken syntax (' : $query;
+		};
+		add_filter( 'query', $break );
+		$suppressed = $wpdb->suppress_errors( true );
+
+		try {
+			( new ContractCreationHandler() )->create_contracts_for_order( $order->get_id() );
+		} finally {
+			$wpdb->suppress_errors( $suppressed );
+			remove_filter( 'query', $break );
+		}
+
+		$this->assertSame( [], Contracts::find_by_origin_order( $order->get_id() ), 'The insert failed, so no contract exists.' );
+		$this->assertSame( ContractCreationHandler::REASON_CREATION_FAILED, $this->deferral_reason( $order ) );
+		$this->assertCount( 1, $this->notes_containing( $order, 'creation_failed' ) );
+
+		// A later paid transition does not retry: the deferral flag holds it.
+		( new ContractCreationHandler() )->create_contracts_for_order( $order->get_id() );
+
+		$this->assertSame( [], Contracts::find_by_origin_order( $order->get_id() ) );
+		$this->assertCount( 1, $this->notes_containing( $order, 'creation_failed' ) );
+	}
+
+	/**
+	 * Make every product line's product accept every Lite plan.
+	 *
+	 * @param WC_Order $order The order.
+	 */
+	private function make_lines_applicable( WC_Order $order ): void {
 		foreach ( $order->get_items() as $item ) {
 			if ( $item instanceof WC_Order_Item_Product ) {
 				( new ApplicabilityStore() )->set( $item->get_product_id(), new ProductApplicability( ProductApplicability::MODE_INHERIT_ALL ) );
 			}
 		}
+	}
 
-		( new ContractCreationHandler() )->create_contracts_for_order( $order->get_id() );
+	/**
+	 * The order's deferral reason, read fresh.
+	 *
+	 * @param WC_Order $order The order.
+	 */
+	private function deferral_reason( WC_Order $order ): string {
+		$fresh = wc_get_order( $order->get_id() );
+		$this->assertInstanceOf( WC_Order::class, $fresh );
 
-		$this->assertSame( [], Subscriptions::find_by_origin_order( $order->get_id() ), 'The parse failure is caught before any contract write.' );
+		return (string) $fresh->get_meta( ContractCreationHandler::CREATION_DEFERRED_META );
+	}
+
+	/**
+	 * The order notes containing `$needle`.
+	 *
+	 * @param WC_Order $order  The order.
+	 * @param string   $needle Text to look for.
+	 * @return array<int, string>
+	 */
+	private function notes_containing( WC_Order $order, string $needle ): array {
+		$notes = array_map(
+			static fn ( $note ): string => (string) $note->content,
+			wc_get_order_notes( [ 'order_id' => $order->get_id() ] )
+		);
+
+		return array_values( array_filter( $notes, static fn ( string $note ): bool => false !== strpos( $note, $needle ) ) );
 	}
 }
