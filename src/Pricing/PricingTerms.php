@@ -24,7 +24,7 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Pricing;
 
-use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Plan;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\View\PlanView;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -97,9 +97,9 @@ final class PricingTerms {
 	/**
 	 * Terms of a plan; empty terms when there is no plan or it carries no payload.
 	 *
-	 * @param Plan|null $plan Plan.
+	 * @param PlanView|null $plan Plan.
 	 */
-	public static function from_plan( ?Plan $plan ): self {
+	public static function from_plan( ?PlanView $plan ): self {
 		return self::from_array( null !== $plan ? $plan->get_pricing_policy() ?? [] : [] );
 	}
 

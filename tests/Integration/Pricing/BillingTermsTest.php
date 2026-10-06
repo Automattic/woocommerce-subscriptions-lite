@@ -9,9 +9,7 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Pricing;
 
-use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Plan;
-use Automattic\WooCommerce\SubscriptionsEngine\Core\ValueObject\BillingPolicy;
-use Automattic\WooCommerce\SubscriptionsLite\Package;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\View\PlanView;
 use Automattic\WooCommerce\SubscriptionsLite\Pricing\BillingTerms;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
 
@@ -22,17 +20,21 @@ final class BillingTermsTest extends LiteIntegrationTestCase {
 
 	public function test_reads_the_plan_billing_policy(): void {
 		$terms = BillingTerms::from_plan(
-			$this->plan(
-				new BillingPolicy(
-					'week',
-					2,
-					null,
-					6,
-					[
-						'length' => 14,
-						'unit'   => 'day',
-					]
-				)
+			$this->make_plan(
+				'week',
+				2,
+				6,
+				[
+					'billing_policy' => [
+						'period'         => 'week',
+						'interval'       => 2,
+						'max_cycles'     => 6,
+						'trial_duration' => [
+							'length' => 14,
+							'unit'   => 'day',
+						],
+					],
+				]
 			)
 		);
 
@@ -50,7 +52,7 @@ final class BillingTermsTest extends LiteIntegrationTestCase {
 	}
 
 	public function test_open_ended_terms_without_a_trial(): void {
-		$terms = BillingTerms::from_plan( $this->plan( new BillingPolicy( 'month', 1, null, null, null ) ) );
+		$terms = BillingTerms::from_plan( $this->make_plan( 'month', 1 ) );
 
 		$this->assertInstanceOf( BillingTerms::class, $terms );
 		$this->assertSame( 1, $terms->get_interval() );
@@ -63,38 +65,48 @@ final class BillingTermsTest extends LiteIntegrationTestCase {
 	}
 
 	/**
-	 * @dataProvider provide_unusable_policies
+	 * @dataProvider provide_unusable_plan_billing
 	 *
-	 * @param string $period   Billing period.
-	 * @param int    $interval Billing interval.
+	 * @param array<string, mixed>|null $billing_policy Plan billing payload.
 	 */
-	public function test_unusable_policies_read_as_no_terms( string $period, int $interval ): void {
-		$this->assertNull( BillingTerms::from_plan( $this->plan( new BillingPolicy( $period, $interval, null, null, null ) ) ) );
+	public function test_a_plan_without_usable_billing_reads_as_no_terms( ?array $billing_policy ): void {
+		$this->assertNull( BillingTerms::from_plan( $this->foreign_plan( $billing_policy ) ) );
 	}
 
 	/**
-	 * @return array<string, array{0: string, 1: int}>
+	 * @return array<string, array{0: array<string, mixed>|null}>
 	 */
-	public function provide_unusable_policies(): array {
+	public function provide_unusable_plan_billing(): array {
 		return [
-			'unknown period' => [ 'fortnight', 1 ],
-			'zero interval'  => [ 'month', 0 ],
+			'null payload'     => [ null ],
+			'missing interval' => [ [ 'period' => 'month' ] ],
+			'unknown period'   => [
+				[
+					'period'   => 'fortnight',
+					'interval' => 1,
+				],
+			],
+			'zero interval'    => [
+				[
+					'period'   => 'month',
+					'interval' => 0,
+				],
+			],
 		];
 	}
 
 	public function test_an_unusable_trial_and_length_read_as_none(): void {
 		$terms = BillingTerms::from_plan(
-			$this->plan(
-				new BillingPolicy(
-					'month',
-					1,
-					null,
-					0,
-					[
+			$this->foreign_plan(
+				[
+					'period'         => 'month',
+					'interval'       => 1,
+					'max_cycles'     => 0,
+					'trial_duration' => [
 						'length' => 0,
 						'unit'   => 'day',
-					]
-				)
+					],
+				]
 			)
 		);
 
@@ -104,17 +116,19 @@ final class BillingTermsTest extends LiteIntegrationTestCase {
 	}
 
 	/**
-	 * An unsaved plan with the given billing policy.
+	 * A plan with the given billing payload, built on a foreign owner's plan: Lite refuses
+	 * such payloads on its own plans.
 	 *
-	 * @param BillingPolicy $policy Billing policy.
+	 * @param array<string, mixed>|null $billing_policy Plan billing payload.
 	 */
-	private function plan( BillingPolicy $policy ): Plan {
-		return Plan::create(
+	private function foreign_plan( ?array $billing_policy ): PlanView {
+		return $this->make_plan(
+			'month',
+			1,
+			null,
 			[
-				'name'           => 'Plan',
-				'billing_policy' => $policy,
-				'category'       => Plan::DEFAULT_CATEGORY,
-				'extension_slug' => Package::EXTENSION_SLUG,
+				'owner'          => 'another-extension',
+				'billing_policy' => $billing_policy,
 			]
 		);
 	}
