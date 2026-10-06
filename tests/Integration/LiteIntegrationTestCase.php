@@ -117,6 +117,32 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Create a plan with the plan validation action unhooked, as a row written
+	 * before a validation rule existed would be stored. Same arguments as
+	 * {@see self::make_plan()}.
+	 *
+	 * @param string               $period     Billing period.
+	 * @param int                  $interval   Billing interval.
+	 * @param int|null             $max_cycles Maximum billing cycles.
+	 * @param array<string, mixed> $overrides  Facade create keys.
+	 */
+	protected function make_unvalidated_plan( string $period = 'month', int $interval = 1, ?int $max_cycles = null, array $overrides = [] ): PlanView {
+		global $wp_filter;
+
+		$hook  = 'woocommerce_subscriptions_engine_validate_plan';
+		$saved = isset( $wp_filter[ $hook ] ) ? clone $wp_filter[ $hook ] : null;
+		remove_all_actions( $hook );
+
+		try {
+			return $this->make_plan( $period, $interval, $max_cycles, $overrides );
+		} finally {
+			if ( null !== $saved ) {
+				$wp_filter[ $hook ] = $saved; // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited -- restores the hook this helper unhooked.
+			}
+		}
+	}
+
+	/**
 	 * Set a plan's status through the engine plan facade.
 	 *
 	 * @param int    $id     Plan id.

@@ -1,7 +1,8 @@
 <?php
 /**
- * Integration tests for Lite's pricing validation on plan writes, dispatched
- * through the real engine plans REST route and its plan validation action.
+ * Integration tests for Lite's billing and pricing validation on plan writes,
+ * dispatched through the engine plan facade, its plans REST route and the plan
+ * validation action.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Tests
  */
@@ -10,8 +11,10 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Pricing;
 
-use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Plan;
-use Automattic\WooCommerce\SubscriptionsEngine\Core\ValueObject\BillingPolicy;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\PlanValidationException;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\Plans;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\SellingPlans;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\View\PlanView;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Pricing\PlanWriteValidation;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
@@ -133,7 +136,7 @@ final class PlanWriteValidationTest extends LiteIntegrationTestCase {
 		$this->assertArrayNotHasKey( 'one_time_fees', $stored );
 	}
 
-	public function test_a_fees_only_patch_validates_the_fees_and_keeps_the_stored_policies(): void {
+	public function test_a_patch_validates_and_replaces_the_whole_pricing_payload(): void {
 		$id = $this->plan_id(
 			$this->create_plan(
 				[
@@ -151,40 +154,17 @@ final class PlanWriteValidationTest extends LiteIntegrationTestCase {
 		$this->assertSame( 400, $invalid->get_status() );
 		$this->assertSame( 'rest_invalid_param', $this->error_code( $invalid ) );
 
-		$valid = $this->patch_plan(
-			$id,
+		$fees  = [
 			[
-				'one_time_fees' => [
-					[
-						'kind'    => 'setup',
-						'amount'  => 5,
-						'taxable' => 'true',
-					],
-				],
-			]
-		);
+				'kind'    => 'setup',
+				'amount'  => 5,
+				'taxable' => 'true',
+			],
+		];
+		$valid = $this->patch_plan( $id, [ 'one_time_fees' => $fees ] );
 		$this->assertSame( 200, $valid->get_status() );
 
-		$stored = $this->fetch_pricing_policy( $id );
-		$this->assertSame(
-			[
-				[
-					'type'  => 'percentage',
-					'value' => 10,
-				],
-			],
-			$stored['policies']
-		);
-		$this->assertSame(
-			[
-				[
-					'kind'    => 'setup',
-					'amount'  => 5,
-					'taxable' => 'true',
-				],
-			],
-			$stored['one_time_fees']
-		);
+		$this->assertSame( [ 'one_time_fees' => $fees ], $this->fetch_pricing_policy( $id ) );
 	}
 
 	public function test_an_invalid_patch_leaves_the_stored_plan_unchanged(): void {
@@ -271,7 +251,7 @@ final class PlanWriteValidationTest extends LiteIntegrationTestCase {
 	public function test_a_foreign_extension_plan_adds_no_errors(): void {
 		$errors = new WP_Error();
 
-		( new PlanWriteValidation() )->validate_plan( $errors, $this->unsaved_plan( [ 'policies' => [ [ 'type' => 'mystery' ] ] ], 'other-extension' ), 'other-extension' );
+		( new PlanWriteValidation() )->validate_plan( $errors, $this->lite_view( [ 'policies' => [ [ 'type' => 'mystery' ] ] ] ), 'other-extension' );
 
 		$this->assertFalse( $errors->has_errors() );
 	}
@@ -287,7 +267,7 @@ final class PlanWriteValidationTest extends LiteIntegrationTestCase {
 			],
 			'custom_key' => 'kept',
 		];
-		$plan           = $this->unsaved_plan( $pricing_policy );
+		$plan           = $this->lite_view( $pricing_policy );
 		$errors         = new WP_Error();
 
 		( new PlanWriteValidation() )->validate_plan( $errors, $plan, Package::EXTENSION_SLUG );
@@ -298,7 +278,7 @@ final class PlanWriteValidationTest extends LiteIntegrationTestCase {
 
 	public function test_each_invalid_term_adds_an_error_and_keeps_earlier_ones(): void {
 		$errors = new WP_Error( 'earlier_error', 'Earlier.' );
-		$plan   = $this->unsaved_plan(
+		$plan   = $this->lite_view(
 			[
 				'policies'      => [ [ 'type' => 'mystery' ] ],
 				'one_time_fees' => [
@@ -320,49 +300,130 @@ final class PlanWriteValidationTest extends LiteIntegrationTestCase {
 		$this->assertSame( [ 'status' => 400 ], $errors->get_error_data( 'rest_invalid_param' ) );
 	}
 
-	public function test_a_fees_only_patch_validates_the_merged_stored_policies(): void {
+	public function test_a_status_only_update_validates_the_stored_payloads(): void {
 		// Store invalid policies with Lite's validation unhooked, as a pre-existing row would be.
 		remove_all_actions( 'woocommerce_subscriptions_engine_validate_plan' );
 		$id = $this->plan_id( $this->create_plan( [ 'policies' => [ [ 'type' => 'mystery' ] ] ] ) );
 		PlanWriteValidation::register();
 
-		$response = $this->patch_plan(
-			$id,
-			[
-				'one_time_fees' => [
-					[
-						'kind'   => 'setup',
-						'amount' => 5,
-					],
-				],
-			]
-		);
+		try {
+			Plans::update( $id, [ 'status' => 'archived' ] );
+			$this->fail( 'A status-only update of a plan with invalid stored pricing must be refused.' );
+		} catch ( PlanValidationException $e ) {
+			$this->assertStringStartsWith( 'pricing_policy.policies[0]:', $e->get_errors()->get_error_message() );
+		}
 
-		$this->assertSame( 400, $response->get_status() );
-		$this->assertStringStartsWith( 'pricing_policy.policies[0]:', $this->error_message( $response ) );
-		$this->assertArrayNotHasKey( 'one_time_fees', $this->fetch_pricing_policy( $id ) );
+		$plan = ( new SellingPlans( [ Package::EXTENSION_SLUG ] ) )->get_plan( $id );
+		$this->assertNotNull( $plan );
+		$this->assertSame( 'active', $plan->get_status() );
 	}
 
 	/**
-	 * An unsaved plan with the given pricing payload.
+	 * @dataProvider provide_unusable_billing
 	 *
-	 * @param array<string, mixed> $pricing_policy Pricing payload.
-	 * @param string               $extension_slug Owner slug.
+	 * @param array<string, mixed>|null $billing_policy Billing payload.
+	 * @param string                    $message_prefix Expected message prefix.
 	 */
-	private function unsaved_plan( array $pricing_policy, string $extension_slug = Package::EXTENSION_SLUG ): Plan {
-		return Plan::create(
-			[
-				'name'           => 'Monthly',
-				'billing_policy' => BillingPolicy::from_array(
-					[
-						'period'   => 'month',
+	public function test_a_create_without_usable_billing_is_rejected_and_nothing_is_stored( ?array $billing_policy, string $message_prefix ): void {
+		$response = $this->create_plan( null, Package::EXTENSION_SLUG, self::BASE, $billing_policy );
+
+		$this->assertSame( 400, $response->get_status() );
+		$this->assertSame( 'rest_invalid_param', $this->error_code( $response ) );
+		$this->assertStringStartsWith( $message_prefix, $this->error_message( $response ) );
+		$this->assertSame( [], $this->list_plans() );
+	}
+
+	/**
+	 * @return array<string, array{0: array<string, mixed>|null, 1: string}>
+	 */
+	public function provide_unusable_billing(): array {
+		$cadence = 'billing_policy must have a period';
+
+		return [
+			'no billing policy'   => [ null, $cadence ],
+			'missing interval'    => [ [ 'period' => 'month' ], $cadence ],
+			'unknown period'      => [
+				[
+					'period'   => 'fortnight',
+					'interval' => 1,
+				],
+				$cadence,
+			],
+			'zero interval'       => [
+				[
+					'period'   => 'month',
+					'interval' => 0,
+				],
+				$cadence,
+			],
+			'string interval'     => [
+				[
+					'period'   => 'month',
+					'interval' => '1',
+				],
+				$cadence,
+			],
+			'unknown trial unit'  => [
+				[
+					'period'         => 'month',
+					'interval'       => 1,
+					'trial_duration' => [
+						'length' => 1,
+						'unit'   => 'fortnight',
+					],
+				],
+				'billing_policy: ',
+			],
+			'min above max cycle' => [
+				[
+					'period'     => 'month',
+					'interval'   => 1,
+					'min_cycles' => 5,
+					'max_cycles' => 2,
+				],
+				'billing_policy: ',
+			],
+		];
+	}
+
+	public function test_the_php_facade_runs_the_lite_validation(): void {
+		try {
+			Plans::create(
+				[
+					'owner'          => Package::EXTENSION_SLUG,
+					'name'           => 'Fortnightly',
+					'billing_policy' => [
+						'period'   => 'fortnight',
 						'interval' => 1,
-					]
-				),
-				'pricing_policy' => $pricing_policy,
-				'extension_slug' => $extension_slug,
+					],
+				]
+			);
+			$this->fail( 'Plans::create() must run the Lite billing validation.' );
+		} catch ( PlanValidationException $e ) {
+			$this->assertSame( [ 'rest_invalid_param' ], $e->get_errors()->get_error_codes() );
+		}
+
+		$this->assertSame( [], ( new SellingPlans( [ Package::EXTENSION_SLUG ] ) )->list_plans() );
+	}
+
+	public function test_a_foreign_extension_plan_without_billing_is_not_checked(): void {
+		$id = Plans::create(
+			[
+				'owner' => 'other-extension',
+				'name'  => 'No cadence',
 			]
 		);
+
+		$this->assertGreaterThan( 0, $id );
+	}
+
+	/**
+	 * A stored Lite plan with the given pricing payload, written unvalidated.
+	 *
+	 * @param array<string, mixed> $pricing_policy Pricing payload.
+	 */
+	private function lite_view( array $pricing_policy ): PlanView {
+		return $this->make_unvalidated_plan( 'month', 1, null, [ 'pricing_policy' => $pricing_policy ] );
 	}
 
 	/**
@@ -371,17 +432,23 @@ final class PlanWriteValidationTest extends LiteIntegrationTestCase {
 	 * @param array<string, mixed>|null $pricing_policy Pricing payload.
 	 * @param string                    $extension_slug Owner slug.
 	 * @param string                    $route          Route to POST to.
+	 * @param array<string, mixed>|null $billing_policy Billing payload.
 	 */
-	private function create_plan( ?array $pricing_policy, string $extension_slug = Package::EXTENSION_SLUG, string $route = self::BASE ): WP_REST_Response {
+	private function create_plan(
+		?array $pricing_policy,
+		string $extension_slug = Package::EXTENSION_SLUG,
+		string $route = self::BASE,
+		?array $billing_policy = [
+			'period'   => 'month',
+			'interval' => 1,
+		]
+	): WP_REST_Response {
 		$request = new WP_REST_Request( 'POST', $route );
 		$request->set_body_params(
 			[
 				'extension_slug' => $extension_slug,
 				'name'           => 'Monthly',
-				'billing_policy' => [
-					'period'   => 'month',
-					'interval' => 1,
-				],
+				'billing_policy' => $billing_policy,
 				'pricing_policy' => $pricing_policy,
 			]
 		);
