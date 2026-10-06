@@ -135,12 +135,34 @@ final class ContractCreationHandler {
 				sprintf( 'ContractCreationHandler: failed to create a contract for order %d: %s', $order_id, $e->getMessage() ),
 				[ 'source' => self::LOG_SOURCE ]
 			);
+			$this->note_stuck_draft( $order );
 			return;
 		}
 
 		$contract = Subscriptions::get( $contract_id );
 		if ( null !== $contract ) {
 			( new RenewalWiring() )->schedule_first_renewal( $contract );
+		}
+	}
+
+	/**
+	 * When creation failed after the draft was written (cycle write or activation),
+	 * leave a merchant-visible order note naming the draft.
+	 *
+	 * @param WC_Order $order The order.
+	 */
+	private function note_stuck_draft( WC_Order $order ): void {
+		foreach ( Subscriptions::find_by_origin_order( $order->get_id() ) as $contract ) {
+			if ( 'draft' !== $contract->get_status() ) {
+				continue;
+			}
+			$order->add_order_note(
+				sprintf(
+					/* translators: %d: subscription (contract) id. */
+					__( 'Subscription #%d was created as a draft but could not be activated. This order needs manual review.', 'woocommerce-subscriptions-lite' ),
+					$contract->get_id()
+				)
+			);
 		}
 	}
 
