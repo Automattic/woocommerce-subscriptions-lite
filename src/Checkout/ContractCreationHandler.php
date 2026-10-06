@@ -235,7 +235,6 @@ final class ContractCreationHandler {
 				'plan_snapshot'        => [
 					'selling_plan_id' => $plan_id,
 					'name'            => $plan->get_name(),
-					'category'        => $plan->get_category(),
 					'billing_policy'  => $plan->get_billing_policy()->to_array(),
 					'pricing_policy'  => $plan->get_pricing_policy(),
 				],
