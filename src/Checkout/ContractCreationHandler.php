@@ -68,8 +68,8 @@ final class ContractCreationHandler {
 	public const REASON_DIVERGENT_PLANS = 'divergent_plans';
 
 	/**
-	 * Deferral reason: the order mixes a plan line with a one-time line. Mixed
-	 * carts are WOOSUBS-1775.
+	 * Deferral reason: the order mixes a plan line with a one-time line; mixed
+	 * carts are not supported yet.
 	 */
 	public const REASON_MIXED_CART = 'mixed_cart';
 
