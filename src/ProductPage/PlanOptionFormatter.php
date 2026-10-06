@@ -25,8 +25,8 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\ProductPage;
 
-use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Plan;
-use Automattic\WooCommerce\SubscriptionsEngine\Core\ValueObject\BillingPolicy;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\View\PlanView;
+use Automattic\WooCommerce\SubscriptionsLite\Pricing\BillingTerms;
 use Automattic\WooCommerce\SubscriptionsLite\Pricing\PriceCalculator;
 use Automattic\WooCommerce\SubscriptionsLite\Pricing\PricingTerms;
 use Automattic\WooCommerce\SubscriptionsLite\Utilities\Formatter;
@@ -46,21 +46,22 @@ final class PlanOptionFormatter {
 	 * Format a picker option's visible text: `{price} {cadence}` plus an optional
 	 * ` ({discount})` suffix (`$21.60 / month (10% off)`). Carries wc_price() HTML.
 	 *
-	 * @param Plan  $plan       Plan being formatted.
-	 * @param float $base_price Base price the plan applies to.
+	 * @param PlanView $plan       Plan being formatted.
+	 * @param float    $base_price Base price the plan applies to.
 	 * @return string Option text; escape with wp_kses_post() when rendering.
 	 */
-	public static function format( Plan $plan, float $base_price ): string {
+	public static function format( PlanView $plan, float $base_price ): string {
 		$calculator = PriceCalculator::for_plan( $plan );
 		$price      = wc_price( $calculator->unit_price( $base_price, 1 ) );
-		$cadence    = self::price_cadence( $plan->get_billing_policy() );
+		$cadence    = self::cadence_suffix( $plan );
 		$discount   = self::discount_suffix( $calculator->get_terms(), $base_price );
+		$text       = '' === $cadence ? $price : sprintf( '%s %s', $price, $cadence );
 
 		if ( '' === $discount ) {
-			return sprintf( '%s %s', $price, $cadence );
+			return $text;
 		}
 
-		return sprintf( '%s %s (%s)', $price, $cadence, $discount );
+		return sprintf( '%s (%s)', $text, $discount );
 	}
 
 	/**
@@ -68,10 +69,12 @@ final class PlanOptionFormatter {
 	 * `every 2 weeks` above interval 1). Plain text; escape with esc_html().
 	 * Matches the customer portal's recurring-summary phrasing.
 	 *
-	 * @param Plan $plan Plan being formatted.
+	 * @param PlanView $plan Plan being formatted.
 	 */
-	public static function cadence_suffix( Plan $plan ): string {
-		return self::price_cadence( $plan->get_billing_policy() );
+	public static function cadence_suffix( PlanView $plan ): string {
+		$terms = BillingTerms::from_plan( $plan );
+
+		return null === $terms ? '' : Formatter::price_cadence( $terms->get_period(), $terms->get_interval() );
 	}
 
 	/**
@@ -80,22 +83,24 @@ final class PlanOptionFormatter {
 	 * interval 1). Post the name/description drop, a plan's identity is its
 	 * cadence. Plain text.
 	 *
-	 * @param Plan $plan Plan being formatted.
+	 * @param PlanView $plan Plan being formatted.
 	 */
-	public static function plan_label( Plan $plan ): string {
-		return self::frequency_label( $plan->get_billing_policy() );
+	public static function plan_label( PlanView $plan ): string {
+		$terms = BillingTerms::from_plan( $plan );
+
+		return null === $terms ? '' : self::frequency_label( $terms->get_period(), $terms->get_interval() );
 	}
 
 	/**
 	 * Format a plan's billing cadence for the admin panel table's Frequency
 	 * column (`Every 3 months`). Plain text.
 	 *
-	 * @param Plan $plan Plan being formatted.
+	 * @param PlanView $plan Plan being formatted.
 	 */
-	public static function format_frequency( Plan $plan ): string {
-		$policy = $plan->get_billing_policy();
+	public static function format_frequency( PlanView $plan ): string {
+		$terms = BillingTerms::from_plan( $plan );
 
-		return Formatter::explicit_cadence( $policy->get_period(), $policy->get_interval() );
+		return null === $terms ? '' : Formatter::explicit_cadence( $terms->get_period(), $terms->get_interval() );
 	}
 
 	/**
@@ -103,25 +108,14 @@ final class PlanOptionFormatter {
 	 * Returns the placeholder when the plan carries no discount to show.
 	 * Carries wc_price() HTML for amount-based discounts.
 	 *
-	 * @param Plan  $plan       Plan being formatted.
-	 * @param float $base_price Base price the plan applies to.
+	 * @param PlanView $plan       Plan being formatted.
+	 * @param float    $base_price Base price the plan applies to.
 	 * @return string Discount text; escape with wp_kses_post() when rendering.
 	 */
-	public static function format_discount( Plan $plan, float $base_price ): string {
+	public static function format_discount( PlanView $plan, float $base_price ): string {
 		$suffix = self::discount_suffix( PricingTerms::from_plan( $plan ), $base_price );
 
 		return '' === $suffix ? Formatter::PLACEHOLDER : $suffix;
-	}
-
-	/**
-	 * Price-cadence suffix: `/ month` at interval 1, else `every N months`. The
-	 * `/ period` form and the `every N periods` msgids match the customer
-	 * portal's cadence, so a single translation covers both surfaces.
-	 *
-	 * @param BillingPolicy $policy Billing policy carrying the period + interval.
-	 */
-	private static function price_cadence( BillingPolicy $policy ): string {
-		return Formatter::price_cadence( $policy->get_period(), $policy->get_interval() );
 	}
 
 	/**
@@ -129,12 +123,10 @@ final class PlanOptionFormatter {
 	 * interval 1, else `Every N months`. Unknown periods at interval 1 fall back
 	 * to the explicit `Every 1 {period}` form.
 	 *
-	 * @param BillingPolicy $policy Billing policy carrying the period + interval.
+	 * @param string $period   Billing period.
+	 * @param int    $interval Periods per cycle.
 	 */
-	private static function frequency_label( BillingPolicy $policy ): string {
-		$period   = $policy->get_period();
-		$interval = $policy->get_interval();
-
+	private static function frequency_label( string $period, int $interval ): string {
 		if ( 1 === $interval ) {
 			switch ( $period ) {
 				case 'day':
