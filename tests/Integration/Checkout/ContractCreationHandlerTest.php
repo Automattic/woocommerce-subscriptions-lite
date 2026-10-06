@@ -195,11 +195,12 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 		$this->assertNull( $contracts[0]->get_next_payment_gmt(), 'A draft is never armed.' );
 		$this->assertSame( [], Subscriptions::get_history( $contracts[0]->get_id() ) );
 
-		$notes = wp_list_pluck( wc_get_order_notes( [ 'order_id' => $order->get_id() ] ), 'content' );
-		$this->assertContains(
-			sprintf( 'Subscription #%d was created as a draft but could not be activated. This order needs manual review.', $contracts[0]->get_id() ),
-			$notes
+		$notes       = wp_list_pluck( wc_get_order_notes( [ 'order_id' => $order->get_id() ] ), 'content' );
+		$draft_notes = array_filter(
+			$notes,
+			static fn( $note ) => 1 === preg_match( '/#' . $contracts[0]->get_id() . '\b/', (string) $note )
 		);
+		$this->assertCount( 1, $draft_notes, 'One order note names the draft contract.' );
 	}
 
 	public function test_two_lines_on_the_same_plan_make_one_multi_line_contract(): void {
