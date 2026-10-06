@@ -91,13 +91,13 @@ final class StatusLabels {
 	/**
 	 * Whether a contract in `$status` may have a renewal run now.
 	 *
-	 * Renewing a terminal contract is a no-op the facade would skip, so the
-	 * action is offered only for non-terminal statuses.
+	 * Renewing a draft or terminal contract is a no-op the facade would skip, so the
+	 * action is offered only for the other statuses.
 	 *
 	 * @param string $status Contract status slug.
 	 */
 	public static function is_renewable( string $status ): bool {
-		return ! in_array( $status, [ ContractStatus::CANCELLED, ContractStatus::EXPIRED ], true );
+		return ! in_array( $status, [ ContractStatus::DRAFT, ContractStatus::CANCELLED, ContractStatus::EXPIRED ], true );
 	}
 
 	/**
