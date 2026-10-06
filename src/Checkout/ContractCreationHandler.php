@@ -110,22 +110,21 @@ final class ContractCreationHandler {
 			return;
 		}
 
-		// Idempotency: a repeat paid-status transition (e.g. processing -> completed)
-		// must neither double-create a contract nor duplicate a deferral note.
-		if ( [] !== Subscriptions::find_by_origin_order( $order_id )
-			|| '' !== (string) $order->get_meta( self::CREATION_DEFERRED_META ) ) {
-			return;
+		$outcome = $this->classify_order( $order );
+		if ( null === $outcome['reason'] && ! $outcome['plan'] instanceof Plan ) {
+			return; // No subscription line on the order.
 		}
 
-		$outcome = $this->classify_order( $order );
+		// Idempotency: a repeat paid-status transition (e.g. processing -> completed)
+		// must neither double-create a contract nor duplicate a deferral note.
+		if ( '' !== (string) $order->get_meta( self::CREATION_DEFERRED_META )
+			|| [] !== Subscriptions::find_by_origin_order( $order_id ) ) {
+			return;
+		}
 
 		if ( null !== $outcome['reason'] ) {
 			$this->record_deferral( $order, $outcome['reason'] );
 			return;
-		}
-
-		if ( ! $outcome['plan'] instanceof Plan ) {
-			return; // No subscription line on the order.
 		}
 
 		try {
