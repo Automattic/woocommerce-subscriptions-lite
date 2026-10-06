@@ -16,6 +16,7 @@ use Automattic\WooCommerce\SubscriptionsEngine\Core\Gateway\GatewayCapabilities;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\PlanRepository;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\SchemaInstaller;
 use Automattic\WooCommerce\SubscriptionsLite\Checkout\ContractCreationHandler;
+use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Renewal\BogoRenewalBonus;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
 use WC_Order;
@@ -85,7 +86,7 @@ final class BogoRenewalBonusTest extends LiteIntegrationTestCase {
 	public function test_a_fractional_paid_quantity_earns_a_fractional_bonus(): void {
 		remove_filter( 'woocommerce_stock_amount', 'intval' );
 		add_filter( 'woocommerce_stock_amount', 'floatval' );
-		$contract_id = $this->sign_up( [ 'policies' => [ [ 'type' => 'bogo' ] ] ], 'woocommerce-subscriptions-lite', 1.5 );
+		$contract_id = $this->sign_up( [ 'policies' => [ [ 'type' => 'bogo' ] ] ], Package::EXTENSION_SLUG, 1.5 );
 
 		$item = $this->only_line( $this->renew( $contract_id ) );
 
@@ -182,7 +183,7 @@ final class BogoRenewalBonusTest extends LiteIntegrationTestCase {
 	 * @param int|float                 $quantity       Origin line quantity.
 	 * @return int Contract id.
 	 */
-	private function sign_up( ?array $pricing_policy, string $extension_slug = 'woocommerce-subscriptions-lite', $quantity = 2 ): int {
+	private function sign_up( ?array $pricing_policy, string $extension_slug = Package::EXTENSION_SLUG, $quantity = 2 ): int {
 		$plan  = $this->make_plan(
 			'month',
 			1,
@@ -201,14 +202,11 @@ final class BogoRenewalBonusTest extends LiteIntegrationTestCase {
 			]
 		);
 
-		foreach ( $order->get_items() as $item ) {
-			$item->update_meta_data( '_wcsl_selling_plan_id', (string) $plan->get_id() );
-			$item->save();
-		}
+		$this->stamp_plan( $order, $plan );
 
 		$contract_id = ( new ContractCreationHandler() )->create_contract( $order, $plan );
 
-		if ( 'woocommerce-subscriptions-lite' !== $extension_slug ) {
+		if ( Package::EXTENSION_SLUG !== $extension_slug ) {
 			// Lite's mapping always records Lite as the owner, and the facade has no owner
 			// update; reassign the row directly to model another extension's contract.
 			global $wpdb;

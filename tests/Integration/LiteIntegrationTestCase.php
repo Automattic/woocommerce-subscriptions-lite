@@ -26,7 +26,9 @@ use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Plan;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\ValueObject\BillingPolicy;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Checkout\OrderLinkage;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\PlanRepository;
+use Automattic\WooCommerce\SubscriptionsLite\Cart\CartPlanHooks;
 use Automattic\WooCommerce\SubscriptionsLite\Checkout\ContractCreationHandler;
+use Automattic\WooCommerce\SubscriptionsLite\Package;
 use WC_Order;
 use WC_Product_Simple;
 use WP_UnitTestCase;
@@ -99,7 +101,7 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 					'name'           => ucfirst( $period ) . 'ly plan',
 					'billing_policy' => new BillingPolicy( $period, $interval, null, $max_cycles, null ),
 					'category'       => Plan::DEFAULT_CATEGORY,
-					'extension_slug' => 'woocommerce-subscriptions-lite',
+					'extension_slug' => Package::EXTENSION_SLUG,
 				],
 				$overrides
 			)
@@ -156,10 +158,7 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 		);
 		$order = $this->create_subscription_order( $customer_id, $args );
 
-		foreach ( $order->get_items() as $item ) {
-			$item->update_meta_data( '_wcsl_selling_plan_id', (string) $plan->get_id() );
-			$item->save();
-		}
+		$this->stamp_plan( $order, $plan );
 
 		$contract_id = ( new ContractCreationHandler() )->create_contract( $order, $plan );
 
@@ -178,6 +177,19 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 		}
 
 		return $contract_id;
+	}
+
+	/**
+	 * Stamp every order line with `$plan`, as the cart writer does at checkout.
+	 *
+	 * @param WC_Order $order The order.
+	 * @param Plan     $plan  The selling plan.
+	 */
+	protected function stamp_plan( WC_Order $order, Plan $plan ): void {
+		foreach ( $order->get_items() as $item ) {
+			$item->update_meta_data( CartPlanHooks::SELLING_PLAN_ID_KEY, (string) $plan->get_id() );
+			$item->save();
+		}
 	}
 
 	/**
