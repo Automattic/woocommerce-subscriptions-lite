@@ -7,9 +7,10 @@
  *   { period: day|week|month|year, interval: int, min_cycles: ?int, max_cycles: ?int,
  *     trial_duration: { length: int, unit: day|week|month|year } | null }
  *
- * Reads are tolerant and never throw: a missing plan, or a payload without a usable
- * period and positive interval, reads as no terms (null); malformed optional fields
- * read as absent.
+ * A live plan is read strictly: {@see self::from_plan()} returns terms only when the
+ * payload is billable, meaning contract creation can parse it through `BillingPolicy`
+ * and compute a first renewal ({@see self::validate()}). The storefront, the cart and
+ * checkout all use that one rule. A missing plan reads as no terms (null). Reads never throw.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Pricing
  */
@@ -19,6 +20,10 @@ declare( strict_types=1 );
 namespace Automattic\WooCommerce\SubscriptionsLite\Pricing;
 
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\PlanView;
+use Automattic\WooCommerce\SubscriptionsEngine\Core\ValueObject\BillingPolicy;
+use DateTimeImmutable;
+use DateTimeZone;
+use DomainException;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -28,6 +33,8 @@ defined( 'ABSPATH' ) || exit;
 final class BillingTerms {
 
 	private const PERIODS = [ 'day', 'week', 'month', 'year' ];
+
+	private const CADENCE_MESSAGE = 'billing_policy must have a period (day, week, month or year) and a positive interval.';
 
 	/**
 	 * Billing period.
@@ -73,12 +80,72 @@ final class BillingTerms {
 	}
 
 	/**
-	 * Terms from a plan's `billing_policy`; null when there is no plan or the policy is absent or unusable.
+	 * Terms from a plan's `billing_policy`; null when there is no plan or it is absent or not billable
+	 * (see {@see self::validate()}).
 	 *
 	 * @param PlanView|null $plan Plan.
 	 */
 	public static function from_plan( ?PlanView $plan ): ?self {
-		$policy = null !== $plan ? $plan->get_billing_policy() : null;
+		if ( null === $plan ) {
+			return null;
+		}
+
+		$policy = $plan->get_billing_policy();
+
+		return [] === self::validate( $policy ) ? self::from_policy( $policy ) : null;
+	}
+
+	/**
+	 * Problems that keep a `billing_policy` payload from being billed: it needs a
+	 * known period and a positive interval, and it must parse through the engine's
+	 * `BillingPolicy` with a first renewal date, exactly as contract creation reads
+	 * it (an integer interval, a known trial unit, consistent cycle bounds).
+	 *
+	 * @param array<string, mixed>|null $policy Billing payload.
+	 * @return array<int, string> Error messages; empty when billable.
+	 */
+	public static function validate( ?array $policy ): array {
+		if ( null === $policy || null === self::from_policy( $policy ) ) {
+			return [ self::CADENCE_MESSAGE ];
+		}
+
+		try {
+			self::parse_first_renewal( $policy, new DateTimeImmutable( '2000-01-01', new DateTimeZone( 'UTC' ) ) );
+		} catch ( DomainException $e ) {
+			return [ 'billing_policy: ' . $e->getMessage() ];
+		}
+
+		return [];
+	}
+
+	/**
+	 * The first renewal moment of a contract on `$plan` starting at `$start`.
+	 *
+	 * @param PlanView          $plan  Plan.
+	 * @param DateTimeImmutable $start Contract start.
+	 * @throws DomainException When the billing payload is not billable.
+	 */
+	public static function first_renewal_from( PlanView $plan, DateTimeImmutable $start ): DateTimeImmutable {
+		return self::parse_first_renewal( $plan->get_billing_policy() ?? [], $start );
+	}
+
+	/**
+	 * Parse a billing payload with the engine's `BillingPolicy` and compute the first renewal.
+	 *
+	 * @param array<string, mixed> $policy Billing payload.
+	 * @param DateTimeImmutable    $start  Contract start.
+	 * @throws DomainException When the payload does not parse or has no usable cadence.
+	 */
+	private static function parse_first_renewal( array $policy, DateTimeImmutable $start ): DateTimeImmutable {
+		return BillingPolicy::from_array( $policy )->compute_first_renewal_from( $start );
+	}
+
+	/**
+	 * Tolerant parse of a `billing_policy` payload; null when it has no usable cadence.
+	 *
+	 * @param mixed $policy Raw billing_policy payload.
+	 */
+	private static function from_policy( $policy ): ?self {
 		if ( ! is_array( $policy ) ) {
 			return null;
 		}

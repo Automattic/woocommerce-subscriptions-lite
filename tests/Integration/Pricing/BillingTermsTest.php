@@ -12,6 +12,8 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Pricing;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\PlanView;
 use Automattic\WooCommerce\SubscriptionsLite\Pricing\BillingTerms;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
+use DateTimeImmutable;
+use DateTimeZone;
 
 /**
  * @covers \Automattic\WooCommerce\SubscriptionsLite\Pricing\BillingTerms
@@ -113,6 +115,108 @@ final class BillingTermsTest extends LiteIntegrationTestCase {
 		$this->assertInstanceOf( BillingTerms::class, $terms );
 		$this->assertNull( $terms->get_trial_duration() );
 		$this->assertNull( $terms->get_max_cycles() );
+	}
+
+	public function test_a_live_plan_is_read_strictly(): void {
+		// A digit-string interval is not billable on a plan.
+		$plan = $this->make_unvalidated_plan(
+			'month',
+			1,
+			null,
+			[
+				'billing_policy' => [
+					'period'   => 'month',
+					'interval' => '1',
+				],
+			]
+		);
+
+		$this->assertNull( BillingTerms::from_plan( $plan ) );
+	}
+
+	/**
+	 * @dataProvider provide_billing_payloads_to_validate
+	 *
+	 * @param array<string, mixed>|null $policy         Billing payload.
+	 * @param string|null               $message_prefix Expected message prefix, or null when billable.
+	 */
+	public function test_validate_reports_why_a_payload_is_not_billable( ?array $policy, ?string $message_prefix ): void {
+		$messages = BillingTerms::validate( $policy );
+
+		if ( null === $message_prefix ) {
+			$this->assertSame( [], $messages );
+			return;
+		}
+
+		$this->assertCount( 1, $messages );
+		$this->assertStringStartsWith( $message_prefix, $messages[0] );
+	}
+
+	/**
+	 * @return array<string, array{0: array<string, mixed>|null, 1: string|null}>
+	 */
+	public function provide_billing_payloads_to_validate(): array {
+		return [
+			'billable'           => [
+				[
+					'period'         => 'week',
+					'interval'       => 2,
+					'trial_duration' => [
+						'length' => 7,
+						'unit'   => 'day',
+					],
+				],
+				null,
+			],
+			'null'               => [ null, 'billing_policy must have a period' ],
+			'unknown period'     => [
+				[
+					'period'   => 'fortnight',
+					'interval' => 1,
+				],
+				'billing_policy must have a period',
+			],
+			'string interval'    => [
+				[
+					'period'   => 'month',
+					'interval' => '1',
+				],
+				'billing_policy: ',
+			],
+			'unknown trial unit' => [
+				[
+					'period'         => 'month',
+					'interval'       => 1,
+					'trial_duration' => [
+						'length' => 1,
+						'unit'   => 'fortnight',
+					],
+				],
+				'billing_policy: ',
+			],
+		];
+	}
+
+	public function test_first_renewal_from_applies_the_trial(): void {
+		$plan = $this->make_plan(
+			'month',
+			1,
+			null,
+			[
+				'billing_policy' => [
+					'period'         => 'month',
+					'interval'       => 1,
+					'trial_duration' => [
+						'length' => 14,
+						'unit'   => 'day',
+					],
+				],
+			]
+		);
+
+		$next = BillingTerms::first_renewal_from( $plan, new DateTimeImmutable( '2026-01-01 00:00:00', new DateTimeZone( 'UTC' ) ) );
+
+		$this->assertSame( '2026-01-15 00:00:00', $next->format( 'Y-m-d H:i:s' ) );
 	}
 
 	/**

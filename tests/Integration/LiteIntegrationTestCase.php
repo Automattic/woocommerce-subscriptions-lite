@@ -127,6 +127,38 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 	 * @param array<string, mixed> $overrides  Facade create keys.
 	 */
 	protected function make_unvalidated_plan( string $period = 'month', int $interval = 1, ?int $max_cycles = null, array $overrides = [] ): PlanView {
+		return $this->without_plan_validation(
+			function () use ( $period, $interval, $max_cycles, $overrides ): PlanView {
+				return $this->make_plan( $period, $interval, $max_cycles, $overrides );
+			}
+		);
+	}
+
+	/**
+	 * Update a plan with the plan validation action unhooked, as an out-of-band
+	 * write would store it.
+	 *
+	 * @param int                  $id   Plan id.
+	 * @param array<string, mixed> $args Facade update keys.
+	 */
+	protected function update_plan_unvalidated( int $id, array $args ): void {
+		$this->assertTrue(
+			$this->without_plan_validation(
+				static function () use ( $id, $args ): bool {
+					return Plans::update( $id, $args );
+				}
+			)
+		);
+	}
+
+	/**
+	 * Run `$write` with the plan validation action unhooked, then restore it.
+	 *
+	 * @template T
+	 * @param callable(): T $write The write.
+	 * @return T
+	 */
+	private function without_plan_validation( callable $write ) {
 		global $wp_filter;
 
 		$hook  = 'woocommerce_subscriptions_engine_validate_plan';
@@ -134,7 +166,7 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 		remove_all_actions( $hook );
 
 		try {
-			return $this->make_plan( $period, $interval, $max_cycles, $overrides );
+			return $write();
 		} finally {
 			if ( null !== $saved ) {
 				$wp_filter[ $hook ] = $saved; // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited -- restores the hook this helper unhooked.

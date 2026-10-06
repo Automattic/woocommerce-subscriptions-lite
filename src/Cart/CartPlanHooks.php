@@ -35,10 +35,7 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Cart;
 
 use WC_Cart;
 use WC_Product;
-use Automattic\WooCommerce\SubscriptionsEngine\Api\SellingPlans;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\PlanView;
-use Automattic\WooCommerce\SubscriptionsLite\Package;
-use Automattic\WooCommerce\SubscriptionsLite\Pricing\BillingTerms;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ProductPlanResolver;
 use Automattic\WooCommerce\SubscriptionsLite\Pricing\PriceCalculator;
 use Automattic\WooCommerce\SubscriptionsLite\ProductPage\PlanOptionFormatter;
@@ -66,21 +63,12 @@ final class CartPlanHooks {
 	private $resolver;
 
 	/**
-	 * Engine catalog read facade scoped to Lite's slug: reads a line's plan by
-	 * id, for pricing/display of a line already in the cart.
-	 *
-	 * @var SellingPlans
-	 */
-	private SellingPlans $plans;
-
-	/**
 	 * Construct the module with the applicability resolver it gates adds through.
 	 *
 	 * @param ProductPlanResolver|null $resolver Applicability resolver; defaults to a real one.
 	 */
 	public function __construct( ?ProductPlanResolver $resolver = null ) {
 		$this->resolver = $resolver ?? new ProductPlanResolver();
-		$this->plans    = new SellingPlans( [ Package::EXTENSION_SLUG ] );
 	}
 
 	/**
@@ -276,21 +264,15 @@ final class CartPlanHooks {
 	}
 
 	/**
-	 * Resolve the plan for a cart item, or null for a one-time line, a plan that
-	 * no longer resolves, or a plan without usable billing terms. Any status:
-	 * a line already in the cart keeps its plan when the plan is archived.
+	 * Resolve the plan for a cart item ({@see ProductPlanResolver::get_line_plan()}),
+	 * or null for a one-time line.
 	 *
 	 * @param array<string, mixed> $cart_item Cart item row.
 	 */
 	private function resolve_line_plan( array $cart_item ): ?PlanView {
 		$plan_id = isset( $cart_item[ self::SELLING_PLAN_ID_KEY ] ) ? (int) $cart_item[ self::SELLING_PLAN_ID_KEY ] : 0;
-		if ( $plan_id <= 0 ) {
-			return null;
-		}
 
-		$plan = $this->plans->get_plan( $plan_id );
-
-		return null !== $plan && null !== BillingTerms::from_plan( $plan ) ? $plan : null;
+		return $plan_id > 0 ? $this->resolver->get_line_plan( $plan_id ) : null;
 	}
 
 	/**

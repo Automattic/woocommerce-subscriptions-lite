@@ -361,7 +361,7 @@ final class PlanWriteValidationTest extends LiteIntegrationTestCase {
 					'period'   => 'month',
 					'interval' => '1',
 				],
-				$cadence,
+				'billing_policy: ',
 			],
 			'unknown trial unit'  => [
 				[
@@ -384,6 +384,24 @@ final class PlanWriteValidationTest extends LiteIntegrationTestCase {
 				'billing_policy: ',
 			],
 		];
+	}
+
+	public function test_a_plan_with_unusable_stored_billing_can_be_archived_but_not_restored(): void {
+		$plan = $this->make_unvalidated_plan( 'month', 1, null, [ 'billing_policy' => null ] );
+		$id   = $plan->get_id();
+
+		$this->assertTrue( Plans::update( $id, [ 'status' => 'archived' ] ), 'Archiving skips the billing check.' );
+
+		try {
+			Plans::update( $id, [ 'status' => 'active' ] );
+			$this->fail( 'Restoring a plan without usable billing must be refused.' );
+		} catch ( PlanValidationException $e ) {
+			$this->assertStringStartsWith( 'billing_policy must have a period', $e->get_errors()->get_error_message() );
+		}
+
+		$stored = ( new SellingPlans( [ Package::EXTENSION_SLUG ] ) )->get_plan( $id );
+		$this->assertNotNull( $stored );
+		$this->assertSame( 'archived', $stored->get_status() );
 	}
 
 	public function test_the_php_facade_runs_the_lite_validation(): void {
