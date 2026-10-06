@@ -45,12 +45,13 @@ final class BogoRenewalBonus {
 	 * @param mixed $contract Contract being renewed.
 	 */
 	public function apply_bonus( $order, $contract ): void {
-		if ( ! $order instanceof WC_Order || ! $contract instanceof Contract || null === $contract->get_id() ) {
+		if ( ! $order instanceof WC_Order || ! $contract instanceof Contract || null === $contract->get_id()
+			|| Package::EXTENSION_SLUG !== $contract->get_extension_slug() ) {
 			return;
 		}
 
 		$view = Subscriptions::get( $contract->get_id() );
-		if ( null === $view || Package::EXTENSION_SLUG !== $view->get_owner() ) {
+		if ( null === $view ) {
 			return;
 		}
 
