@@ -16,7 +16,7 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Checkout;
 
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
-use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Plan;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\View\PlanView;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\SchemaInstaller;
 use Automattic\WooCommerce\SubscriptionsLite\Checkout\ContractCreationHandler;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
@@ -40,9 +40,9 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 	 * `$plan` on each - the production shape after add-to-cart.
 	 *
 	 * @param WC_Order $order The order.
-	 * @param Plan     $plan  The plan to stamp.
+	 * @param PlanView $plan  The plan to stamp.
 	 */
-	private function apply_and_stamp( WC_Order $order, Plan $plan ): void {
+	private function apply_and_stamp( WC_Order $order, PlanView $plan ): void {
 		foreach ( $order->get_items() as $item ) {
 			( new ApplicabilityStore() )->set(
 				$item->get_product_id(),
@@ -58,11 +58,11 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 	 * Add a product line to an order. With a plan it is made applicable + stamped;
 	 * without one it is a plain (one-time) line.
 	 *
-	 * @param WC_Order  $order The order.
-	 * @param string    $name  Product name.
-	 * @param Plan|null $plan  Plan to stamp, or null for a one-time line.
+	 * @param WC_Order      $order The order.
+	 * @param string        $name  Product name.
+	 * @param PlanView|null $plan  Plan to stamp, or null for a one-time line.
 	 */
-	private function add_line( WC_Order $order, string $name, ?Plan $plan ): void {
+	private function add_line( WC_Order $order, string $name, ?PlanView $plan ): void {
 		$product = new WC_Product_Simple();
 		$product->set_name( $name );
 		$product->set_regular_price( '5.00' );
@@ -70,7 +70,7 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 
 		$item_id = $order->add_product( $product, 1 );
 
-		if ( $plan instanceof Plan ) {
+		if ( $plan instanceof PlanView ) {
 			( new ApplicabilityStore() )->set(
 				$product->get_id(),
 				new ProductApplicability( ProductApplicability::MODE_INHERIT_ALL )

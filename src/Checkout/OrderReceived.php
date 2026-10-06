@@ -26,10 +26,11 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Checkout;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\SellingPlans;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\View\PlanView;
 use Automattic\WooCommerce\SubscriptionsLite\Contracts\CustomerVisibility;
-use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Plan;
 use Automattic\WooCommerce\SubscriptionsLite\CustomerPortal\Endpoints;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
+use Automattic\WooCommerce\SubscriptionsLite\Pricing\BillingTerms;
 use Automattic\WooCommerce\SubscriptionsLite\Utilities\Formatter;
 use WC_Order;
 
@@ -164,37 +165,34 @@ final class OrderReceived {
 	}
 
 	/**
-	 * The plan behind a contract, read from the Lite catalog, or null if gone or unset.
+	 * The plan behind a contract, read from the Lite catalog in any status, or
+	 * null if gone or unset.
 	 *
 	 * @param int|null $plan_id The selling plan id.
 	 */
-	private function find_plan( ?int $plan_id ): ?Plan {
+	private function find_plan( ?int $plan_id ): ?PlanView {
 		if ( null === $plan_id ) {
 			return null;
 		}
 
-		$plans = ( new SellingPlans( [ Package::EXTENSION_SLUG ] ) )->get_plans( [ $plan_id ] );
-		$plan  = reset( $plans );
-
-		return $plan instanceof Plan ? $plan : null;
+		return ( new SellingPlans( [ Package::EXTENSION_SLUG ] ) )->get_plan( $plan_id );
 	}
 
 	/**
 	 * The price cadence suffix (`/ month`) for a plan, or '' when there is no
-	 * plan. Reads the shared wording off {@see Formatter} so the checkout
+	 * plan or it has no usable billing terms. Reads the shared wording off {@see Formatter} so the checkout
 	 * summary matches the cart and portal without reaching into another surface's
 	 * formatter.
 	 *
-	 * @param Plan|null $plan The contract's plan, or null if gone.
+	 * @param PlanView|null $plan The contract's plan, or null if gone.
 	 */
-	private function plan_cadence( ?Plan $plan ): string {
-		if ( ! $plan instanceof Plan ) {
+	private function plan_cadence( ?PlanView $plan ): string {
+		$terms = null === $plan ? null : BillingTerms::from_plan( $plan );
+		if ( null === $terms ) {
 			return '';
 		}
 
-		$policy = $plan->get_billing_policy();
-
-		return Formatter::price_cadence( $policy->get_period(), $policy->get_interval() );
+		return Formatter::price_cadence( $terms->get_period(), $terms->get_interval() );
 	}
 
 	/**

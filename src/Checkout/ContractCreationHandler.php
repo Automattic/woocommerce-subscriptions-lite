@@ -30,9 +30,10 @@ use WC_Order_Item_Product;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\SellingPlans;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\View\PlanView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\CycleStatus;
-use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Plan;
+use Automattic\WooCommerce\SubscriptionsEngine\Core\ValueObject\BillingPolicy;
 use Automattic\WooCommerce\SubscriptionsLite\Contracts\AddressFields;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ProductPlanResolver;
@@ -109,7 +110,7 @@ final class ContractCreationHandler {
 		}
 
 		$outcome = $this->classify_order( $order );
-		if ( null === $outcome['reason'] && ! $outcome['plan'] instanceof Plan ) {
+		if ( null === $outcome['reason'] && ! $outcome['plan'] instanceof PlanView ) {
 			return; // No subscription line on the order.
 		}
 
@@ -187,13 +188,16 @@ final class ContractCreationHandler {
 	 * then cycle 1 (billed by the order), then activation with the first renewal date.
 	 * Activation comes last, so a failure part-way leaves a draft that is never due.
 	 *
+	 * The first renewal date comes from the engine's opt-in `BillingPolicy` parser
+	 * over the plan's billing payload.
+	 *
 	 * @param WC_Order $order The paid order.
-	 * @param Plan     $plan  The order's selling plan.
+	 * @param PlanView $plan  The order's selling plan.
 	 * @return ContractView|null The active contract; null when it was deleted before activation.
-	 * @throws Throwable When an engine write fails.
+	 * @throws Throwable When the billing payload does not parse or an engine write fails.
 	 */
-	public function create_contract( WC_Order $order, Plan $plan ): ?ContractView {
-		$plan_id    = (int) $plan->get_id();
+	public function create_contract( WC_Order $order, PlanView $plan ): ?ContractView {
+		$plan_id    = $plan->get_id();
 		$plan_lines = [];
 		foreach ( $order->get_items() as $item ) {
 			if ( $item instanceof WC_Order_Item_Product && $plan_id === (int) $item->get_meta( self::SELLING_PLAN_META ) ) {
@@ -205,7 +209,7 @@ final class ContractCreationHandler {
 		$start = null !== $paid
 			? new DateTimeImmutable( '@' . $paid->getTimestamp() )
 			: new DateTimeImmutable( 'now', new DateTimeZone( 'UTC' ) );
-		$next  = $plan->get_billing_policy()->compute_first_renewal_from( $start );
+		$next  = BillingPolicy::from_array( $plan->get_billing_policy() ?? [] )->compute_first_renewal_from( $start );
 
 		$totals = $this->get_recurring_totals( $order, $plan_lines );
 
@@ -335,13 +339,13 @@ final class ContractCreationHandler {
 	/**
 	 * Inspect the order's product lines and decide the outcome.
 	 *
-	 * Returns the single `Plan` when one re-validated plan covers every plan line
+	 * Returns the single plan when one re-validated plan covers every plan line
 	 * and there is no other product line; a `reason` when a subscription was
 	 * intended but the order cannot be one contract; or neither when there is no
 	 * subscription line at all.
 	 *
 	 * @param WC_Order $order The paid order.
-	 * @return array{plan: Plan|null, reason: string|null}
+	 * @return array{plan: PlanView|null, reason: string|null}
 	 */
 	private function classify_order( WC_Order $order ): array {
 		$resolver  = new ProductPlanResolver();
@@ -383,11 +387,8 @@ final class ContractCreationHandler {
 			];
 		}
 
-		$plans = ( new SellingPlans( [ Package::EXTENSION_SLUG ] ) )->get_plans( [ (int) array_key_first( $plan_ids ) ] );
-		$plan  = reset( $plans );
-
 		return [
-			'plan'   => $plan instanceof Plan ? $plan : null,
+			'plan'   => ( new SellingPlans( [ Package::EXTENSION_SLUG ] ) )->get_plan( (int) array_key_first( $plan_ids ) ),
 			'reason' => null,
 		];
 	}

@@ -1,7 +1,8 @@
 <?php
 /**
  * Integration tests for ContractCreationHandler: recurring money facts of taxed,
- * discounted and multi-line orders, and an activation write that fails.
+ * discounted and multi-line orders, an activation write that fails, and a plan
+ * billing payload that does not parse.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Tests
  */
@@ -166,5 +167,35 @@ final class ContractCreationOutcomesTest extends LiteIntegrationTestCase {
 			array_filter( $notes, static fn ( string $note ): bool => false !== strpos( $note, '#' . $draft->get_id() ) ),
 			'An order note names the draft.'
 		);
+	}
+
+	public function test_an_unparseable_plan_billing_payload_creates_no_contract(): void {
+		$order = $this->create_subscription_order( $this->create_customer() );
+		$order->set_status( 'processing' );
+		$order->save();
+
+		// Readable as display terms (a digit-string interval), but the strict
+		// billing parser contract creation uses refuses it.
+		$plan = $this->make_unvalidated_plan(
+			'month',
+			1,
+			null,
+			[
+				'billing_policy' => [
+					'period'   => 'month',
+					'interval' => '1',
+				],
+			]
+		);
+		$this->stamp_plan( $order, $plan );
+		foreach ( $order->get_items() as $item ) {
+			if ( $item instanceof WC_Order_Item_Product ) {
+				( new ApplicabilityStore() )->set( $item->get_product_id(), new ProductApplicability( ProductApplicability::MODE_INHERIT_ALL ) );
+			}
+		}
+
+		( new ContractCreationHandler() )->create_contracts_for_order( $order->get_id() );
+
+		$this->assertSame( [], Subscriptions::find_by_origin_order( $order->get_id() ), 'The parse failure is caught before any contract write.' );
 	}
 }
