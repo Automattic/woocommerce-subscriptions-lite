@@ -9,8 +9,10 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Admin;
 
+use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\PlanStatus;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
-use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Plan;
+use Automattic\WooCommerce\SubscriptionsLite\Plans\PlanOrder;
+use Automattic\WooCommerce\SubscriptionsLite\Plans\PlanOrderController;
 use Automattic\WooCommerce\SubscriptionsLite\Pricing\PricingTerms;
 
 defined( 'ABSPATH' ) || exit;
@@ -107,8 +109,10 @@ final class SettingsPage {
 		$config_json = wp_json_encode(
 			[
 				'restBase'      => '/wc/v3/subscriptions-engine/plans',
+				'orderPath'     => '/' . PlanOrderController::REST_NAMESPACE . PlanOrderController::ROUTE,
+				'planOrder'     => ( new PlanOrder() )->get(),
 				'extensionSlug' => 'woocommerce-subscriptions-lite',
-				'defaultStatus' => 'active',
+				'defaultStatus' => PlanStatus::ACTIVE,
 				'definitions'   => $this->get_plan_data_definitions(),
 			]
 		);
@@ -183,11 +187,11 @@ final class SettingsPage {
 		return [
 			'statuses'       => [
 				[
-					'value' => Plan::STATUS_ACTIVE,
+					'value' => PlanStatus::ACTIVE,
 					'label' => __( 'Active', 'woocommerce-subscriptions-lite' ),
 				],
 				[
-					'value' => Plan::STATUS_ARCHIVED,
+					'value' => PlanStatus::ARCHIVED,
 					'label' => __( 'Archived', 'woocommerce-subscriptions-lite' ),
 				],
 			],

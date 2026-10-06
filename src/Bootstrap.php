@@ -73,6 +73,10 @@ final class Bootstrap {
 		// the engine's plans REST route (REST requests are not is_admin()).
 		Pricing\PlanWriteValidation::register();
 
+		// Plans: the REST route that saves Lite's plan display order, used by
+		// the plans manager (REST requests are not is_admin()).
+		Plans\PlanOrderController::register();
+
 		// Cart/Checkout Blocks: expose per-item plan data on core's Store API and
 		// enqueue the checkout filters (frequency suffix + "Total due today").
 		// Guarded so Lite still loads on WooCommerce builds without Blocks.

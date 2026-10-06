@@ -14,6 +14,7 @@ declare( strict_types=1 );
 namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Admin;
 
 use Automattic\WooCommerce\SubscriptionsLite\Admin\SettingsPage;
+use Automattic\WooCommerce\SubscriptionsLite\Plans\PlanOrder;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
 
 /**
@@ -63,13 +64,14 @@ final class SettingsPageTest extends LiteIntegrationTestCase {
 
 		// Right screen, right tab.
 		$_GET['tab'] = SettingsPage::TAB_SLUG;
+		update_option( PlanOrder::OPTION, [ 7, 3 ] );
 		$page->enqueue_assets( 'woocommerce_page_wc-settings' );
 
 		$this->assertTrue( wp_script_is( self::SCRIPT_HANDLE, 'enqueued' ) );
 		$this->assertTrue( wp_style_is( 'wp-components', 'enqueued' ) );
 
-		// The inline config seeds the React app with the engine REST base and
-		// the extension slug.
+		// The inline config seeds the React app with the engine REST base, the
+		// extension slug, and the Lite plan order with its route.
 		$inline = wp_scripts()->get_data( self::SCRIPT_HANDLE, 'before' );
 		$config = null;
 		foreach ( (array) $inline as $chunk ) {
@@ -80,6 +82,9 @@ final class SettingsPageTest extends LiteIntegrationTestCase {
 		$this->assertIsArray( $config, 'The inline plans config is attached to the script.' );
 		$this->assertSame( '/wc/v3/subscriptions-engine/plans', $config['restBase'] );
 		$this->assertSame( 'woocommerce-subscriptions-lite', $config['extensionSlug'] );
+		$this->assertSame( '/wc/v3/subscriptions-lite/plans/reorder', $config['orderPath'] );
+		$this->assertSame( [ 7, 3 ], $config['planOrder'] );
+		$this->assertSame( [ 'active', 'archived' ], array_column( $config['definitions']['statuses'], 'value' ) );
 		$this->assertSame( 'day', $config['definitions']['billing_units'][0]['value'] );
 
 		// BOGO is offered as a pricing type so the editor can render it.
