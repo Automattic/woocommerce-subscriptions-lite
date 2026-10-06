@@ -176,6 +176,22 @@ final class EngineDataProviderTest extends LiteIntegrationTestCase {
 		$this->assertNotNull( $this->provider->get_contract( $active_id, $customer_id ) );
 	}
 
+	public function test_a_draft_inside_the_page_window_does_not_shorten_the_page(): void {
+		$customer_id = $this->create_customer();
+		$older_id    = $this->create_contract( $customer_id );
+		Contracts::create(
+			[
+				'owner'       => Package::EXTENSION_SLUG,
+				'customer_id' => $customer_id,
+			]
+		);
+		$newer_id = $this->create_contract( $customer_id );
+
+		// The portal's next-page probe asks for one row more than it shows.
+		$this->assertSame( [ $newer_id, $older_id ], array_column( $this->provider->get_contracts_for_customer( $customer_id, 2, 0 ), 'id' ) );
+		$this->assertSame( [ $older_id ], array_column( $this->provider->get_contracts_for_customer( $customer_id, 1, 1 ), 'id' ) );
+	}
+
 	public function test_get_contract_is_ownership_asymmetric(): void {
 		$customer_id = $this->create_customer();
 		$stranger_id = $this->create_customer();

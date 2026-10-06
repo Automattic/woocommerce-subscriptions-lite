@@ -31,7 +31,7 @@ use DateTimeInterface;
 use WC_Order;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Subscriptions;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
-use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
+use Automattic\WooCommerce\SubscriptionsLite\Contracts\CustomerVisibility;
 use Automattic\WooCommerce\SubscriptionsLite\Pricing\BillingTerms;
 
 defined( 'ABSPATH' ) || exit;
@@ -45,8 +45,8 @@ final class EngineDataProvider {
 	 * Return the customer's contracts as domain-ish list-row arrays.
 	 *
 	 * Reads the customer-scoped contract list off the facade and reduces each contract to
-	 * the row shape {@see ViewModel} consumes, skipping drafts (so a page can hold fewer
-	 * than `$limit` rows). The empty array means "no subscriptions".
+	 * the row shape {@see ViewModel} consumes. Drafts are filtered out before paging, so a
+	 * page holds up to `$limit` visible rows. The empty array means "no subscriptions".
 	 *
 	 * @param int $customer_id The logged-in customer id.
 	 * @param int $limit       Maximum contracts to return.
@@ -55,10 +55,8 @@ final class EngineDataProvider {
 	 */
 	public function get_contracts_for_customer( int $customer_id, int $limit = 20, int $offset = 0 ): array {
 		$rows = [];
-		foreach ( Subscriptions::list_for_customer( $customer_id, $limit, $offset ) as $contract ) {
-			if ( ContractStatus::DRAFT !== $contract->get_status() ) {
-				$rows[] = $this->contract_to_row( $contract );
-			}
+		foreach ( Subscriptions::list_for_customer( $customer_id, $limit, $offset, [ 'status' => CustomerVisibility::visible_statuses() ] ) as $contract ) {
+			$rows[] = $this->contract_to_row( $contract );
 		}
 		return $rows;
 	}
@@ -77,7 +75,7 @@ final class EngineDataProvider {
 	 */
 	public function get_contract( int $contract_id, int $customer_id ): ?array {
 		$contract = Subscriptions::get_for_customer( $contract_id, $customer_id );
-		if ( null === $contract || ContractStatus::DRAFT === $contract->get_status() ) {
+		if ( null === $contract || ! CustomerVisibility::is_visible( $contract ) ) {
 			return null;
 		}
 
