@@ -34,6 +34,8 @@ final class StatusLabels {
 	 */
 	public static function contract_label( string $status ): string {
 		switch ( $status ) {
+			case ContractStatus::DRAFT:
+				return __( 'Draft', 'woocommerce-subscriptions-lite' );
 			case ContractStatus::ACTIVE:
 				return __( 'Active', 'woocommerce-subscriptions-lite' );
 			case ContractStatus::ON_HOLD:

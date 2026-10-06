@@ -23,6 +23,7 @@ use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTe
 final class StatusLabelsTest extends LiteIntegrationTestCase {
 
 	public function test_contract_label_uses_merchant_wording(): void {
+		$this->assertSame( 'Draft', StatusLabels::contract_label( ContractStatus::DRAFT ) );
 		$this->assertSame( 'Active', StatusLabels::contract_label( ContractStatus::ACTIVE ) );
 		$this->assertSame( 'Pending cancellation', StatusLabels::contract_label( ContractStatus::PENDING_CANCELLATION ) );
 	}
