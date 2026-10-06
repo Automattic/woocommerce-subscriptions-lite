@@ -89,7 +89,7 @@ export function formErrors( registry, formData ) {
  * Translate a DataViews view into engine list query params.
  *
  * The list has no search, filter, or pagination UI: every status comes back
- * in one page ordered by manual sort_order.
+ * in one page ordered by id; the screen then applies the Lite plan order.
  *
  * @param {Object} view DataViews view state.
  * @return {Object} Query params for the engine plans endpoint.
@@ -98,7 +98,7 @@ export function viewToQuery( view ) {
 	return {
 		page: view.page || 1,
 		per_page: view.perPage || 100,
-		orderby: view.sort?.field || 'sort_order',
+		orderby: view.sort?.field || 'id',
 		order: view.sort?.direction || 'asc',
 	};
 }

@@ -43,10 +43,12 @@ export function builtInFields() {
 				interval: plan.billing_policy?.interval || 1,
 				period: plan.billing_policy?.period || 'month',
 			} ),
-			toPayload: ( formData, payload ) => ( {
+			// A PATCH replaces the whole billing_policy, so an edit starts from
+			// the stored payload to keep keys this form does not edit.
+			toPayload: ( formData, payload, plan ) => ( {
 				...payload,
 				billing_policy: {
-					...( payload.billing_policy || {} ),
+					...( payload.billing_policy || plan?.billing_policy || {} ),
 					period: formData.period,
 					interval: Number( formData.interval ),
 				},
@@ -184,10 +186,10 @@ export function builtInFields() {
 					maxCycles,
 				};
 			},
-			toPayload: ( formData, payload ) => ( {
+			toPayload: ( formData, payload, plan ) => ( {
 				...payload,
 				billing_policy: {
-					...( payload.billing_policy || {} ),
+					...( payload.billing_policy || plan?.billing_policy || {} ),
 					max_cycles: formData.expires
 						? Number( formData.maxCycles )
 						: null,
