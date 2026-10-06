@@ -86,6 +86,7 @@ final class PlanOrderControllerTest extends LiteIntegrationTestCase {
 
 		$ids = [
 			'duplicate'     => [ $lite, $lite ],
+			'int and digit' => [ $lite, (string) $lite ],
 			'zero'          => [ $lite, 0 ],
 			'negative'      => [ -1, $lite ],
 			'foreign owner' => [ $lite, $foreign ],
@@ -107,6 +108,7 @@ final class PlanOrderControllerTest extends LiteIntegrationTestCase {
 	public function provide_invalid_orders(): array {
 		return [
 			'duplicate'     => [ 'duplicate' ],
+			'int and digit' => [ 'int and digit' ],
 			'zero'          => [ 'zero' ],
 			'negative'      => [ 'negative' ],
 			'foreign owner' => [ 'foreign owner' ],

@@ -58,7 +58,10 @@ final class PlanOrderController {
 					'ids' => [
 						'description' => __( 'Plan ids in display order.', 'woocommerce-subscriptions-lite' ),
 						'type'        => 'array',
-						'items'       => [ 'type' => 'integer' ],
+						'items'       => [
+							'type'    => 'integer',
+							'minimum' => 1,
+						],
 						'required'    => true,
 					],
 				],
@@ -73,13 +76,10 @@ final class PlanOrderController {
 	 * @return WP_REST_Response|WP_Error
 	 */
 	public function reorder( WP_REST_Request $request ) {
+		// The args schema refuses ids below 1. Repeats are checked after the int cast:
+		// `uniqueItems` would accept `[ 1, "1" ]`.
 		$ids = array_map( 'intval', (array) $request->get_param( 'ids' ) );
 
-		foreach ( $ids as $id ) {
-			if ( $id <= 0 ) {
-				return self::invalid( __( 'Plan ids must be positive integers.', 'woocommerce-subscriptions-lite' ) );
-			}
-		}
 		if ( count( $ids ) !== count( array_unique( $ids ) ) ) {
 			return self::invalid( __( 'Plan ids must not repeat.', 'woocommerce-subscriptions-lite' ) );
 		}
