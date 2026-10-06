@@ -25,7 +25,6 @@ declare( strict_types=1 );
 namespace Automattic\WooCommerce\SubscriptionsLite\Pricing;
 
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Plan;
-use Automattic\WooCommerce\SubscriptionsEngine\Core\ValueObject\PlanSnapshot;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -105,13 +104,13 @@ final class PricingTerms {
 	}
 
 	/**
-	 * Terms frozen in a plan snapshot; empty terms when its `pricing_policy` is
-	 * absent, null or not an object.
+	 * Terms frozen in a plan snapshot payload; empty terms when the payload or its
+	 * `pricing_policy` is absent, null or not an object.
 	 *
-	 * @param PlanSnapshot $snapshot Plan snapshot.
+	 * @param array<string, mixed>|null $plan_snapshot Plan snapshot payload.
 	 */
-	public static function from_snapshot( PlanSnapshot $snapshot ): self {
-		$data = $snapshot->to_array()['pricing_policy'] ?? null;
+	public static function from_snapshot( ?array $plan_snapshot ): self {
+		$data = $plan_snapshot['pricing_policy'] ?? null;
 
 		return self::from_array( is_array( $data ) ? $data : [] );
 	}

@@ -10,7 +10,6 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Pricing;
 
-use Automattic\WooCommerce\SubscriptionsEngine\Core\ValueObject\PlanSnapshot;
 use Automattic\WooCommerce\SubscriptionsLite\Pricing\PricingTerms;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
 
@@ -375,16 +374,17 @@ final class PricingTermsTest extends LiteIntegrationTestCase {
 	}
 
 	public function test_from_snapshot_reads_absent_or_null_payloads_as_empty_terms(): void {
-		$absent = PricingTerms::from_snapshot( PlanSnapshot::from_array( [ 'selling_plan_id' => 1 ] ) );
+		$no_payload = PricingTerms::from_snapshot( null );
+		$this->assertSame( [], $no_payload->get_policies() );
+
+		$absent = PricingTerms::from_snapshot( [ 'selling_plan_id' => 1 ] );
 		$this->assertSame( [], $absent->get_policies() );
 		$this->assertSame( [], $absent->get_one_time_fees() );
 
-		$explicit_null = PricingTerms::from_snapshot( PlanSnapshot::from_array( [ 'pricing_policy' => null ] ) );
+		$explicit_null = PricingTerms::from_snapshot( [ 'pricing_policy' => null ] );
 		$this->assertSame( [], $explicit_null->get_policies() );
 
-		$present = PricingTerms::from_snapshot(
-			PlanSnapshot::from_array( [ 'pricing_policy' => [ 'policies' => [ [ 'type' => 'bogo' ] ] ] ] )
-		);
+		$present = PricingTerms::from_snapshot( [ 'pricing_policy' => [ 'policies' => [ [ 'type' => 'bogo' ] ] ] ] );
 		$this->assertTrue( $present->has_type( PricingTerms::TYPE_BOGO ) );
 	}
 
