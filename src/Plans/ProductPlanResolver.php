@@ -11,8 +11,10 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Plans;
 
 use WC_Product;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\SellingPlans;
-use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Plan;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\View\PlanView;
+use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\PlanStatus;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
+use Automattic\WooCommerce\SubscriptionsLite\Pricing\BillingTerms;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -22,8 +24,9 @@ defined( 'ABSPATH' ) || exit;
  * Applicability lives on parent products: a variation id resolves to its
  * parent before the meta is read. The mode drives the engine catalog read -
  * 'disable' yields no plans, 'inherit_all' every active Lite-owned plan,
- * 'inherit_select' the attached plans that are active - and plans come back
- * in the catalog's display order.
+ * 'inherit_select' the attached plans that are active. Plans without usable
+ * billing terms are skipped, and the rest come back in the Lite plan order
+ * ({@see PlanOrder}).
  */
 final class ProductPlanResolver {
 
@@ -59,9 +62,26 @@ final class ProductPlanResolver {
 	 * 'inherit_select' resolves to no plans.
 	 *
 	 * @param int $product_id Product (or variation) id.
-	 * @return array<int, Plan> Plans in display order.
+	 * @return array<int, PlanView> Plans in display order.
 	 */
 	public function get_plans_for_product( int $product_id ): array {
+		$plans = array_filter(
+			$this->read_plans( $product_id ),
+			static function ( PlanView $plan ): bool {
+				return null !== BillingTerms::from_plan( $plan );
+			}
+		);
+
+		return ( new PlanOrder() )->sort( array_values( $plans ) );
+	}
+
+	/**
+	 * Active plans selected by the product's applicability, in catalog order.
+	 *
+	 * @param int $product_id Product (or variation) id.
+	 * @return array<int, PlanView>
+	 */
+	private function read_plans( int $product_id ): array {
 		$product = wc_get_product( $product_id );
 		if ( ! $product instanceof WC_Product ) {
 			return [];
@@ -71,13 +91,13 @@ final class ProductPlanResolver {
 		$applicability = $this->store->get( $parent_id > 0 ? $parent_id : $product_id );
 
 		if ( ProductApplicability::MODE_INHERIT_ALL === $applicability->get_mode() ) {
-			return $this->catalog->list_plans();
+			return $this->catalog->list_plans( [ 'status' => PlanStatus::ACTIVE ] );
 		}
 
 		if ( ProductApplicability::MODE_INHERIT_SELECT === $applicability->get_mode() ) {
 			$plan_ids = $applicability->get_plan_ids();
 
-			return [] === $plan_ids ? [] : $this->catalog->get_plans( $plan_ids );
+			return [] === $plan_ids ? [] : $this->catalog->get_plans( $plan_ids, [ 'status' => PlanStatus::ACTIVE ] );
 		}
 
 		return [];

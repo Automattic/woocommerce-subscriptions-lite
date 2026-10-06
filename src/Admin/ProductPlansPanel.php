@@ -29,8 +29,10 @@ use InvalidArgumentException;
 use WC_Admin_Meta_Boxes;
 use WC_Product;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\SellingPlans;
+use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\PlanStatus;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ApplicabilityStore;
+use Automattic\WooCommerce\SubscriptionsLite\Plans\PlanOrder;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ProductApplicability;
 use Automattic\WooCommerce\SubscriptionsLite\ProductPage\PlanOptionFormatter;
 
@@ -156,7 +158,7 @@ final class ProductPlansPanel {
 
 		$product_id    = isset( $post->ID ) ? (int) $post->ID : 0;
 		$applicability = ( new ApplicabilityStore() )->get( $product_id );
-		$plans         = $this->catalog->list_plans();
+		$plans         = ( new PlanOrder() )->sort( $this->catalog->list_plans( [ 'status' => PlanStatus::ACTIVE ] ) );
 
 		$is_plans_mode = ProductApplicability::MODE_DISABLE !== $applicability->get_mode();
 		$is_select     = ProductApplicability::MODE_INHERIT_SELECT === $applicability->get_mode();

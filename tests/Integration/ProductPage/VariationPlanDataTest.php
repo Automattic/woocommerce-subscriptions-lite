@@ -14,10 +14,7 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\ProductPage;
 
-use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Plan;
-use Automattic\WooCommerce\SubscriptionsEngine\Core\ValueObject\BillingPolicy;
-use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\PlanRepository;
-use Automattic\WooCommerce\SubscriptionsLite\Package;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\View\PlanView;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ApplicabilityStore;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ProductApplicability;
 use Automattic\WooCommerce\SubscriptionsLite\ProductPage\VariationPlanData;
@@ -48,11 +45,13 @@ final class VariationPlanDataTest extends LiteIntegrationTestCase {
 	 *
 	 * @param bool $discount Whether the plan carries the 10% discount.
 	 */
-	private function discounted_plan( bool $discount = true ): Plan {
-		$plan = Plan::create(
+	private function discounted_plan( bool $discount = true ): PlanView {
+		return $this->make_plan(
+			'month',
+			1,
+			null,
 			[
 				'name'           => 'Monthly',
-				'billing_policy' => new BillingPolicy( 'month', 1, null, null, null ),
 				'pricing_policy' => $discount ? [
 					'policies'      => [
 						[
@@ -62,12 +61,8 @@ final class VariationPlanDataTest extends LiteIntegrationTestCase {
 					],
 					'one_time_fees' => [],
 				] : null,
-				'extension_slug' => Package::EXTENSION_SLUG,
 			]
 		);
-		( new PlanRepository() )->insert( $plan );
-
-		return $plan;
 	}
 
 	/**

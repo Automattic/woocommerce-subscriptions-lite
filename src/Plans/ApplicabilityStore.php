@@ -18,6 +18,7 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Plans;
 use InvalidArgumentException;
 use WC_Product;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\SellingPlans;
+use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\PlanStatus;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 
 defined( 'ABSPATH' ) || exit;
@@ -136,7 +137,7 @@ final class ApplicabilityStore {
 	/**
 	 * Validate a write. Plan-id existence and ownership go through the
 	 * engine's catalog read ({@see SellingPlans::get_plans()} scoped to
-	 * Lite's slug): an id that is unknown, archived, or owned by another
+	 * Lite's slug, active plans only): an id that is unknown, archived, or owned by another
 	 * extension is absent from the result and rejects the whole write.
 	 *
 	 * @param int                  $product_id    Parent product id.
@@ -167,7 +168,7 @@ final class ApplicabilityStore {
 		}
 
 		$found = [];
-		foreach ( $this->catalog->get_plans( $plan_ids ) as $plan ) {
+		foreach ( $this->catalog->get_plans( $plan_ids, [ 'status' => PlanStatus::ACTIVE ] ) as $plan ) {
 			$found[ (int) $plan->get_id() ] = true;
 		}
 
