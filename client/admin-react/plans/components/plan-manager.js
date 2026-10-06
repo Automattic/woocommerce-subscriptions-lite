@@ -19,7 +19,7 @@ const DEFAULT_VIEW = {
 	type: 'table',
 	perPage: 100,
 	page: 1,
-	sort: { field: 'sort_order', direction: 'asc' },
+	sort: { field: 'id', direction: 'asc' },
 	layout: {},
 };
 
@@ -170,7 +170,6 @@ export function PlanManager() {
 						'woocommerce-subscriptions-lite'
 					)
 				);
-				await reload();
 			} catch ( reorderError ) {
 				showError(
 					reorderError?.message ||
@@ -181,7 +180,7 @@ export function PlanManager() {
 				);
 			}
 		},
-		[ reload, reorder, showError, showSuccess ]
+		[ reorder, showError, showSuccess ]
 	);
 
 	return (

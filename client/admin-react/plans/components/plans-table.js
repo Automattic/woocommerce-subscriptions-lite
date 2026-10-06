@@ -4,7 +4,7 @@
  * Renders a plain table (no search, filters, view configuration, or
  * pagination chrome) via the DataViews composition API, and layers HTML5
  * drag-reorder onto the rendered rows, plus keyboard-accessible move
- * up/down actions. Manual sort_order is the only ordering.
+ * up/down actions. The Lite plan display order is the only ordering.
  */
 
 import { DataViews } from '@wordpress/dataviews/wp';
@@ -32,7 +32,7 @@ import {
  * prefixed with a synthetic drag-handle (grip) column.
  *
  * All columns are plain: no sorting, hiding, or filtering affordances -
- * manual sort_order is the only ordering.
+ * the Lite plan display order is the only ordering.
  *
  * @param {Array<Object>} registry    Field descriptors.
  * @param {Object}        definitions Normalized engine definitions.

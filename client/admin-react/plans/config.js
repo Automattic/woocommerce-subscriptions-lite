@@ -25,6 +25,12 @@ export const config = {
 	restBase:
 		window.wcSubscriptionsLitePlans?.restBase ||
 		'/wc/v3/subscriptions-engine/plans',
+	orderPath:
+		window.wcSubscriptionsLitePlans?.orderPath ||
+		'/wc/v3/subscriptions-lite/plans/reorder',
+	planOrder: Array.isArray( window.wcSubscriptionsLitePlans?.planOrder )
+		? window.wcSubscriptionsLitePlans.planOrder
+		: [],
 	definitions: window.wcSubscriptionsLitePlans?.definitions || {},
 	defaultStatus: window.wcSubscriptionsLitePlans?.defaultStatus || 'active',
 	extensionSlug:

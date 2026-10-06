@@ -46,10 +46,16 @@ export function updatePlan( id, payload ) {
 	} );
 }
 
-export function reorderPlans( ids, extensionSlug = null ) {
+/**
+ * Save the Lite plan display order (a Lite route; the engine stores no order).
+ *
+ * @param {Array<number>} ids Plan ids in display order.
+ * @return {Promise<{ids: Array<number>}>} The saved order.
+ */
+export function reorderPlans( ids ) {
 	return apiFetch( {
-		path: `${ config.restBase }/reorder`,
+		path: config.orderPath,
 		method: 'POST',
-		data: { ids, extension_slug: extensionSlug || config.extensionSlug },
+		data: { ids },
 	} );
 }

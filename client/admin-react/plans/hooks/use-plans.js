@@ -1,14 +1,19 @@
 /**
- * usePlans - plan list state + CRUD against the engine REST API.
+ * usePlans - plan list state + CRUD against the engine REST API, in the Lite
+ * plan display order.
  *
- * Wraps the engine's plain WP-REST conventions (list with X-WP-Total headers,
- * POST create, PATCH update, archive-via-status, POST reorder with ids). It
+ * Plan CRUD wraps the engine's plain WP-REST conventions (list with
+ * X-WP-Total headers, POST create, PATCH update, archive-via-status). The
+ * display order is Lite data: seeded from the inline config, applied to the
+ * fetched plans client-side, and saved through Lite's own reorder route. It
  * intentionally does not assume Premium's { success, message, data } envelope.
  */
 
-import { useCallback, useEffect, useState } from '@wordpress/element';
+import { useCallback, useEffect, useMemo, useState } from '@wordpress/element';
 import { __ } from '@wordpress/i18n';
 import { createPlan, fetchPlans, reorderPlans, updatePlan } from '../api';
+import { config } from '../config';
+import { sortByPlanOrder } from '../order';
 import { viewToQuery } from '../transforms';
 
 /**
@@ -16,7 +21,12 @@ import { viewToQuery } from '../transforms';
  * @return {Object} Plan list state and CRUD operations.
  */
 export function usePlans( view ) {
-	const [ plans, setPlans ] = useState( [] );
+	const [ fetchedPlans, setPlans ] = useState( [] );
+	const [ planOrder, setPlanOrder ] = useState( config.planOrder );
+	const plans = useMemo(
+		() => sortByPlanOrder( fetchedPlans, planOrder ),
+		[ fetchedPlans, planOrder ]
+	);
 	const [ paginationInfo, setPaginationInfo ] = useState( {
 		totalItems: 0,
 		totalPages: 0,
@@ -63,7 +73,10 @@ export function usePlans( view ) {
 		[]
 	);
 
-	const reorder = useCallback( ( ids ) => reorderPlans( ids ), [] );
+	const reorder = useCallback( async ( ids ) => {
+		const response = await reorderPlans( ids );
+		setPlanOrder( Array.isArray( response?.ids ) ? response.ids : ids );
+	}, [] );
 
 	return {
 		plans,
