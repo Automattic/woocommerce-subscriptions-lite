@@ -9,9 +9,10 @@
  * a WooCommerce order mapped by Lite's checkout handler onto the engine's
  * contracts facade - and moved to other statuses through the engine's public
  * facade verbs, so the data under test is shaped exactly like production data.
- * The engine's `Integration\` classes used here (plan repository, order
- * linkage for renewal orders) are a documented test-only exemption from the
- * "consume the engine via the `Api\` facade only" production rule.
+ * Plans are created through the engine's plan write facade and read back as
+ * views, as production code reads them. The engine's `Integration\` classes
+ * used here (order linkage for renewal orders) are a documented test-only
+ * exemption from the "consume the engine via the `Api\` facade only" rule.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Tests
  */
@@ -21,12 +22,12 @@ declare( strict_types=1 );
 namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration;
 
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\Plans;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\SellingPlans;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Subscriptions;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
-use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Plan;
-use Automattic\WooCommerce\SubscriptionsEngine\Core\ValueObject\BillingPolicy;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\View\PlanView;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Checkout\OrderLinkage;
-use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\PlanRepository;
 use Automattic\WooCommerce\SubscriptionsLite\Cart\CartPlanHooks;
 use Automattic\WooCommerce\SubscriptionsLite\Checkout\ContractCreationHandler;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
@@ -88,28 +89,41 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 	}
 
 	/**
-	 * Persist a plan and return the entity (with its id stamped by the insert).
+	 * Create a plan through the engine plan facade and return its view.
 	 *
 	 * @param string               $period     Billing period (day / week / month / year).
 	 * @param int                  $interval   Billing interval.
 	 * @param int|null             $max_cycles Maximum billing cycles, or null for open-ended.
-	 * @param array<string, mixed> $overrides  Plan attribute overrides (name, status, sort_order, extension_slug, ...).
+	 * @param array<string, mixed> $overrides  Facade create keys (name, status, owner, billing_policy, pricing_policy, delivery_policy).
 	 */
-	protected function make_plan( string $period = 'month', int $interval = 1, ?int $max_cycles = null, array $overrides = [] ): Plan {
-		$plan = Plan::create(
-			array_merge(
-				[
-					'name'           => ucfirst( $period ) . 'ly plan',
-					'billing_policy' => new BillingPolicy( $period, $interval, null, $max_cycles, null ),
-					'category'       => Plan::DEFAULT_CATEGORY,
-					'extension_slug' => Package::EXTENSION_SLUG,
+	protected function make_plan( string $period = 'month', int $interval = 1, ?int $max_cycles = null, array $overrides = [] ): PlanView {
+		$args = array_merge(
+			[
+				'owner'          => Package::EXTENSION_SLUG,
+				'name'           => ucfirst( $period ) . 'ly plan',
+				'billing_policy' => [
+					'period'     => $period,
+					'interval'   => $interval,
+					'max_cycles' => $max_cycles,
 				],
-				$overrides
-			)
+			],
+			$overrides
 		);
-		( new PlanRepository() )->insert( $plan );
+
+		$plan = ( new SellingPlans( [ (string) $args['owner'] ] ) )->get_plan( Plans::create( $args ) );
+		$this->assertNotNull( $plan );
 
 		return $plan;
+	}
+
+	/**
+	 * Set a plan's status through the engine plan facade.
+	 *
+	 * @param int    $id     Plan id.
+	 * @param string $status A registered plan status.
+	 */
+	protected function set_plan_status( int $id, string $status ): void {
+		$this->assertTrue( Plans::update( $id, [ 'status' => $status ] ) );
 	}
 
 	/**
@@ -186,9 +200,9 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 	 * Stamp every order line with `$plan`, as the cart writer does at checkout.
 	 *
 	 * @param WC_Order $order The order.
-	 * @param Plan     $plan  The selling plan.
+	 * @param PlanView $plan  The selling plan.
 	 */
-	protected function stamp_plan( WC_Order $order, Plan $plan ): void {
+	protected function stamp_plan( WC_Order $order, PlanView $plan ): void {
 		foreach ( $order->get_items() as $item ) {
 			$item->update_meta_data( CartPlanHooks::SELLING_PLAN_ID_KEY, (string) $plan->get_id() );
 			$item->save();
