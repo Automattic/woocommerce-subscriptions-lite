@@ -17,7 +17,8 @@ declare( strict_types=1 );
 namespace Automattic\WooCommerce\SubscriptionsLite\Admin\MetaBoxes;
 
 use Automattic\WooCommerce\SubscriptionsLite\Admin\Formatting;
-use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Contract;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
+use Automattic\WooCommerce\SubscriptionsLite\Pricing\BillingTerms;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -29,9 +30,9 @@ final class Schedule {
 	/**
 	 * Render the box body.
 	 *
-	 * @param Contract $contract The contract being viewed.
+	 * @param ContractView $contract The contract being viewed.
 	 */
-	public static function output( Contract $contract ): void {
+	public static function output( ContractView $contract ): void {
 		DetailTable::render( self::rows( $contract ) );
 	}
 
@@ -39,10 +40,10 @@ final class Schedule {
 	 * Compose the schedule rows: the plan cadence rows (when a snapshot is
 	 * present) followed by the schedule dates.
 	 *
-	 * @param Contract $contract The contract.
+	 * @param ContractView $contract The contract.
 	 * @return array<int, array{label: string, value: string}>
 	 */
-	private static function rows( Contract $contract ): array {
+	private static function rows( ContractView $contract ): array {
 		$rows = self::plan_rows( $contract );
 
 		$rows[] = [
@@ -71,12 +72,11 @@ final class Schedule {
 	 * when present. Empty when the contract carries no plan snapshot, so a
 	 * snapshot-less contract simply shows its dates rather than a fatal.
 	 *
-	 * @param Contract $contract The contract.
+	 * @param ContractView $contract The contract.
 	 * @return array<int, array{label: string, value: string}>
 	 */
-	private static function plan_rows( Contract $contract ): array {
-		$snapshot = $contract->get_plan_snapshot();
-		$policy   = null !== $snapshot ? $snapshot->get_billing_policy() : null;
+	private static function plan_rows( ContractView $contract ): array {
+		$policy = BillingTerms::from_snapshot( $contract->get_plan_snapshot() );
 		if ( null === $policy ) {
 			return [];
 		}
@@ -103,10 +103,10 @@ final class Schedule {
 		}
 
 		$trial = $policy->get_trial_duration();
-		if ( is_array( $trial ) && isset( $trial['length'], $trial['unit'] ) ) {
+		if ( null !== $trial ) {
 			$rows[] = [
 				'label' => __( 'Free trial', 'woocommerce-subscriptions-lite' ),
-				'value' => esc_html( Formatting::trial_duration( (int) $trial['length'], (string) $trial['unit'] ) ),
+				'value' => esc_html( Formatting::trial_duration( $trial['length'], $trial['unit'] ) ),
 			];
 		}
 

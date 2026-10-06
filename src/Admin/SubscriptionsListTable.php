@@ -23,7 +23,7 @@ use Throwable;
 use WP_List_Table;
 use WP_User;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Subscriptions;
-use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Contract;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
 
 defined( 'ABSPATH' ) || exit;
@@ -295,7 +295,7 @@ final class SubscriptionsListTable extends WP_List_Table {
 	/**
 	 * ID cell: linked subscription number.
 	 *
-	 * @param Contract $item Current row.
+	 * @param ContractView $item Current row.
 	 */
 	public function column_id( $item ): string {
 		$id = (int) $item->get_id();
@@ -316,7 +316,7 @@ final class SubscriptionsListTable extends WP_List_Table {
 	/**
 	 * Status cell: badge.
 	 *
-	 * @param Contract $item Current row.
+	 * @param ContractView $item Current row.
 	 */
 	public function column_status( $item ): string {
 		return StatusLabels::contract_badge_html( $item->get_status() );
@@ -326,11 +326,11 @@ final class SubscriptionsListTable extends WP_List_Table {
 	 * Customer cell: display name linked to the user edit screen, or a neutral
 	 * placeholder when the customer cannot be resolved.
 	 *
-	 * @param Contract $item Current row.
+	 * @param ContractView $item Current row.
 	 */
 	public function column_customer( $item ): string {
 		$customer_id = $item->get_customer_id();
-		$user        = $customer_id > 0 ? get_userdata( $customer_id ) : false;
+		$user        = null !== $customer_id && $customer_id > 0 ? get_userdata( $customer_id ) : false;
 
 		if ( ! $user instanceof WP_User ) {
 			return esc_html__( '(no customer)', 'woocommerce-subscriptions-lite' );
@@ -354,7 +354,7 @@ final class SubscriptionsListTable extends WP_List_Table {
 	 * Items cell: the line-item count, from the page's batched `item_counts` read
 	 * (0 when the count is unavailable).
 	 *
-	 * @param Contract $item Current row.
+	 * @param ContractView $item Current row.
 	 */
 	public function column_items( $item ): string {
 		$count = $this->item_counts[ (int) $item->get_id() ] ?? 0;
@@ -371,7 +371,7 @@ final class SubscriptionsListTable extends WP_List_Table {
 	/**
 	 * Next-payment cell: localized date, or a dash when none is scheduled.
 	 *
-	 * @param Contract $item Current row.
+	 * @param ContractView $item Current row.
 	 */
 	public function column_next_payment( $item ): string {
 		return esc_html( Formatting::date( $item->get_next_payment_gmt() ) );
@@ -380,10 +380,10 @@ final class SubscriptionsListTable extends WP_List_Table {
 	/**
 	 * Total cell: the recurring billing total in the contract currency.
 	 *
-	 * @param Contract $item Current row.
+	 * @param ContractView $item Current row.
 	 */
 	public function column_total( $item ): string {
-		return Formatting::price( $item->get_billing_total(), $item->get_currency() );
+		return Formatting::price( $item->get_billing_total(), (string) ( $item->get_currency() ?? '' ) );
 	}
 
 	/**
@@ -395,9 +395,9 @@ final class SubscriptionsListTable extends WP_List_Table {
 	 * so no nonce rides in the URL; they render inside the table cell, never inside
 	 * the search GET form, which sits above and closes before the table.
 	 *
-	 * @param Contract $item        Current row.
-	 * @param string   $column_name Column being rendered.
-	 * @param string   $primary     The primary column slug.
+	 * @param ContractView $item        Current row.
+	 * @param string       $column_name Column being rendered.
+	 * @param string       $primary     The primary column slug.
 	 */
 	protected function handle_row_actions( $item, $column_name, $primary ): string {
 		if ( $column_name !== $primary ) {
@@ -411,7 +411,7 @@ final class SubscriptionsListTable extends WP_List_Table {
 	 * The status-gated row actions for a subscription, keyed by action slug so
 	 * `WP_List_Table::row_actions()` renders them "Renew now | Cancel".
 	 *
-	 * @param Contract $item Current row.
+	 * @param ContractView $item Current row.
 	 * @return array<string, string> Action slug => markup.
 	 */
 	private function row_action_links( $item ): array {
@@ -444,8 +444,8 @@ final class SubscriptionsListTable extends WP_List_Table {
 	 * Fallback for any column without a dedicated renderer. Returns empty rather
 	 * than the parent's debug dump so a stray column shows blank.
 	 *
-	 * @param Contract $item        Current row.
-	 * @param string   $column_name Column slug.
+	 * @param ContractView $item        Current row.
+	 * @param string       $column_name Column slug.
 	 */
 	public function column_default( $item, $column_name ): string {
 		return '';

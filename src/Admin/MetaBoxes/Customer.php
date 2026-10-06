@@ -14,7 +14,7 @@ declare( strict_types=1 );
 namespace Automattic\WooCommerce\SubscriptionsLite\Admin\MetaBoxes;
 
 use WP_User;
-use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Contract;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -26,11 +26,11 @@ final class Customer {
 	/**
 	 * Render the box body.
 	 *
-	 * @param Contract $contract The contract being viewed.
+	 * @param ContractView $contract The contract being viewed.
 	 */
-	public static function output( Contract $contract ): void {
+	public static function output( ContractView $contract ): void {
 		$customer_id = $contract->get_customer_id();
-		$user        = $customer_id > 0 ? get_userdata( $customer_id ) : false;
+		$user        = null !== $customer_id && $customer_id > 0 ? get_userdata( $customer_id ) : false;
 
 		if ( ! $user instanceof WP_User ) {
 			echo '<p>' . esc_html__( '(no customer)', 'woocommerce-subscriptions-lite' ) . '</p>';
