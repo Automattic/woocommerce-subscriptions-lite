@@ -130,18 +130,37 @@ final class ContractCreationHandler {
 		try {
 			$contract_id = $this->create_contract( $order, $outcome['plan'] );
 		} catch ( Throwable $e ) {
-			wc_get_logger()->error(
-				sprintf( 'ContractCreationHandler: failed to create a contract for order %d: %s', $order_id, $e->getMessage() ),
-				[ 'source' => self::LOG_SOURCE ]
-			);
-			$this->note_stuck_draft( $order );
+			$this->log_error( sprintf( 'failed to create a contract for order %d: %s', $order_id, $e->getMessage() ) );
+			try {
+				$this->note_stuck_draft( $order );
+			} catch ( Throwable $note_error ) {
+				$this->log_error( sprintf( 'failed to note the draft contract on order %d: %s', $order_id, $note_error->getMessage() ) );
+			}
 			return;
 		}
 
-		$contract = Subscriptions::get( $contract_id );
-		if ( null !== $contract ) {
+		try {
+			$contract = Subscriptions::get( $contract_id );
+			if ( null === $contract ) {
+				wc_get_logger()->warning(
+					sprintf( 'ContractCreationHandler: contract %d for order %d could not be read back; its first renewal was not scheduled.', $contract_id, $order_id ),
+					[ 'source' => self::LOG_SOURCE ]
+				);
+				return;
+			}
 			( new RenewalWiring() )->schedule_first_renewal( $contract );
+		} catch ( Throwable $e ) {
+			$this->log_error( sprintf( 'failed to schedule the first renewal of contract %d: %s', $contract_id, $e->getMessage() ) );
 		}
+	}
+
+	/**
+	 * Log an error line under the Lite source.
+	 *
+	 * @param string $message Message, without the class prefix.
+	 */
+	private function log_error( string $message ): void {
+		wc_get_logger()->error( 'ContractCreationHandler: ' . $message, [ 'source' => self::LOG_SOURCE ] );
 	}
 
 	/**
