@@ -2,7 +2,8 @@
 /**
  * Integration tests for ContractCreationHandler: recurring money facts of taxed,
  * discounted and multi-line orders, an activation write that fails, a contract
- * insert that fails, and a plan billing payload that does not parse.
+ * insert that fails (retryable), a contract field the engine refuses (deferred),
+ * and a plan billing payload that does not parse.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Tests
  */
@@ -167,6 +168,8 @@ final class ContractCreationOutcomesTest extends LiteIntegrationTestCase {
 			array_filter( $notes, static fn ( string $note ): bool => false !== strpos( $note, '#' . $draft->get_id() ) ),
 			'An order note names the draft.'
 		);
+		$this->assertSame( '', $this->deferral_reason( $order ), 'The draft, not a deferral flag, holds the retries.' );
+		$this->assertSame( [], $this->notes_containing( $order, 'creation_failed' ) );
 	}
 
 	public function test_an_unparseable_plan_billing_payload_defers_the_order(): void {
@@ -197,7 +200,7 @@ final class ContractCreationOutcomesTest extends LiteIntegrationTestCase {
 		$this->assertNotEmpty( $this->notes_containing( $order, 'plan_unavailable' ), 'An order note records the deferral.' );
 	}
 
-	public function test_a_failed_contract_insert_defers_the_order_and_is_not_retried(): void {
+	public function test_a_failed_contract_insert_stays_retryable(): void {
 		global $wpdb;
 
 		$order = $this->create_subscription_order( $this->create_customer() );
@@ -222,14 +225,38 @@ final class ContractCreationOutcomesTest extends LiteIntegrationTestCase {
 		}
 
 		$this->assertSame( [], Contracts::find_by_origin_order( $order->get_id() ), 'The insert failed, so no contract exists.' );
-		$this->assertSame( ContractCreationHandler::REASON_CREATION_FAILED, $this->deferral_reason( $order ) );
-		$this->assertCount( 1, $this->notes_containing( $order, 'creation_failed' ) );
+		$this->assertSame( '', $this->deferral_reason( $order ), 'A database failure may be transient, so nothing blocks a retry.' );
+		$this->assertSame( [], $this->notes_containing( $order, 'creation_failed' ) );
 
-		// A later paid transition does not retry: the deferral flag holds it.
+		// A later paid transition retries and, with the database back, creates the contract.
 		( new ContractCreationHandler() )->create_contracts_for_order( $order->get_id() );
 
+		$this->assertCount( 1, Contracts::find_by_origin_order( $order->get_id() ) );
+		$this->assertSame( '', $this->deferral_reason( $order ) );
+	}
+
+	public function test_a_refused_contract_field_defers_the_order_and_is_not_retried(): void {
+		$order = $this->create_subscription_order( $this->create_customer() );
+		$order->set_status( 'processing' );
+		$order->save();
+
+		$this->stamp_plan( $order, $this->make_plan() );
+		$this->make_lines_applicable( $order );
+
+		// The engine refuses a lowercase currency code: the same order fails the same way on every retry.
+		$lowercase = static fn (): string => 'usd';
+		add_filter( 'woocommerce_order_get_currency', $lowercase );
+
+		try {
+			( new ContractCreationHandler() )->create_contracts_for_order( $order->get_id() );
+			( new ContractCreationHandler() )->create_contracts_for_order( $order->get_id() );
+		} finally {
+			remove_filter( 'woocommerce_order_get_currency', $lowercase );
+		}
+
 		$this->assertSame( [], Contracts::find_by_origin_order( $order->get_id() ) );
-		$this->assertCount( 1, $this->notes_containing( $order, 'creation_failed' ) );
+		$this->assertSame( ContractCreationHandler::REASON_CREATION_FAILED, $this->deferral_reason( $order ) );
+		$this->assertCount( 1, $this->notes_containing( $order, 'creation_failed' ), 'The deferral flag stops the retry.' );
 	}
 
 	/**

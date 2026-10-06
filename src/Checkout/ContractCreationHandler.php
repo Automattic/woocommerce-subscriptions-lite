@@ -24,6 +24,7 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Checkout;
 
 use DateTimeImmutable;
 use DateTimeZone;
+use LogicException;
 use Throwable;
 use WC_Order;
 use WC_Order_Item_Product;
@@ -80,7 +81,8 @@ final class ContractCreationHandler {
 	public const REASON_PLAN_UNAVAILABLE = 'plan_unavailable';
 
 	/**
-	 * Deferral reason: contract creation failed before any contract was written.
+	 * Deferral reason: contract creation was refused before any contract was written,
+	 * for a reason that would repeat on every retry (an invalid field or billing).
 	 */
 	public const REASON_CREATION_FAILED = 'creation_failed';
 
@@ -141,9 +143,12 @@ final class ContractCreationHandler {
 		} catch ( Throwable $e ) {
 			$this->log_error( sprintf( 'failed to create a contract for order %d: %s', $order_id, $e->getMessage() ) );
 			try {
-				// A draft blocks retries through the idempotency check; without one, the
-				// deferral flag does, so a later paid transition does not fail the same way.
-				if ( ! $this->note_stuck_draft( $order ) ) {
+				// A draft blocks retries through the idempotency check. Without one, a refused
+				// input (a LogicException: the engine rejected a field, or the billing does not
+				// parse) fails the same way every time, so the deferral flag stops the retries;
+				// any other failure (a database error) may be transient and stays retryable on
+				// a later paid transition.
+				if ( ! $this->note_stuck_draft( $order ) && $e instanceof LogicException ) {
 					$this->record_deferral( $order, self::REASON_CREATION_FAILED );
 				}
 			} catch ( Throwable $note_error ) {
