@@ -66,17 +66,20 @@ final class EndpointsRenderTest extends LiteIntegrationTestCase {
 	}
 
 	/**
-	 * Clear a contract's next payment date - the on-hold "admin action" shape
-	 * (no missed charge pending), as opposed to the failed-payment retry shape.
+	 * Set (or clear) a contract's next payment date directly, so each on-hold shape is
+	 * seeded explicitly rather than depending on what the engine's hold does with the
+	 * date: no next payment is the "admin action" shape (no missed charge pending); a
+	 * next payment is the failed-payment retry shape.
 	 *
-	 * @param int $contract_id Contract id.
+	 * @param int         $contract_id      Contract id.
+	 * @param string|null $next_payment_gmt GMT next payment date, or null to clear.
 	 */
-	private function clear_next_payment( int $contract_id ): void {
+	private function set_next_payment( int $contract_id, ?string $next_payment_gmt ): void {
 		global $wpdb;
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
 		$wpdb->update(
 			SchemaInstaller::get_table_name( SchemaInstaller::TABLE_CONTRACTS ),
-			[ 'next_payment_gmt' => null ],
+			[ 'next_payment_gmt' => $next_payment_gmt ],
 			[ 'id' => $contract_id ]
 		);
 	}
@@ -232,8 +235,9 @@ final class EndpointsRenderTest extends LiteIntegrationTestCase {
 	}
 
 	public function test_on_hold_admin_path_shows_reactivate(): void {
+		// The admin-action shape: on hold with no next payment date, seeded explicitly.
 		$contract_id = $this->create_contract( $this->customer_id, [ 'status' => 'on-hold' ] );
-		$this->clear_next_payment( $contract_id );
+		$this->set_next_payment( $contract_id, null );
 
 		$endpoints = new Endpoints();
 		$html      = $this->capture(
@@ -248,9 +252,10 @@ final class EndpointsRenderTest extends LiteIntegrationTestCase {
 	}
 
 	public function test_on_hold_retry_path_shows_needs_payment_notice(): void {
-		// A held contract keeps its next payment date - the failed-payment
-		// retry shape, where reactivating without a payment fix is unsafe.
+		// On hold with a next payment date: the failed-payment retry shape, where
+		// reactivating without a payment fix is unsafe. Seeded explicitly.
 		$contract_id = $this->create_contract( $this->customer_id, [ 'status' => 'on-hold' ] );
+		$this->set_next_payment( $contract_id, '2099-02-01 00:00:00' );
 
 		$endpoints = new Endpoints();
 		$html      = $this->capture(

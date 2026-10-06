@@ -183,7 +183,7 @@ final class SubscriptionsListTable extends WP_List_Table {
 			'all' => $this->view_link( '', __( 'All', 'woocommerce-subscriptions-lite' ), (int) array_sum( $counts ), '' === $current ),
 		];
 
-		foreach ( ContractStatus::all() as $status ) {
+		foreach ( ContractStatus::get_all() as $status ) {
 			$views[ $status ] = $this->view_link(
 				$status,
 				StatusLabels::contract_label( $status ),
@@ -218,7 +218,7 @@ final class SubscriptionsListTable extends WP_List_Table {
 		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only list filter.
 		$status = isset( $_GET['status'] ) ? sanitize_key( wp_unslash( (string) $_GET['status'] ) ) : '';
 
-		return ContractStatus::is_valid( $status ) ? $status : '';
+		return ContractStatus::is_registered( $status ) ? $status : '';
 	}
 
 	/**
