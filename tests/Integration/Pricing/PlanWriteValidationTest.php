@@ -404,6 +404,56 @@ final class PlanWriteValidationTest extends LiteIntegrationTestCase {
 		$this->assertSame( 'archived', $stored->get_status() );
 	}
 
+	public function test_an_archived_plan_billing_change_is_validated(): void {
+		$id = $this->make_plan( 'month', 1, null, [ 'status' => 'archived' ] )->get_id();
+
+		try {
+			Plans::update(
+				$id,
+				[
+					'billing_policy' => [
+						'period'   => 'month',
+						'interval' => 0,
+					],
+				]
+			);
+			$this->fail( 'An unbillable billing payload must be refused on an archived plan too.' );
+		} catch ( PlanValidationException $e ) {
+			$this->assertNotSame( '', $e->get_errors()->get_error_message() );
+		}
+
+		$this->assertTrue(
+			Plans::update(
+				$id,
+				[
+					'name'           => 'Renamed',
+					'billing_policy' => [
+						'period'   => 'week',
+						'interval' => 2,
+					],
+				]
+			),
+			'A billable change to an archived plan is accepted.'
+		);
+
+		$stored = ( new SellingPlans( [ Package::EXTENSION_SLUG ] ) )->get_plan( $id );
+		$this->assertNotNull( $stored );
+		$this->assertSame( 'week', $stored->get_billing_policy()['period'] ?? null );
+	}
+
+	public function test_creating_an_archived_plan_validates_its_billing(): void {
+		$this->expectException( PlanValidationException::class );
+
+		Plans::create(
+			[
+				'owner'          => Package::EXTENSION_SLUG,
+				'name'           => 'Archived on arrival',
+				'status'         => 'archived',
+				'billing_policy' => null,
+			]
+		);
+	}
+
 	public function test_the_php_facade_runs_the_lite_validation(): void {
 		try {
 			Plans::create(
