@@ -30,6 +30,8 @@ use WC_Order_Item_Product;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\SellingPlans;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Subscriptions;
+use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
+use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\CycleStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Plan;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ProductPlanResolver;
@@ -171,7 +173,7 @@ final class ContractCreationHandler {
 	 */
 	private function note_stuck_draft( WC_Order $order ): void {
 		foreach ( Subscriptions::find_by_origin_order( $order->get_id() ) as $contract ) {
-			if ( 'draft' !== $contract->get_status() ) {
+			if ( ContractStatus::DRAFT !== $contract->get_status() ) {
 				continue;
 			}
 			$order->add_order_note(
@@ -216,7 +218,7 @@ final class ContractCreationHandler {
 		$contract_id = Contracts::create(
 			[
 				'owner'                => Package::EXTENSION_SLUG,
-				'status'               => 'draft',
+				'status'               => ContractStatus::DRAFT,
 				'customer_id'          => $order->get_customer_id() > 0 ? $order->get_customer_id() : null,
 				'currency'             => $order->get_currency(),
 				'selling_plan_id'      => $plan_id,
@@ -248,7 +250,7 @@ final class ContractCreationHandler {
 		Contracts::add_cycle(
 			$contract_id,
 			[
-				'status'         => 'billed',
+				'status'         => CycleStatus::BILLED,
 				'order_id'       => $order->get_id(),
 				'starts_at_gmt'  => $start,
 				'ends_at_gmt'    => $next,
@@ -259,7 +261,7 @@ final class ContractCreationHandler {
 		Contracts::update(
 			$contract_id,
 			[
-				'status'           => 'active',
+				'status'           => ContractStatus::ACTIVE,
 				'next_payment_gmt' => $next,
 			]
 		);
