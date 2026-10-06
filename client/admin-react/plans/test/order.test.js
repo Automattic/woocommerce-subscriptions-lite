@@ -128,4 +128,21 @@ describe( 'createReorderQueue', () => {
 		await expect( b ).rejects.toThrow( 'Nope' );
 		expect( apply.mock.calls ).toEqual( [ [ [ 10, 20 ] ] ] );
 	} );
+
+	it( 'applies nothing when every save fails', async () => {
+		const save = jest
+			.fn()
+			.mockRejectedValueOnce( new Error( 'First' ) )
+			.mockRejectedValueOnce( new Error( 'Second' ) );
+		const apply = jest.fn();
+		const reorder = createReorderQueue( save, apply );
+
+		const a = reorder( [ 1, 2 ] );
+		const b = reorder( [ 2, 1 ] );
+
+		await expect( a ).rejects.toThrow( 'First' );
+		await expect( b ).rejects.toThrow( 'Second' );
+		expect( save ).toHaveBeenCalledTimes( 2 );
+		expect( apply ).not.toHaveBeenCalled();
+	} );
 } );
