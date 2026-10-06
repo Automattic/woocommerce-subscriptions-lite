@@ -5,8 +5,8 @@
  * On `woocommerce_order_details_after_order_table` (the same hook WooCommerce
  * Subscriptions uses) it renders a "Related subscriptions" table directly below
  * the order details table on the order-received (thank-you) and My Account
- * view-order pages, resolving the order's contract through the engine's public
- * facade. The table reuses WooCommerce's My Account orders-table markup and
+ * view-order pages, resolving the contract created from the order (by origin order)
+ * through the engine's public facade. The table reuses WooCommerce's My Account orders-table markup and
  * classes, so it inherits the active theme's order-table styling. When a
  * subscription was intended but not created (see {@see ContractCreationHandler}),
  * it prints a warning notice instead.
@@ -25,9 +25,9 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Checkout;
 
 use Automattic\WooCommerce\SubscriptionsEngine\Api\SellingPlans;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Subscriptions;
-use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Contract;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
+use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Plan;
-use Automattic\WooCommerce\SubscriptionsEngine\Integration\Checkout\OrderLinkage;
 use Automattic\WooCommerce\SubscriptionsLite\CustomerPortal\Endpoints;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Utilities\Formatter;
@@ -61,13 +61,10 @@ final class OrderReceived {
 			return;
 		}
 
-		$contract_id = (int) $order->get_meta( OrderLinkage::META_CONTRACT_ID );
-		if ( $contract_id > 0 ) {
-			$contract = Subscriptions::get_for_customer( $contract_id, $order->get_customer_id() );
-			if ( $contract instanceof Contract ) {
-				$this->render_table( $contract );
-				return;
-			}
+		$contract = $this->find_contract( $order );
+		if ( null !== $contract ) {
+			$this->render_table( $contract );
+			return;
 		}
 
 		if ( '' !== (string) $order->get_meta( ContractCreationHandler::CREATION_DEFERRED_META ) ) {
@@ -79,20 +76,40 @@ final class OrderReceived {
 	}
 
 	/**
+	 * The non-draft contract created from `$order` and owned by the order's customer, or null.
+	 *
+	 * @param WC_Order $order The order.
+	 */
+	private function find_contract( WC_Order $order ): ?ContractView {
+		$customer_id = $order->get_customer_id();
+		if ( $customer_id <= 0 ) {
+			return null;
+		}
+
+		foreach ( Subscriptions::find_by_origin_order( $order->get_id() ) as $contract ) {
+			if ( $customer_id === $contract->get_customer_id() && ContractStatus::DRAFT !== $contract->get_status() ) {
+				return $contract;
+			}
+		}
+
+		return null;
+	}
+
+	/**
 	 * Print the "Related subscriptions" table for a created contract.
 	 *
 	 * Mirrors WooCommerce's My Account orders-table markup so the theme styles it
 	 * identically to the order details table above it.
 	 *
-	 * @param Contract $contract The created contract.
+	 * @param ContractView $contract The created contract.
 	 */
-	private function render_table( Contract $contract ): void {
-		$contract_id  = (int) $contract->get_id();
-		$status       = (string) $contract->get_status();
+	private function render_table( ContractView $contract ): void {
+		$contract_id  = $contract->get_id();
+		$status       = $contract->get_status();
 		$url          = ( new Endpoints() )->detail_url( $contract_id );
 		$plan         = $this->find_plan( $contract->get_selling_plan_id() );
 		$cadence      = $this->plan_cadence( $plan );
-		$amount       = wc_price( (float) $contract->get_billing_total(), [ 'currency' => $contract->get_currency() ] );
+		$amount       = wc_price( (float) $contract->get_billing_total(), [ 'currency' => (string) ( $contract->get_currency() ?? '' ) ] );
 		$next_gmt     = $contract->get_next_payment_gmt();
 		$next_ts      = null !== $next_gmt ? strtotime( $next_gmt . ' UTC' ) : false;
 		$next_out     = false !== $next_ts ? wp_date( wc_date_format(), $next_ts ) : '';
@@ -147,11 +164,15 @@ final class OrderReceived {
 	}
 
 	/**
-	 * The plan behind a contract, read from the Lite catalog, or null if gone.
+	 * The plan behind a contract, read from the Lite catalog, or null if gone or unset.
 	 *
-	 * @param int $plan_id The selling plan id.
+	 * @param int|null $plan_id The selling plan id.
 	 */
-	private function find_plan( int $plan_id ): ?Plan {
+	private function find_plan( ?int $plan_id ): ?Plan {
+		if ( null === $plan_id ) {
+			return null;
+		}
+
 		$plans = ( new SellingPlans( [ Package::EXTENSION_SLUG ] ) )->get_plans( [ $plan_id ] );
 		$plan  = reset( $plans );
 
