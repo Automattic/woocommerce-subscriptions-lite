@@ -146,10 +146,14 @@ final class ContractCreationHandler {
 				// A draft blocks retries through the idempotency check. Without one, a refused
 				// input (a LogicException: the engine rejected a field, or the billing does not
 				// parse) fails the same way every time, so the deferral flag stops the retries;
-				// any other failure (a database error) may be transient and stays retryable on
-				// a later paid transition.
-				if ( ! $this->note_stuck_draft( $order ) && $e instanceof LogicException ) {
-					$this->record_deferral( $order, self::REASON_CREATION_FAILED );
+				// any other failure (a database error) may be transient: it gets a note but no
+				// flag, so a later paid transition still retries.
+				if ( ! $this->note_stuck_draft( $order ) ) {
+					if ( $e instanceof LogicException ) {
+						$this->record_deferral( $order, self::REASON_CREATION_FAILED );
+					} else {
+						$order->add_order_note( __( 'The subscription for this order could not be created. It will be retried on the next paid status change. If it keeps failing, this order needs manual review.', 'woocommerce-subscriptions-lite' ) );
+					}
 				}
 			} catch ( Throwable $note_error ) {
 				$this->log_error( sprintf( 'failed to record the failed creation on order %d: %s', $order_id, $note_error->getMessage() ) );
@@ -367,7 +371,10 @@ final class ContractCreationHandler {
 	 * plan stamp is trusted as the plan the shopper was charged for: applicability is
 	 * not re-checked, so a plan archived or detached from the product after
 	 * add-to-cart, or before an offline payment is confirmed, still becomes a
-	 * contract. Returns the single plan when it covers every plan line and
+	 * contract. Lite writes the stamp only at add-to-cart, from a plan that passed
+	 * the applicability check, but a stamp from any writer is trusted the same way
+	 * (privileged edits such as REST line meta or import tools); the plan must
+	 * still be a billable Lite plan. Returns the single plan when it covers every plan line and
 	 * there is no other product line; a `reason` when a subscription was intended but
 	 * the order cannot be one contract (including a line whose plan no longer
 	 * resolves); or neither when there is no subscription line at all.
