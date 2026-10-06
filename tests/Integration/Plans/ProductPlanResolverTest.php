@@ -15,6 +15,8 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Plans;
 
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\PlanView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\PlanStatus;
+use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\PlanRepository;
+use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ApplicabilityStore;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\PlanOrder;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ProductApplicability;
@@ -196,5 +198,43 @@ final class ProductPlanResolverTest extends LiteIntegrationTestCase {
 		$this->assertTrue( $resolver->is_plan_applicable_to_product( $applicable, $product_id ) );
 		$this->assertFalse( $resolver->is_plan_applicable_to_product( $other, $product_id ), 'A plan not attached to the product does not apply.' );
 		$this->assertFalse( $resolver->is_plan_applicable_to_product( $applicable, 999999 ), 'No plan applies to an unknown product.' );
+	}
+
+	public function test_get_line_plan_resolves_a_billable_lite_plan_in_any_status(): void {
+		$resolver = new ProductPlanResolver();
+		$active   = $this->make_plan();
+		$archived = $this->make_plan( 'week', 1, null, [ 'status' => PlanStatus::ARCHIVED ] );
+
+		$resolved = $resolver->get_line_plan( $active->get_id() );
+		$this->assertInstanceOf( PlanView::class, $resolved );
+		$this->assertSame( $active->get_id(), $resolved->get_id() );
+
+		$resolved = $resolver->get_line_plan( $archived->get_id() );
+		$this->assertInstanceOf( PlanView::class, $resolved, 'An archived plan still resolves for the lines that carry it.' );
+		$this->assertSame( $archived->get_id(), $resolved->get_id() );
+	}
+
+	public function test_get_line_plan_is_null_for_a_plan_a_line_cannot_carry(): void {
+		$resolver = new ProductPlanResolver();
+
+		$deleted_id = $this->make_plan()->get_id();
+		( new PlanRepository() )->delete( $deleted_id, Package::EXTENSION_SLUG );
+		$foreign_id    = $this->make_plan( 'year', 1, null, [ 'owner' => 'other-extension' ] )->get_id();
+		$unbillable_id = $this->make_unvalidated_plan(
+			'month',
+			1,
+			null,
+			[
+				'billing_policy' => [
+					'period'   => 'month',
+					'interval' => 0,
+				],
+			]
+		)->get_id();
+
+		$this->assertNull( $resolver->get_line_plan( $deleted_id ), 'A deleted plan does not resolve.' );
+		$this->assertNull( $resolver->get_line_plan( $foreign_id ), 'Another extension\'s plan does not resolve.' );
+		$this->assertNull( $resolver->get_line_plan( $unbillable_id ), 'A plan with no usable cadence does not resolve.' );
+		$this->assertNull( $resolver->get_line_plan( 0 ), 'A non-positive id does not resolve.' );
 	}
 }

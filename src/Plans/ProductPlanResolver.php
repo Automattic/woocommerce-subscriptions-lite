@@ -76,27 +76,6 @@ final class ProductPlanResolver {
 	}
 
 	/**
-	 * Whether the product's applicability selects `$plan`, whatever the plan's status:
-	 * the checkout re-check of a line's plan, after {@see self::get_line_plan()}.
-	 *
-	 * @param PlanView $plan       A Lite plan.
-	 * @param int      $product_id Product (or variation) id.
-	 */
-	public function applies_to_product( PlanView $plan, int $product_id ): bool {
-		$applicability = $this->applicability( $product_id );
-		if ( null === $applicability ) {
-			return false;
-		}
-
-		if ( ProductApplicability::MODE_INHERIT_ALL === $applicability->get_mode() ) {
-			return true;
-		}
-
-		return ProductApplicability::MODE_INHERIT_SELECT === $applicability->get_mode()
-			&& in_array( $plan->get_id(), $applicability->get_plan_ids(), true );
-	}
-
-	/**
 	 * The applicability of a product, read from its parent for a variation; null
 	 * for an unknown product.
 	 *

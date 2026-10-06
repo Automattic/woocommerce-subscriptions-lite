@@ -43,7 +43,7 @@ defined( 'ABSPATH' ) || exit;
 /**
  * Create one contract per paid subscription order.
  *
- * Collaborators (the engine facades, applicability resolver, and renewal wiring)
+ * Collaborators (the engine facades, plan resolver, and renewal wiring)
  * are called directly; the grouping, mapping, idempotency, and error paths are
  * covered by integration tests against real WooCommerce.
  */
@@ -75,7 +75,7 @@ final class ContractCreationHandler {
 
 	/**
 	 * Deferral reason: a line carries a plan that no longer resolves as a billable
-	 * Lite plan for its product (deleted, not billable, or no longer applicable).
+	 * Lite plan (deleted or not billable).
 	 */
 	public const REASON_PLAN_UNAVAILABLE = 'plan_unavailable';
 
@@ -357,10 +357,12 @@ final class ContractCreationHandler {
 	/**
 	 * Inspect the order's product lines and decide the outcome.
 	 *
-	 * A line's plan resolves with the rule cart pricing used
-	 * ({@see ProductPlanResolver::get_line_plan()}: any status, billable) and must still
-	 * be selected by the product's applicability, so a plan archived after add-to-cart,
-	 * or before an offline payment is confirmed, still becomes a contract. Returns the single plan when it covers every plan line and
+	 * A line's plan resolves with the rule cart pricing and the Store API use
+	 * ({@see ProductPlanResolver::get_line_plan()}: any status, billable). The line's
+	 * plan stamp is trusted as the plan the shopper was charged for: applicability is
+	 * not re-checked, so a plan archived or detached from the product after
+	 * add-to-cart, or before an offline payment is confirmed, still becomes a
+	 * contract. Returns the single plan when it covers every plan line and
 	 * there is no other product line; a `reason` when a subscription was intended but
 	 * the order cannot be one contract (including a line whose plan no longer
 	 * resolves); or neither when there is no subscription line at all.
@@ -386,7 +388,7 @@ final class ContractCreationHandler {
 			}
 
 			$plan = $resolver->get_line_plan( $plan_id );
-			if ( null === $plan || ! $resolver->applies_to_product( $plan, $item->get_product_id() ) ) {
+			if ( null === $plan ) {
 				$unavailable = true;
 				continue;
 			}
