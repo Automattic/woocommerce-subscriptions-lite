@@ -52,24 +52,24 @@ describe( 'createReorderQueue', () => {
 		return { promise, resolve, reject };
 	};
 
-	it( 'applies the saved order from the response', async () => {
+	it( 'applies the saved order from the response, not the requested one', async () => {
 		const apply = jest.fn();
 		const reorder = createReorderQueue(
-			() => Promise.resolve( { ids: [ 2, 1 ] } ),
+			() => Promise.resolve( { ids: [ 2, 1, 9 ] } ),
 			apply
 		);
 
 		await reorder( [ 2, 1 ] );
 
-		expect( apply ).toHaveBeenCalledWith( [ 2, 1 ] );
+		expect( apply.mock.calls ).toEqual( [ [ [ 2, 1, 9 ] ] ] );
 	} );
 
-	it( 'starts a save only after the previous one settles', async () => {
+	it( 'starts a save only after the previous one settles and applies only the newest response', async () => {
 		const first = deferred();
 		const save = jest
 			.fn()
 			.mockReturnValueOnce( first.promise )
-			.mockResolvedValueOnce( { ids: [ 3, 1, 2 ] } );
+			.mockResolvedValueOnce( { ids: [ 30, 10, 20 ] } );
 		const apply = jest.fn();
 		const reorder = createReorderQueue( save, apply );
 
@@ -79,14 +79,15 @@ describe( 'createReorderQueue', () => {
 
 		expect( save ).toHaveBeenCalledTimes( 1 );
 
-		first.resolve( { ids: [ 1, 3, 2 ] } );
-		await Promise.all( [ a, b ] );
+		first.resolve( { ids: [ 10, 30, 20 ] } );
+		await a;
+
+		expect( apply ).not.toHaveBeenCalled();
+
+		await b;
 
 		expect( save ).toHaveBeenNthCalledWith( 2, [ 3, 1, 2 ] );
-		expect( apply.mock.calls ).toEqual( [
-			[ [ 1, 3, 2 ] ],
-			[ [ 3, 1, 2 ] ],
-		] );
+		expect( apply.mock.calls ).toEqual( [ [ [ 30, 10, 20 ] ] ] );
 	} );
 
 	it( 'keeps saving after a failed save', async () => {
@@ -94,7 +95,7 @@ describe( 'createReorderQueue', () => {
 		const save = jest
 			.fn()
 			.mockReturnValueOnce( first.promise )
-			.mockResolvedValueOnce( { ids: [ 2 ] } );
+			.mockResolvedValueOnce( { ids: [ 20 ] } );
 		const apply = jest.fn();
 		const reorder = createReorderQueue( save, apply );
 
@@ -104,6 +105,27 @@ describe( 'createReorderQueue', () => {
 
 		await expect( a ).rejects.toThrow( 'Nope' );
 		await b;
-		expect( apply.mock.calls ).toEqual( [ [ [ 2 ] ] ] );
+		expect( apply.mock.calls ).toEqual( [ [ [ 20 ] ] ] );
+	} );
+
+	it( 'applies the last saved order when the newest save fails', async () => {
+		const second = deferred();
+		const save = jest
+			.fn()
+			.mockResolvedValueOnce( { ids: [ 10, 20 ] } )
+			.mockReturnValueOnce( second.promise );
+		const apply = jest.fn();
+		const reorder = createReorderQueue( save, apply );
+
+		const a = reorder( [ 1, 2 ] );
+		const b = reorder( [ 2, 1 ] );
+		await a;
+
+		expect( apply ).not.toHaveBeenCalled();
+
+		second.reject( new Error( 'Nope' ) );
+
+		await expect( b ).rejects.toThrow( 'Nope' );
+		expect( apply.mock.calls ).toEqual( [ [ [ 10, 20 ] ] ] );
 	} );
 } );
