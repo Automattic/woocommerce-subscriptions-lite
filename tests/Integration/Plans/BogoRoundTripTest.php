@@ -68,7 +68,7 @@ final class BogoRoundTripTest extends LiteIntegrationTestCase {
 
 		$created_policy = $this->first_policy( $created->get_data() );
 		$this->assertSame( 'bogo', $created_policy['type'] );
-		$this->assertSame( 0.0, $created_policy['value'], 'A value-less BOGO entry normalizes to 0.' );
+		$this->assertArrayNotHasKey( 'value', $created_policy, 'A value-less BOGO entry is stored as sent.' );
 		$this->assertSame( 1, $created_policy['duration_cycles'], 'The cycle scope is preserved.' );
 
 		// A fresh read round-trips the stored shape through the database.
@@ -78,7 +78,7 @@ final class BogoRoundTripTest extends LiteIntegrationTestCase {
 
 		$fetched_policy = $this->first_policy( $fetched->get_data() );
 		$this->assertSame( 'bogo', $fetched_policy['type'] );
-		$this->assertSame( 0.0, $fetched_policy['value'] );
+		$this->assertArrayNotHasKey( 'value', $fetched_policy );
 		$this->assertSame( 1, $fetched_policy['duration_cycles'] );
 	}
 

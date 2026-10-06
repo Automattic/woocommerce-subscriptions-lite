@@ -17,8 +17,10 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\ProductPlansPanel;
 use Automattic\WooCommerce\SubscriptionsLite\Bootstrap;
 use Automattic\WooCommerce\SubscriptionsLite\CustomerPortal\Endpoints;
+use Automattic\WooCommerce\SubscriptionsLite\Pricing\PlanWriteValidation;
 use Automattic\WooCommerce\SubscriptionsLite\ProductPage\PlanPicker;
 use Automattic\WooCommerce\SubscriptionsLite\ProductPage\VariationPlanData;
+use Automattic\WooCommerce\SubscriptionsLite\Renewal\BogoRenewalBonus;
 
 /**
  * @covers \Automattic\WooCommerce\SubscriptionsLite\Bootstrap
@@ -66,6 +68,17 @@ final class BootstrapTest extends LiteIntegrationTestCase {
 		$this->assertTrue(
 			$this->hook_has_callback_on( 'woocommerce_available_variation', VariationPlanData::class ),
 			'Variation payloads carry the per-plan option HTML.'
+		);
+	}
+
+	public function test_the_pricing_and_renewal_modules_are_wired(): void {
+		$this->assertTrue(
+			$this->hook_has_callback_on( 'woocommerce_subscriptions_engine_validate_plan', PlanWriteValidation::class ),
+			'Engine plan writes validate Lite pricing terms.'
+		);
+		$this->assertTrue(
+			$this->hook_has_callback_on( 'woocommerce_subscriptions_engine_renewal_order_created', BogoRenewalBonus::class ),
+			'Engine-built renewal orders get the BOGO bonus.'
 		);
 	}
 

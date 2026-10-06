@@ -89,8 +89,8 @@ export function builtInFields() {
 				} else if ( Number( durationCycles ) > 1 ) {
 					pricingScope = 'n_cycles';
 				}
-				// BOGO is value-less; the engine normalizes its value to 0, so
-				// keep the value field empty rather than surfacing a stray "0".
+				// BOGO entries are value-less; a stored value is ignored, so the
+				// value field stays empty rather than surfacing a stray "0".
 				const isBogo = firstPolicy?.type === 'bogo';
 				return {
 					pricingType: firstPolicy?.type || 'percentage',

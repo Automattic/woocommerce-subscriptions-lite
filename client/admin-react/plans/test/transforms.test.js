@@ -123,7 +123,7 @@ describe( 'registry transforms', () => {
 			name: 'Monthly BOGO',
 			billing_policy: { period: 'month', interval: 1 },
 			pricing_policy: {
-				// The engine stores BOGO value-less, normalized to 0.
+				// BOGO entries are value-less; a stored value is ignored.
 				policies: [ { type: 'bogo', value: 0, duration_cycles: 1 } ],
 				one_time_fees: [],
 			},

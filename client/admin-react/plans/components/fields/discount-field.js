@@ -1,7 +1,7 @@
 /**
  * DiscountField - pricing value + type + scope editor.
  *
- * Maps to the engine's pricing_policy.policies[0]. The value input carries a
+ * Maps to the plan's pricing_policy.policies[0]. The value input carries a
  * type-driven affix: "%" for percentage discounts, the store currency symbol
  * (on its configured side) for monetary ones. The unit is also reflected in
  * the input's accessible name ("Discount (%)" / "Discount (USD)"), since the

@@ -17,7 +17,6 @@ declare( strict_types=1 );
 namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Cart;
 
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Plan;
-use Automattic\WooCommerce\SubscriptionsEngine\Core\ValueObject\PricingPolicy;
 use Automattic\WooCommerce\SubscriptionsLite\Cart\CartPlanHooks;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ApplicabilityStore;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ProductApplicability;
@@ -82,15 +81,15 @@ final class CartPlanHooksTest extends LiteIntegrationTestCase {
 			1,
 			null,
 			[
-				'pricing_policy' => new PricingPolicy(
-					[
+				'pricing_policy' => [
+					'policies'      => [
 						[
 							'type'  => 'percentage',
 							'value' => $percent,
 						],
 					],
-					[]
-				),
+					'one_time_fees' => [],
+				],
 			]
 		);
 	}
@@ -323,15 +322,15 @@ final class CartPlanHooksTest extends LiteIntegrationTestCase {
 			1,
 			null,
 			[
-				'pricing_policy' => new PricingPolicy(
-					[
+				'pricing_policy' => [
+					'policies'      => [
 						[
 							'type'  => 'fixed_amount',
 							'value' => 5.0,
 						],
 					],
-					[]
-				),
+					'one_time_fees' => [],
+				],
 			]
 		)->get_id();
 		( new ApplicabilityStore() )->set( $product_id, new ProductApplicability( ProductApplicability::MODE_INHERIT_ALL ) );
@@ -350,15 +349,15 @@ final class CartPlanHooksTest extends LiteIntegrationTestCase {
 			1,
 			null,
 			[
-				'pricing_policy' => new PricingPolicy(
-					[
+				'pricing_policy' => [
+					'policies'      => [
 						[
 							'type'  => 'price',
 							'value' => 15.0,
 						],
 					],
-					[]
-				),
+					'one_time_fees' => [],
+				],
 			]
 		)->get_id();
 		( new ApplicabilityStore() )->set( $product_id, new ProductApplicability( ProductApplicability::MODE_INHERIT_ALL ) );

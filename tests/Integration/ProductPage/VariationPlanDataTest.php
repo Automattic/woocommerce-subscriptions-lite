@@ -16,7 +16,6 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\ProductPage
 
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Plan;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\ValueObject\BillingPolicy;
-use Automattic\WooCommerce\SubscriptionsEngine\Core\ValueObject\PricingPolicy;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\PlanRepository;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ApplicabilityStore;
@@ -54,15 +53,15 @@ final class VariationPlanDataTest extends LiteIntegrationTestCase {
 			[
 				'name'           => 'Monthly',
 				'billing_policy' => new BillingPolicy( 'month', 1, null, null, null ),
-				'pricing_policy' => $discount ? new PricingPolicy(
-					[
+				'pricing_policy' => $discount ? [
+					'policies'      => [
 						[
 							'type'  => 'percentage',
 							'value' => 10.0,
 						],
 					],
-					[]
-				) : null,
+					'one_time_fees' => [],
+				] : null,
 				'extension_slug' => Package::EXTENSION_SLUG,
 			]
 		);

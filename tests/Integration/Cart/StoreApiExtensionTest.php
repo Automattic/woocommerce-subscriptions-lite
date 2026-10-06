@@ -13,7 +13,6 @@ declare( strict_types=1 );
 namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Cart;
 
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Plan;
-use Automattic\WooCommerce\SubscriptionsEngine\Core\ValueObject\PricingPolicy;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\PlanRepository;
 use Automattic\WooCommerce\SubscriptionsLite\Cart\Blocks\StoreApiExtension;
 use Automattic\WooCommerce\SubscriptionsLite\Cart\CartPlanHooks;
@@ -55,15 +54,15 @@ final class StoreApiExtensionTest extends LiteIntegrationTestCase {
 			null,
 			[
 				'name'           => 'Coffee Club',
-				'pricing_policy' => new PricingPolicy(
-					[
+				'pricing_policy' => [
+					'policies'      => [
 						[
 							'type'  => 'percentage',
 							'value' => 10.0,
 						],
 					],
-					[]
-				),
+					'one_time_fees' => [],
+				],
 			]
 		);
 
