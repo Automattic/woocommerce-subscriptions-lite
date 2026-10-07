@@ -16,6 +16,7 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\CustomerPor
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Plans;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\PlanView;
+use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\PlanStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\PlanRepository;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\CustomerPortal\EngineDataProvider;
@@ -171,6 +172,40 @@ final class EngineDataProviderTest extends LiteIntegrationTestCase {
 
 		$this->assertSame( 'week', $detail['billing_period'] );
 		$this->assertSame( 3, $detail['billing_interval'] );
+	}
+
+	public function test_cadence_is_kept_when_the_plan_is_archived(): void {
+		$customer_id = $this->create_customer();
+		$contract_id = $this->create_contract(
+			$customer_id,
+			[
+				'period'   => 'week',
+				'interval' => 2,
+			]
+		);
+
+		$this->set_plan_status( (int) Contracts::get( $contract_id )->get_selling_plan_id(), PlanStatus::ARCHIVED );
+
+		$detail = $this->provider->get_contract( $contract_id, $customer_id );
+		$rows   = $this->provider->get_contracts_for_customer( $customer_id );
+
+		$this->assertSame( 'week', $detail['billing_period'] );
+		$this->assertSame( 2, $detail['billing_interval'] );
+		$this->assertSame( 'week', $rows[0]['billing_period'] );
+		$this->assertSame( 2, $rows[0]['billing_interval'] );
+	}
+
+	public function test_cadence_is_empty_for_a_plan_owned_by_another_extension(): void {
+		$customer_id = $this->create_customer();
+		$contract_id = $this->create_contract( $customer_id );
+		$foreign     = $this->make_plan( 'week', 2, null, [ 'extension_slug' => 'other-extension' ] );
+		$this->assertNotNull( Contracts::update( $contract_id, [ 'selling_plan_id' => $foreign->get_id() ] ) );
+
+		$detail = $this->provider->get_contract( $contract_id, $customer_id );
+		$rows   = $this->provider->get_contracts_for_customer( $customer_id );
+
+		$this->assertSame( '', $detail['billing_period'] );
+		$this->assertSame( '', $rows[0]['billing_period'] );
 	}
 
 	public function test_cadence_degrades_to_empty_when_the_plan_is_gone(): void {

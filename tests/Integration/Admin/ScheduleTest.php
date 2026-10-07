@@ -14,6 +14,7 @@ declare( strict_types=1 );
 namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Admin;
 
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
+use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\PlanStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\PlanRepository;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\MetaBoxes\Schedule;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
@@ -64,6 +65,25 @@ final class ScheduleTest extends LiteIntegrationTestCase {
 
 		$this->assertStringContainsString( 'Every 1 week', $html );
 		$this->assertStringNotContainsString( 'cycles', $html );
+	}
+
+	public function test_a_contract_on_an_archived_plan_keeps_its_billing_row(): void {
+		$customer = $this->create_customer();
+		$id       = $this->create_contract(
+			$customer,
+			[
+				'period'   => 'week',
+				'interval' => 2,
+			]
+		);
+		$contract = Contracts::get( $id );
+		$this->assertNotNull( $contract );
+
+		$this->set_plan_status( (int) $contract->get_selling_plan_id(), PlanStatus::ARCHIVED );
+		$html = $this->render( $id );
+
+		$this->assertStringContainsString( 'Billing', $html );
+		$this->assertStringContainsString( 'Every 2 weeks', $html );
 	}
 
 	public function test_a_contract_whose_plan_is_gone_shows_only_the_dates(): void {

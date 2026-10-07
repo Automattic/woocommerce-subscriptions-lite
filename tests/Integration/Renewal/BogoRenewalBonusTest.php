@@ -14,6 +14,7 @@ use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Plans;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\PlanView;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Subscriptions;
+use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\PlanStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Gateway\GatewayCapabilities;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\SchemaInstaller;
 use Automattic\WooCommerce\SubscriptionsLite\Checkout\ContractCreationHandler;
@@ -141,6 +142,16 @@ final class BogoRenewalBonusTest extends LiteIntegrationTestCase {
 		$this->set_live_pricing_policy( $contract_id, null );
 
 		$this->assertSame( 2, $this->only_line( $this->renew( $contract_id ) )->get_quantity() );
+	}
+
+	public function test_a_bogo_on_an_archived_plan_still_applies_on_renewal(): void {
+		$contract_id = $this->sign_up( [ 'policies' => [ [ 'type' => 'bogo' ] ] ] );
+		$contract    = Contracts::get( $contract_id );
+		$this->assertNotNull( $contract );
+
+		$this->set_plan_status( (int) $contract->get_selling_plan_id(), PlanStatus::ARCHIVED );
+
+		$this->assertSame( 4, $this->only_line( $this->renew( $contract_id ) )->get_quantity(), 'Archiving stops new sign-ups, not the bonus of existing subscribers.' );
 	}
 
 	public function test_a_contract_owned_by_another_extension_is_left_alone(): void {
