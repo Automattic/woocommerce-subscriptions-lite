@@ -208,8 +208,6 @@ final class ContractCreationHandler {
 		$next  = $plan->get_billing_policy()->compute_first_renewal_from( $start );
 
 		$totals = $this->get_recurring_totals( $order, $plan_lines );
-		$items  = $this->map_items( $plan_lines );
-		$token  = $this->get_payment_token_id( $order );
 
 		$contract_id = Contracts::create(
 			[
@@ -221,13 +219,13 @@ final class ContractCreationHandler {
 				'origin_order_id'      => $order->get_id(),
 				'payment_method'       => '' !== $order->get_payment_method() ? $order->get_payment_method() : null,
 				'payment_method_title' => '' !== $order->get_payment_method_title() ? $order->get_payment_method_title() : null,
-				'payment_token_id'     => $token,
+				'payment_token_id'     => $this->get_payment_token_id( $order ),
 				'start_gmt'            => $start,
 				'billing_total'        => $totals['billing_total'],
 				'discount_total'       => $totals['discount_total'],
 				'shipping_total'       => $totals['shipping_total'],
 				'tax_total'            => $totals['tax_total'],
-				'items'                => $items,
+				'items'                => $this->map_items( $plan_lines ),
 				'addresses'            => [
 					'billing'  => $this->map_address( $order, 'billing' ),
 					'shipping' => $this->map_address( $order, 'shipping' ),
