@@ -191,13 +191,14 @@ final class EngineDataProviderTest extends LiteIntegrationTestCase {
 	public function test_drafts_are_hidden_from_the_customer(): void {
 		$customer_id = $this->create_customer();
 		$active_id   = $this->create_contract( $customer_id );
-		$draft_id    = Contracts::create(
+		$draft       = Contracts::create(
 			[
 				'extension_slug' => Package::EXTENSION_SLUG,
 				'customer_id'    => $customer_id,
 				'status'         => 'draft',
 			]
-		)->get_id();
+		);
+		$draft_id    = $draft->get_id();
 
 		$rows = $this->provider->get_contracts_for_customer( $customer_id );
 

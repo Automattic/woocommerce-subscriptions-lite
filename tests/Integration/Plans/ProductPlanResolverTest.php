@@ -220,7 +220,7 @@ final class ProductPlanResolverTest extends LiteIntegrationTestCase {
 		$deleted_id = $this->make_plan()->get_id();
 		( new PlanRepository() )->delete( $deleted_id, Package::EXTENSION_SLUG );
 		$foreign_id    = $this->make_plan( 'year', 1, null, [ 'extension_slug' => 'other-extension' ] )->get_id();
-		$unbillable_id = $this->make_unvalidated_plan(
+		$unbillable    = $this->make_unvalidated_plan(
 			'month',
 			1,
 			null,
@@ -230,7 +230,8 @@ final class ProductPlanResolverTest extends LiteIntegrationTestCase {
 					'interval' => 0,
 				],
 			]
-		)->get_id();
+		);
+		$unbillable_id = $unbillable->get_id();
 
 		$this->assertNull( $resolver->get_line_plan( $deleted_id ), 'A deleted plan does not resolve.' );
 		$this->assertNull( $resolver->get_line_plan( $foreign_id ), 'Another extension\'s plan does not resolve.' );

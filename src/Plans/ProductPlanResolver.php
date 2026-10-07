@@ -58,7 +58,7 @@ final class ProductPlanResolver {
 	 */
 	public function get_plans_for_product( int $product_id ): array {
 		$plans = array_filter(
-			$this->read_plans( $product_id ),
+			$this->get_applicable_plans( $product_id ),
 			static function ( PlanView $plan ): bool {
 				return null !== BillingTerms::from_plan( $plan );
 			}
@@ -73,7 +73,7 @@ final class ProductPlanResolver {
 	 *
 	 * @param int $product_id Product (or variation) id.
 	 */
-	private function applicability( int $product_id ): ?ProductApplicability {
+	private function get_applicability( int $product_id ): ?ProductApplicability {
 		$product = wc_get_product( $product_id );
 		if ( ! $product instanceof WC_Product ) {
 			return null;
@@ -85,13 +85,13 @@ final class ProductPlanResolver {
 	}
 
 	/**
-	 * Active plans selected by the product's applicability, in catalog order.
+	 * Active plans selected by the product's applicability, oldest id first.
 	 *
 	 * @param int $product_id Product (or variation) id.
 	 * @return array<int, PlanView>
 	 */
-	private function read_plans( int $product_id ): array {
-		$applicability = $this->applicability( $product_id );
+	private function get_applicable_plans( int $product_id ): array {
+		$applicability = $this->get_applicability( $product_id );
 		if ( null === $applicability ) {
 			return [];
 		}

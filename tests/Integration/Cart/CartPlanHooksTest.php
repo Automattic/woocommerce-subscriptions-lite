@@ -318,7 +318,7 @@ final class CartPlanHooksTest extends LiteIntegrationTestCase {
 
 	public function test_line_price_reflects_a_fixed_amount_discount(): void {
 		$product_id = $this->make_product( '20.00' );
-		$plan_id    = (int) $this->make_plan(
+		$plan       = $this->make_plan(
 			'month',
 			1,
 			null,
@@ -333,7 +333,8 @@ final class CartPlanHooksTest extends LiteIntegrationTestCase {
 					'one_time_fees' => [],
 				],
 			]
-		)->get_id();
+		);
+		$plan_id    = $plan->get_id();
 		( new ApplicabilityStore() )->set( $product_id, new ProductApplicability( ProductApplicability::MODE_INHERIT_ALL ) );
 
 		$this->add_to_cart( $product_id, $plan_id );
@@ -345,7 +346,7 @@ final class CartPlanHooksTest extends LiteIntegrationTestCase {
 
 	public function test_line_price_reflects_a_price_replacement(): void {
 		$product_id = $this->make_product( '20.00' );
-		$plan_id    = (int) $this->make_plan(
+		$plan       = $this->make_plan(
 			'month',
 			1,
 			null,
@@ -360,7 +361,8 @@ final class CartPlanHooksTest extends LiteIntegrationTestCase {
 					'one_time_fees' => [],
 				],
 			]
-		)->get_id();
+		);
+		$plan_id    = $plan->get_id();
 		( new ApplicabilityStore() )->set( $product_id, new ProductApplicability( ProductApplicability::MODE_INHERIT_ALL ) );
 
 		$this->add_to_cart( $product_id, $plan_id );
