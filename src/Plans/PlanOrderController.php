@@ -13,7 +13,7 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Plans;
 
-use Automattic\WooCommerce\SubscriptionsEngine\Api\SellingPlans;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\Plans;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 use WP_Error;
 use WP_REST_Request;
@@ -83,7 +83,13 @@ final class PlanOrderController {
 		if ( count( $ids ) !== count( array_unique( $ids ) ) ) {
 			return self::invalid( __( 'Plan ids must not repeat.', 'woocommerce-subscriptions-lite' ) );
 		}
-		if ( [] !== $ids && count( ( new SellingPlans( [ Package::EXTENSION_SLUG ] ) )->get_plans( $ids ) ) !== count( $ids ) ) {
+		$owned_plans = [] === $ids ? [] : Plans::list(
+			[
+				'extension_slug' => Package::EXTENSION_SLUG,
+				'ids'            => $ids,
+			]
+		);
+		if ( count( $owned_plans ) !== count( $ids ) ) {
 			return self::invalid( __( 'Every id must be an existing subscription plan of this store.', 'woocommerce-subscriptions-lite' ) );
 		}
 

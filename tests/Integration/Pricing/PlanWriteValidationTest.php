@@ -13,7 +13,6 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Pricing;
 
 use Automattic\WooCommerce\SubscriptionsEngine\Api\PlanValidationException;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Plans;
-use Automattic\WooCommerce\SubscriptionsEngine\Api\SellingPlans;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\PlanView;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Pricing\PlanWriteValidation;
@@ -313,7 +312,7 @@ final class PlanWriteValidationTest extends LiteIntegrationTestCase {
 			$this->assertStringStartsWith( 'pricing_policy.policies[0]:', $e->get_errors()->get_error_message() );
 		}
 
-		$plan = ( new SellingPlans( [ Package::EXTENSION_SLUG ] ) )->get_plan( $id );
+		$plan = Plans::get( $id );
 		$this->assertNotNull( $plan );
 		$this->assertSame( 'active', $plan->get_status() );
 	}
@@ -390,7 +389,7 @@ final class PlanWriteValidationTest extends LiteIntegrationTestCase {
 		$plan = $this->make_unvalidated_plan( 'month', 1, null, [ 'billing_policy' => null ] );
 		$id   = $plan->get_id();
 
-		$this->assertTrue( Plans::update( $id, [ 'status' => 'archived' ] ), 'Archiving skips the billing check.' );
+		$this->assertInstanceOf( PlanView::class, Plans::update( $id, [ 'status' => 'archived' ] ), 'Archiving skips the billing check.' );
 
 		try {
 			Plans::update( $id, [ 'status' => 'active' ] );
@@ -399,7 +398,7 @@ final class PlanWriteValidationTest extends LiteIntegrationTestCase {
 			$this->assertStringStartsWith( 'billing_policy must have a period', $e->get_errors()->get_error_message() );
 		}
 
-		$stored = ( new SellingPlans( [ Package::EXTENSION_SLUG ] ) )->get_plan( $id );
+		$stored = Plans::get( $id );
 		$this->assertNotNull( $stored );
 		$this->assertSame( 'archived', $stored->get_status() );
 	}
@@ -422,22 +421,18 @@ final class PlanWriteValidationTest extends LiteIntegrationTestCase {
 			$this->assertNotSame( '', $e->get_errors()->get_error_message() );
 		}
 
-		$this->assertTrue(
-			Plans::update(
-				$id,
-				[
-					'name'           => 'Renamed',
-					'billing_policy' => [
-						'period'   => 'week',
-						'interval' => 2,
-					],
-				]
-			),
-			'A billable change to an archived plan is accepted.'
+		$stored = Plans::update(
+			$id,
+			[
+				'name'           => 'Renamed',
+				'billing_policy' => [
+					'period'   => 'week',
+					'interval' => 2,
+				],
+			]
 		);
 
-		$stored = ( new SellingPlans( [ Package::EXTENSION_SLUG ] ) )->get_plan( $id );
-		$this->assertNotNull( $stored );
+		$this->assertNotNull( $stored, 'A billable change to an archived plan is accepted.' );
 		$this->assertSame( 'week', $stored->get_billing_policy()['period'] ?? null );
 	}
 
@@ -471,18 +466,18 @@ final class PlanWriteValidationTest extends LiteIntegrationTestCase {
 			$this->assertSame( [ 'rest_invalid_param' ], $e->get_errors()->get_error_codes() );
 		}
 
-		$this->assertSame( [], ( new SellingPlans( [ Package::EXTENSION_SLUG ] ) )->list_plans() );
+		$this->assertSame( [], Plans::list( [ 'extension_slug' => Package::EXTENSION_SLUG ] ) );
 	}
 
 	public function test_a_foreign_extension_plan_without_billing_is_not_checked(): void {
-		$id = Plans::create(
+		$plan = Plans::create(
 			[
 				'extension_slug' => 'other-extension',
 				'name'           => 'No cadence',
 			]
 		);
 
-		$this->assertGreaterThan( 0, $id );
+		$this->assertGreaterThan( 0, $plan->get_id() );
 	}
 
 	/**

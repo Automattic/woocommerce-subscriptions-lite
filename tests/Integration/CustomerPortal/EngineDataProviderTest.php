@@ -15,6 +15,7 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\CustomerPor
 
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Plans;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\View\PlanView;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\PlanRepository;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\CustomerPortal\EngineDataProvider;
@@ -155,17 +156,16 @@ final class EngineDataProviderTest extends LiteIntegrationTestCase {
 	public function test_detail_cadence_follows_a_live_plan_edit(): void {
 		$customer_id = $this->create_customer();
 		$contract_id = $this->create_contract( $customer_id );
-		$this->assertTrue(
-			Plans::update(
-				(int) Contracts::get( $contract_id )->get_selling_plan_id(),
-				[
-					'billing_policy' => [
-						'period'   => 'week',
-						'interval' => 3,
-					],
-				]
-			)
+		$plan        = Plans::update(
+			(int) Contracts::get( $contract_id )->get_selling_plan_id(),
+			[
+				'billing_policy' => [
+					'period'   => 'week',
+					'interval' => 3,
+				],
+			]
 		);
+		$this->assertInstanceOf( PlanView::class, $plan );
 
 		$detail = $this->provider->get_contract( $contract_id, $customer_id );
 

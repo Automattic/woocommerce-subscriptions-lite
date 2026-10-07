@@ -23,7 +23,7 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Checkout;
 
-use Automattic\WooCommerce\SubscriptionsEngine\Api\SellingPlans;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\Plans;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\PlanView;
@@ -175,7 +175,9 @@ final class OrderReceived {
 			return null;
 		}
 
-		return ( new SellingPlans( [ Package::EXTENSION_SLUG ] ) )->get_plan( $plan_id );
+		$plan = Plans::get( $plan_id );
+
+		return null !== $plan && Package::EXTENSION_SLUG === $plan->get_extension_slug() ? $plan : null;
 	}
 
 	/**

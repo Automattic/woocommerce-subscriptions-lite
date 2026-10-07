@@ -2,7 +2,7 @@
 /**
  * ContractPlans - resolves contracts to the live selling plans they were created under.
  *
- * Reads through the engine's catalog facade scoped to Lite's slug, so only active
+ * Reads through the engine plan facade filtered to Lite's slug, so only active
  * Lite-owned plans resolve; a contract without a plan, or whose plan was archived or
  * deleted, resolves to none.
  *
@@ -13,7 +13,7 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Plans;
 
-use Automattic\WooCommerce\SubscriptionsEngine\Api\SellingPlans;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\Plans;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\PlanView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\PlanStatus;
@@ -54,9 +54,17 @@ final class ContractPlans {
 			return [];
 		}
 
+		$owned_plans = Plans::list(
+			[
+				'extension_slug' => Package::EXTENSION_SLUG,
+				'status'         => PlanStatus::ACTIVE,
+				'ids'            => array_values( $ids ),
+			]
+		);
+
 		$plans = [];
-		foreach ( ( new SellingPlans( [ Package::EXTENSION_SLUG ] ) )->get_plans( array_values( $ids ), [ 'status' => PlanStatus::ACTIVE ] ) as $plan ) {
-			$plans[ (int) $plan->get_id() ] = $plan;
+		foreach ( $owned_plans as $plan ) {
+			$plans[ $plan->get_id() ] = $plan;
 		}
 
 		return $plans;

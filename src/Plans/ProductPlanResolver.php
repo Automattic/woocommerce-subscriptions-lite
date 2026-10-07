@@ -10,7 +10,7 @@ declare( strict_types=1 );
 namespace Automattic\WooCommerce\SubscriptionsLite\Plans;
 
 use WC_Product;
-use Automattic\WooCommerce\SubscriptionsEngine\Api\SellingPlans;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\Plans;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\PlanView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\PlanStatus;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
@@ -38,20 +38,12 @@ final class ProductPlanResolver {
 	private $store;
 
 	/**
-	 * Engine catalog read facade, scoped to Lite's slug.
-	 *
-	 * @var SellingPlans
-	 */
-	private $catalog;
-
-	/**
 	 * Construct the resolver.
 	 *
 	 * @param ApplicabilityStore|null $store Applicability meta store.
 	 */
 	public function __construct( ?ApplicabilityStore $store = null ) {
-		$this->store   = $store ?? new ApplicabilityStore();
-		$this->catalog = new SellingPlans( [ Package::EXTENSION_SLUG ] );
+		$this->store = $store ?? new ApplicabilityStore();
 	}
 
 	/**
@@ -105,13 +97,24 @@ final class ProductPlanResolver {
 		}
 
 		if ( ProductApplicability::MODE_INHERIT_ALL === $applicability->get_mode() ) {
-			return $this->catalog->list_plans( [ 'status' => PlanStatus::ACTIVE ] );
+			return Plans::list(
+				[
+					'extension_slug' => Package::EXTENSION_SLUG,
+					'status'         => PlanStatus::ACTIVE,
+				]
+			);
 		}
 
 		if ( ProductApplicability::MODE_INHERIT_SELECT === $applicability->get_mode() ) {
 			$plan_ids = $applicability->get_plan_ids();
 
-			return [] === $plan_ids ? [] : $this->catalog->get_plans( $plan_ids, [ 'status' => PlanStatus::ACTIVE ] );
+			return [] === $plan_ids ? [] : Plans::list(
+				[
+					'extension_slug' => Package::EXTENSION_SLUG,
+					'status'         => PlanStatus::ACTIVE,
+					'ids'            => $plan_ids,
+				]
+			);
 		}
 
 		return [];
@@ -127,9 +130,12 @@ final class ProductPlanResolver {
 	 * @param int $plan_id Plan id stamped on the line.
 	 */
 	public function get_line_plan( int $plan_id ): ?PlanView {
-		$plan = $this->catalog->get_plan( $plan_id );
+		$plan = Plans::get( $plan_id );
+		if ( null === $plan || Package::EXTENSION_SLUG !== $plan->get_extension_slug() ) {
+			return null;
+		}
 
-		return null !== $plan && null !== BillingTerms::from_plan( $plan ) ? $plan : null;
+		return null !== BillingTerms::from_plan( $plan ) ? $plan : null;
 	}
 
 	/**

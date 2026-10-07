@@ -12,6 +12,7 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Renewal;
 
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Plans;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\View\PlanView;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Subscriptions;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Gateway\GatewayCapabilities;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\SchemaInstaller;
@@ -175,7 +176,7 @@ final class BogoRenewalBonusTest extends LiteIntegrationTestCase {
 	private function set_live_pricing_policy( int $contract_id, ?array $pricing_policy ): void {
 		$contract = Contracts::get( $contract_id );
 		$this->assertNotNull( $contract );
-		$this->assertTrue( Plans::update( (int) $contract->get_selling_plan_id(), [ 'pricing_policy' => $pricing_policy ] ) );
+		$this->assertInstanceOf( PlanView::class, Plans::update( (int) $contract->get_selling_plan_id(), [ 'pricing_policy' => $pricing_policy ] ) );
 	}
 
 	/**

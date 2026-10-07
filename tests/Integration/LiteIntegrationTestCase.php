@@ -23,7 +23,6 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration;
 
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Plans;
-use Automattic\WooCommerce\SubscriptionsEngine\Api\SellingPlans;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Subscriptions;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\PlanView;
@@ -97,23 +96,20 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 	 * @param array<string, mixed> $overrides  Facade create keys (name, status, extension_slug, billing_policy, pricing_policy, delivery_policy).
 	 */
 	protected function make_plan( string $period = 'month', int $interval = 1, ?int $max_cycles = null, array $overrides = [] ): PlanView {
-		$args = array_merge(
-			[
-				'extension_slug' => Package::EXTENSION_SLUG,
-				'name'           => ucfirst( $period ) . 'ly plan',
-				'billing_policy' => [
-					'period'     => $period,
-					'interval'   => $interval,
-					'max_cycles' => $max_cycles,
+		return Plans::create(
+			array_merge(
+				[
+					'extension_slug' => Package::EXTENSION_SLUG,
+					'name'           => ucfirst( $period ) . 'ly plan',
+					'billing_policy' => [
+						'period'     => $period,
+						'interval'   => $interval,
+						'max_cycles' => $max_cycles,
+					],
 				],
-			],
-			$overrides
+				$overrides
+			)
 		);
-
-		$plan = ( new SellingPlans( [ (string) $args['extension_slug'] ] ) )->get_plan( Plans::create( $args ) );
-		$this->assertNotNull( $plan );
-
-		return $plan;
 	}
 
 	/**
@@ -142,13 +138,12 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 	 * @param array<string, mixed> $args Facade update keys.
 	 */
 	protected function update_plan_unvalidated( int $id, array $args ): void {
-		$this->assertTrue(
-			$this->without_plan_validation(
-				static function () use ( $id, $args ): bool {
-					return Plans::update( $id, $args );
-				}
-			)
+		$plan = $this->without_plan_validation(
+			static function () use ( $id, $args ): ?PlanView {
+				return Plans::update( $id, $args );
+			}
 		);
+		$this->assertInstanceOf( PlanView::class, $plan );
 	}
 
 	/**
@@ -181,7 +176,7 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 	 * @param string $status A registered plan status.
 	 */
 	protected function set_plan_status( int $id, string $status ): void {
-		$this->assertTrue( Plans::update( $id, [ 'status' => $status ] ) );
+		$this->assertInstanceOf( PlanView::class, Plans::update( $id, [ 'status' => $status ] ) );
 	}
 
 	/**

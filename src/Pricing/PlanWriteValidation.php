@@ -22,7 +22,7 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Pricing;
 
-use Automattic\WooCommerce\SubscriptionsEngine\Api\SellingPlans;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\Plans;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\PlanView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\PlanStatus;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
@@ -80,7 +80,7 @@ final class PlanWriteValidation {
 			return true;
 		}
 
-		$stored = ( new SellingPlans( [ Package::EXTENSION_SLUG ] ) )->get_plan( $plan->get_id() );
+		$stored = Plans::get( $plan->get_id() );
 
 		return null === $stored || $stored->get_billing_policy() !== $plan->get_billing_policy();
 	}

@@ -17,7 +17,7 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Plans;
 
 use InvalidArgumentException;
 use WC_Product;
-use Automattic\WooCommerce\SubscriptionsEngine\Api\SellingPlans;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\Plans;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\PlanStatus;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 
@@ -47,20 +47,6 @@ final class ApplicabilityStore {
 	 * @var array<int, string>
 	 */
 	public const SUPPORTED_PRODUCT_TYPES = [ 'simple', 'variable' ];
-
-	/**
-	 * Engine catalog read facade, scoped to Lite's slug.
-	 *
-	 * @var SellingPlans
-	 */
-	private $catalog;
-
-	/**
-	 * Construct the store.
-	 */
-	public function __construct() {
-		$this->catalog = new SellingPlans( [ Package::EXTENSION_SLUG ] );
-	}
 
 	/**
 	 * Read a product's applicability. Absent meta yields the defaults
@@ -136,7 +122,7 @@ final class ApplicabilityStore {
 
 	/**
 	 * Validate a write. Plan-id existence and ownership go through the
-	 * engine's catalog read ({@see SellingPlans::get_plans()} scoped to
+	 * engine's plan read ({@see Plans::list()} filtered to
 	 * Lite's slug, active plans only): an id that is unknown, archived, or owned by another
 	 * extension is absent from the result and rejects the whole write.
 	 *
@@ -167,9 +153,16 @@ final class ApplicabilityStore {
 			return;
 		}
 
-		$found = [];
-		foreach ( $this->catalog->get_plans( $plan_ids, [ 'status' => PlanStatus::ACTIVE ] ) as $plan ) {
-			$found[ (int) $plan->get_id() ] = true;
+		$owned_plans = Plans::list(
+			[
+				'extension_slug' => Package::EXTENSION_SLUG,
+				'status'         => PlanStatus::ACTIVE,
+				'ids'            => $plan_ids,
+			]
+		);
+		$found       = [];
+		foreach ( $owned_plans as $plan ) {
+			$found[ $plan->get_id() ] = true;
 		}
 
 		foreach ( $plan_ids as $plan_id ) {
