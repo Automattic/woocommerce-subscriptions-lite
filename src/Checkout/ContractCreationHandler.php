@@ -209,7 +209,7 @@ final class ContractCreationHandler {
 
 		$totals = $this->get_recurring_totals( $order, $plan_lines );
 
-		$contract_id = Contracts::create(
+		$contract = Contracts::create(
 			[
 				'extension_slug'       => Package::EXTENSION_SLUG,
 				'status'               => ContractStatus::DRAFT,
@@ -231,10 +231,10 @@ final class ContractCreationHandler {
 					'shipping' => $this->map_address( $order, 'shipping' ),
 				],
 			]
-		)->get_id();
+		);
 
 		Contracts::add_cycle(
-			$contract_id,
+			$contract->get_id(),
 			[
 				'status'         => CycleStatus::BILLED,
 				'count'          => 1,
@@ -247,7 +247,7 @@ final class ContractCreationHandler {
 		);
 
 		return Contracts::update(
-			$contract_id,
+			$contract->get_id(),
 			[
 				'status'           => ContractStatus::ACTIVE,
 				'next_payment_gmt' => $next,
