@@ -61,7 +61,7 @@ final class OrderReceivedTest extends LiteIntegrationTestCase {
 	}
 
 	public function test_shows_no_cadence_when_the_plan_billing_is_unusable(): void {
-		$contract = Subscriptions::get( $this->create_contract( $this->create_customer() ) );
+		$contract = Contracts::get( $this->create_contract( $this->create_customer() ) );
 		$this->update_plan_unvalidated(
 			(int) $contract->get_selling_plan_id(),
 			[
