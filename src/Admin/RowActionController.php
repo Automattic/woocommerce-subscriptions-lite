@@ -5,9 +5,9 @@
  *
  * Each action POSTs to `admin-post.php`; the request entry point authenticates
  * the request (capability and a POST nonce verified with `check_admin_referer()`),
- * drives the engine through its public
- * {@see \Automattic\WooCommerce\SubscriptionsEngine\Api\Subscriptions} facade,
- * queues a flash notice, and redirects back to the page the action was triggered
+ * runs the renewal through the engine's
+ * {@see \Automattic\WooCommerce\SubscriptionsEngine\Api\Subscriptions} facade or the
+ * cancel through Lite's {@see Cancellation}, queues a flash notice, and redirects back to the page the action was triggered
  * from (the detail page or the list), not a fixed destination.
  *
  * The decision logic ({@see self::handle_renew_now()}, {@see self::handle_cancel()})
@@ -29,14 +29,15 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Admin;
 use Throwable;
 use WC_Order;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Subscriptions;
+use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Cancellation;
 
 defined( 'ABSPATH' ) || exit;
 
 /**
  * Admin-post handlers for the state-mutating subscription actions.
  *
- * Construct via the no-arg constructor in production (the facade calls, the
- * capability helper, and the WooCommerce logger); tests inject fake renew /
+ * Construct via the no-arg constructor in production (the renewal facade, Lite's
+ * cancel, the capability helper, and the WooCommerce logger); tests inject fake renew /
  * cancel / capability / logger seams to drive every decision branch.
  */
 final class RowActionController {
@@ -49,7 +50,7 @@ final class RowActionController {
 	private $renew;
 
 	/**
-	 * Canceller. Production: `Subscriptions::cancel()`.
+	 * Canceller; false when the contract does not exist. Production: `Cancellation::cancel()`.
 	 *
 	 * @var callable(int): bool
 	 */
@@ -74,7 +75,7 @@ final class RowActionController {
 	 * Construct the controller.
 	 *
 	 * @param (callable(int): ?WC_Order)|null                     $renew     Renewal runner; defaults to `Subscriptions::renew_now()`.
-	 * @param (callable(int): bool)|null                          $cancel    Canceller; defaults to `Subscriptions::cancel()`.
+	 * @param (callable(int): bool)|null                          $cancel    Canceller; defaults to `Cancellation::cancel()`.
 	 * @param (callable(): bool)|null                             $can       Capability check; defaults to `current_user_can()`.
 	 * @param (callable(string, array<string, mixed>): void)|null $log_error Error logger; defaults to `wc_get_logger()->error()`.
 	 */
@@ -88,7 +89,7 @@ final class RowActionController {
 			return Subscriptions::renew_now( $id );
 		};
 		$this->cancel    = $cancel ?? static function ( int $id ): bool {
-			return Subscriptions::cancel( $id );
+			return null !== ( new Cancellation() )->cancel( $id );
 		};
 		$this->can       = $can ?? static function (): bool {
 			return current_user_can( PageController::CAPABILITY );
@@ -203,10 +204,10 @@ final class RowActionController {
 	/**
 	 * Decide and perform an immediate "Cancel".
 	 *
-	 * Guard order: capability, then a valid contract id, then the facade cancel.
-	 * A false facade return means no such contract - surfaced as an error. An
-	 * engine throwable is logged in full and surfaced as a generic error outcome
-	 * rather than a fatal or a leaked internal message.
+	 * Guard order: capability, then a valid contract id, then the cancel. A false
+	 * return means no such contract - surfaced as an error. A throwable (including a
+	 * status the cancel does not allow) is logged in full and surfaced as a generic
+	 * error outcome rather than a fatal or a leaked internal message.
 	 *
 	 * @param array<string, mixed> $params Request params: `contract_id`.
 	 * @return RowActionResult The outcome.

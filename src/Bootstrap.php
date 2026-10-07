@@ -104,8 +104,8 @@ final class Bootstrap {
 		Rest\ContractActionsController::register();
 
 		// Admin (back office only): the WooCommerce > Subscriptions list + detail
-		// page and its Renew now / Cancel handlers, driven through the engine's
-		// public Api\Subscriptions facade. Front-end requests never need this.
+		// page and its Renew now / Cancel handlers (the engine's renewal facade and
+		// Lite's cancel flow). Front-end requests never need this.
 		if ( is_admin() ) {
 			Admin\PageController::register();
 			Admin\RowActionController::register();

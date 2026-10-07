@@ -3,8 +3,8 @@
  * Integration tests for the admin row-action handlers.
  *
  * The handlers back the Renew now / Cancel actions on the admin subscriptions
- * screens: the decision method verifies the capability, then drives the engine
- * facade, returning a {@see RowActionResult}. The decision branches are driven
+ * screens: the decision method verifies the capability, then runs the renewal or
+ * cancel, returning a {@see RowActionResult}. The decision branches are driven
  * through the controller's own constructor seams (its public API); the hook
  * registration is asserted against the real hook table. The nonce is a
  * request-boundary concern (check_admin_referer), out of scope here.
@@ -134,7 +134,7 @@ final class RowActionControllerTest extends LiteIntegrationTestCase {
 		$this->assertStringContainsString( 'gateway down', $this->logged[0], 'The full exception detail is logged.' );
 	}
 
-	public function test_cancel_runs_the_facade_for_an_authorised_request(): void {
+	public function test_cancel_runs_the_canceller_for_an_authorised_request(): void {
 		$cancel_calls = [];
 		$controller   = $this->make_controller(
 			[
@@ -146,7 +146,7 @@ final class RowActionControllerTest extends LiteIntegrationTestCase {
 		$result = $controller->handle_cancel( [ 'contract_id' => 100 ] );
 
 		$this->assertTrue( $result->is_success() );
-		$this->assertSame( [ 100 ], $cancel_calls, 'The facade cancel runs for the authorised contract.' );
+		$this->assertSame( [ 100 ], $cancel_calls, 'The canceller runs for the authorised contract.' );
 	}
 
 	public function test_a_draft_offers_cancel_and_the_real_cancel_resolves_it(): void {
@@ -159,7 +159,7 @@ final class RowActionControllerTest extends LiteIntegrationTestCase {
 		$this->assertStringContainsString( PageController::ACTION_CANCEL, $html, 'The detail screen offers Cancel for a draft.' );
 		$this->assertStringNotContainsString( PageController::ACTION_RENEW_NOW, $html, 'Renew now stays hidden for a draft.' );
 
-		// Default canceller: the real engine facade.
+		// Default canceller: Lite's cancel flow.
 		$controller = new RowActionController( null, null, static fn (): bool => true );
 		$result     = $controller->handle_cancel( [ 'contract_id' => $id ] );
 
@@ -169,8 +169,53 @@ final class RowActionControllerTest extends LiteIntegrationTestCase {
 		$this->assertSame( ContractStatus::CANCELLED, $stored->get_status() );
 	}
 
+	public function test_the_real_cancel_runs_lite_s_cancel_flow(): void {
+		$contract_id = $this->seed_contract();
+		$fired       = 0;
+		add_action(
+			'woocommerce_subscriptions_lite_contract_cancelled',
+			static function () use ( &$fired ): void {
+				++$fired;
+			}
+		);
+
+		$result = ( new RowActionController( null, null, static fn (): bool => true ) )
+			->handle_cancel( [ 'contract_id' => $contract_id ] );
+
+		$this->assertTrue( $result->is_success() );
+		$this->assertSame( 1, $fired, 'The Lite cancelled action fires.' );
+		$this->assertNull( $this->get_contract( $contract_id )->get_next_payment_gmt() );
+	}
+
+	public function test_the_real_cancel_reports_a_missing_contract_as_not_found(): void {
+		$result = ( new RowActionController( null, null, static fn (): bool => true ) )
+			->handle_cancel( [ 'contract_id' => 4242424 ] );
+
+		$this->assertSame( RowActionResult::ERROR, $result->type() );
+		$this->assertSame( 'Subscription not found.', $result->message() );
+	}
+
+	public function test_the_real_cancel_reports_a_status_it_cannot_cancel_as_a_failure(): void {
+		$contract_id = $this->seed_contract( [ 'status' => ContractStatus::EXPIRED ] );
+
+		$controller = new RowActionController(
+			null,
+			null,
+			static fn (): bool => true,
+			function ( string $message ): void {
+				$this->logged[] = $message;
+			}
+		);
+
+		$result = $controller->handle_cancel( [ 'contract_id' => $contract_id ] );
+
+		$this->assertSame( RowActionResult::ERROR, $result->type() );
+		$this->assertCount( 1, $this->logged, 'The refused cancel is logged.' );
+		$this->assertSame( ContractStatus::EXPIRED, $this->get_contract( $contract_id )->get_status() );
+	}
+
 	public function test_cancel_reports_a_missing_contract_as_an_error(): void {
-		// A false facade return means no such contract.
+		// A false canceller return means no such contract.
 		$result = $this->make_controller( [ 'cancel_return' => false ] )
 			->handle_cancel( [ 'contract_id' => 999 ] );
 
@@ -191,7 +236,7 @@ final class RowActionControllerTest extends LiteIntegrationTestCase {
 		$result = $controller->handle_cancel( [ 'contract_id' => 100 ] );
 
 		$this->assertTrue( $result->is_forbidden() );
-		$this->assertSame( [], $cancel_calls, 'An unauthorised request never reaches the facade.' );
+		$this->assertSame( [], $cancel_calls, 'An unauthorised request never reaches the canceller.' );
 	}
 
 	public function test_cancel_logs_the_exception_and_surfaces_a_generic_message(): void {
@@ -205,14 +250,14 @@ final class RowActionControllerTest extends LiteIntegrationTestCase {
 		$this->assertStringContainsString( 'storage offline', $this->logged[0], 'The full exception detail is logged.' );
 	}
 
-	public function test_cancel_rejects_a_missing_contract_id_before_the_facade(): void {
+	public function test_cancel_rejects_a_missing_contract_id_before_the_canceller(): void {
 		$cancel_calls = [];
 		$controller   = $this->make_controller( [ 'cancel_calls' => &$cancel_calls ] );
 
 		$result = $controller->handle_cancel( [] );
 
 		$this->assertSame( RowActionResult::ERROR, $result->type(), 'No contract id resolves to not found.' );
-		$this->assertSame( [], $cancel_calls, 'A missing contract id never reaches the facade.' );
+		$this->assertSame( [], $cancel_calls, 'A missing contract id never reaches the canceller.' );
 	}
 
 	public function test_redirect_target_returns_the_origin_page_and_falls_back_to_the_list(): void {
