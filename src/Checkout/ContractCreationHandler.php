@@ -244,6 +244,7 @@ final class ContractCreationHandler {
 				'starts_at_gmt'  => $start,
 				'ends_at_gmt'    => $next,
 				'expected_total' => $totals['billing_total'],
+				'currency'       => $order->get_currency(),
 			]
 		);
 
