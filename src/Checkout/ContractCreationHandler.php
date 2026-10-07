@@ -240,6 +240,7 @@ final class ContractCreationHandler {
 			$contract_id,
 			[
 				'status'         => CycleStatus::BILLED,
+				'count'          => 1,
 				'order_id'       => $order->get_id(),
 				'starts_at_gmt'  => $start,
 				'ends_at_gmt'    => $next,
