@@ -1,14 +1,10 @@
 <?php
 /**
- * BillingTerms - Lite's reader of the billing terms frozen in a contract's plan snapshot.
+ * BillingTerms - Lite's reader of a plan's billing terms.
  *
- * The engine stores the plan snapshot as an extension payload; Lite writes it at
- * checkout with `billing_policy` in the engine's billing policy array shape:
- *   { period: day|week|month|year, interval: int, min_cycles: ?int, max_cycles: ?int,
- *     trial_duration: { length: int, unit: day|week|month|year } | null }
- *
- * Reads are tolerant and never throw: a payload without a usable period and positive
- * interval reads as no terms (null); malformed optional fields read as absent.
+ * Reads are tolerant and never throw: a missing plan, or a billing policy without a
+ * usable period and positive interval, reads as no terms (null); malformed optional
+ * fields read as absent.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Pricing
  */
@@ -16,6 +12,8 @@
 declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Pricing;
+
+use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Plan;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -55,7 +53,7 @@ final class BillingTerms {
 	private $trial_duration;
 
 	/**
-	 * Build from parsed values; use {@see self::from_snapshot()}.
+	 * Build from parsed values; use {@see self::from_plan()}.
 	 *
 	 * @param string                                $period         Billing period.
 	 * @param int                                   $interval       Periods per cycle.
@@ -70,33 +68,30 @@ final class BillingTerms {
 	}
 
 	/**
-	 * Terms from a plan snapshot payload's `billing_policy`; null when absent or unusable.
+	 * Terms from a plan's billing policy; null when there is no plan or the policy is unusable.
 	 *
-	 * @param array<string, mixed>|null $plan_snapshot Plan snapshot payload.
+	 * @param Plan|null $plan Plan.
 	 */
-	public static function from_snapshot( ?array $plan_snapshot ): ?self {
-		$policy = $plan_snapshot['billing_policy'] ?? null;
-		if ( ! is_array( $policy ) ) {
+	public static function from_plan( ?Plan $plan ): ?self {
+		if ( null === $plan ) {
 			return null;
 		}
 
-		$period   = $policy['period'] ?? null;
-		$interval = self::positive_int( $policy['interval'] ?? null );
-		if ( ! is_string( $period ) || ! in_array( $period, self::PERIODS, true ) || null === $interval ) {
+		$policy   = $plan->get_billing_policy();
+		$period   = $policy->get_period();
+		$interval = $policy->get_interval();
+		if ( ! in_array( $period, self::PERIODS, true ) || $interval <= 0 ) {
 			return null;
 		}
 
-		$trial  = $policy['trial_duration'] ?? null;
-		$length = is_array( $trial ) ? self::positive_int( $trial['length'] ?? null ) : null;
-		$unit   = is_array( $trial ) ? ( $trial['unit'] ?? null ) : null;
-		$trial  = null !== $length && is_string( $unit ) && in_array( $unit, self::PERIODS, true )
-			? [
-				'length' => $length,
-				'unit'   => $unit,
-			]
-			: null;
+		$trial = $policy->get_trial_duration();
+		if ( null !== $trial && ( $trial['length'] <= 0 || ! in_array( $trial['unit'], self::PERIODS, true ) ) ) {
+			$trial = null;
+		}
 
-		return new self( $period, $interval, self::positive_int( $policy['max_cycles'] ?? null ), $trial );
+		$max_cycles = $policy->get_max_cycles();
+
+		return new self( $period, $interval, null !== $max_cycles && $max_cycles > 0 ? $max_cycles : null, $trial );
 	}
 
 	/**
@@ -127,18 +122,5 @@ final class BillingTerms {
 	 */
 	public function get_trial_duration(): ?array {
 		return $this->trial_duration;
-	}
-
-	/**
-	 * A positive integer from an int or digit string, else null.
-	 *
-	 * @param mixed $value Raw value.
-	 */
-	private static function positive_int( $value ): ?int {
-		if ( is_string( $value ) && 1 === preg_match( '/^[0-9]+$/', $value ) ) {
-			$value = (int) $value;
-		}
-
-		return is_int( $value ) && $value > 0 ? $value : null;
 	}
 }

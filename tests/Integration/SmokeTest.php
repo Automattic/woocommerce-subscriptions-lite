@@ -49,7 +49,7 @@ final class SmokeTest extends LiteIntegrationTestCase {
 		$this->assertCount( 1, $items );
 		$this->assertSame( 'Smoke Box', $items[0]['item_name'] );
 
-		$this->assertIsArray( $contract->get_plan_snapshot(), 'The contract plan snapshot hydrates on read.' );
+		$this->assertNotNull( $contract->get_selling_plan_id(), 'The contract records its selling plan.' );
 
 		$this->assertNull(
 			Subscriptions::get_for_customer( $contract_id, $customer_id + 1 ),

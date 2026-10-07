@@ -126,26 +126,18 @@ final class BogoRenewalBonusTest extends LiteIntegrationTestCase {
 		$this->assertSame( 2, $this->only_line( $this->renew( $contract_id ) )->get_quantity() );
 	}
 
-	public function test_the_snapshot_terms_apply_after_the_live_plan_is_deleted(): void {
-		$contract_id = $this->sign_up( [ 'policies' => [ [ 'type' => 'bogo' ] ] ] );
+	public function test_a_bogo_added_to_the_live_plan_later_applies_on_renewal(): void {
+		$contract_id = $this->sign_up( null );
 
-		$contract = Subscriptions::get( $contract_id );
-		$this->assertNotNull( $contract );
-		( new PlanRepository() )->delete( $contract->get_selling_plan_id() );
+		$this->set_live_pricing_policy( $contract_id, [ 'policies' => [ [ 'type' => 'bogo' ] ] ] );
 
 		$this->assertSame( 4, $this->only_line( $this->renew( $contract_id ) )->get_quantity() );
 	}
 
-	public function test_a_snapshot_without_terms_ignores_a_bogo_added_to_the_live_plan_later(): void {
-		$contract_id = $this->sign_up( null );
+	public function test_a_bogo_removed_from_the_live_plan_grants_nothing(): void {
+		$contract_id = $this->sign_up( [ 'policies' => [ [ 'type' => 'bogo' ] ] ] );
 
-		$contract = Subscriptions::get( $contract_id );
-		$this->assertNotNull( $contract );
-		$plans = new PlanRepository();
-		$plan  = $plans->find( $contract->get_selling_plan_id() );
-		$this->assertInstanceOf( Plan::class, $plan );
-		$plan->set_pricing_policy( [ 'policies' => [ [ 'type' => 'bogo' ] ] ] );
-		$this->assertTrue( $plans->update( $plan ) );
+		$this->set_live_pricing_policy( $contract_id, null );
 
 		$this->assertSame( 2, $this->only_line( $this->renew( $contract_id ) )->get_quantity() );
 	}
@@ -172,6 +164,22 @@ final class BogoRenewalBonusTest extends LiteIntegrationTestCase {
 
 		$this->assertSame( 2, $this->only_line( $order )->get_quantity() );
 		$this->assertSame( 39.98, (float) $order->get_total() );
+	}
+
+	/**
+	 * Replace the pricing payload of the contract's live plan.
+	 *
+	 * @param int                       $contract_id    Contract id.
+	 * @param array<string, mixed>|null $pricing_policy New pricing payload.
+	 */
+	private function set_live_pricing_policy( int $contract_id, ?array $pricing_policy ): void {
+		$contract = Subscriptions::get( $contract_id );
+		$this->assertNotNull( $contract );
+		$plans = new PlanRepository();
+		$plan  = $plans->find( (int) $contract->get_selling_plan_id() );
+		$this->assertInstanceOf( Plan::class, $plan );
+		$plan->set_pricing_policy( $pricing_policy );
+		$this->assertTrue( $plans->update( $plan ) );
 	}
 
 	/**

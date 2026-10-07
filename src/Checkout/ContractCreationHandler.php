@@ -12,7 +12,7 @@
  * reads. The handler never throws out of the hook and never blocks checkout.
  *
  * Lite maps the order to explicit contract fields (customer, payment, addresses,
- * plan lines, recurring totals, snapshots) and writes them through the engine's
+ * plan lines, recurring totals) and writes them through the engine's
  * contracts facade; the engine records what it is given and never reads the order.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Checkout
@@ -232,13 +232,6 @@ final class ContractCreationHandler {
 					'billing'  => $this->map_address( $order, 'billing' ),
 					'shipping' => $this->map_address( $order, 'shipping' ),
 				],
-				'plan_snapshot'        => [
-					'selling_plan_id' => $plan_id,
-					'name'            => $plan->get_name(),
-					'billing_policy'  => $plan->get_billing_policy()->to_array(),
-					'pricing_policy'  => $plan->get_pricing_policy(),
-				],
-				'items_snapshot'       => $items,
 			]
 		);
 

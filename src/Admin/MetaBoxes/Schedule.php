@@ -3,7 +3,7 @@
  * Schedule meta box - the contract's billing cadence and schedule dates.
  *
  * A side-column box gathering the "when" of a subscription: the billing cadence,
- * fixed length and native trial read off the contract's frozen plan snapshot,
+ * fixed length and native trial read off the contract's live plan,
  * followed by the start, next-payment, last-payment and end dates. Kept beside
  * the main detail so the {@see SubscriptionData} box stays a compact status
  * summary, mirroring how the order edit screen keeps schedule-like facts out of
@@ -18,6 +18,7 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Admin\MetaBoxes;
 
 use Automattic\WooCommerce\SubscriptionsLite\Admin\Formatting;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
+use Automattic\WooCommerce\SubscriptionsLite\Plans\ContractPlans;
 use Automattic\WooCommerce\SubscriptionsLite\Pricing\BillingTerms;
 
 defined( 'ABSPATH' ) || exit;
@@ -37,8 +38,8 @@ final class Schedule {
 	}
 
 	/**
-	 * Compose the schedule rows: the plan cadence rows (when a snapshot is
-	 * present) followed by the schedule dates.
+	 * Compose the schedule rows: the plan cadence rows (when the plan resolves)
+	 * followed by the schedule dates.
 	 *
 	 * @param ContractView $contract The contract.
 	 * @return array<int, array{label: string, value: string}>
@@ -67,16 +68,15 @@ final class Schedule {
 	}
 
 	/**
-	 * Plan-detail rows from the contract's frozen plan snapshot: the billing
-	 * cadence, the fixed length when the plan is close-ended, and a native trial
-	 * when present. Empty when the contract carries no plan snapshot, so a
-	 * snapshot-less contract simply shows its dates rather than a fatal.
+	 * Plan-detail rows from the contract's live plan: the billing cadence, the
+	 * fixed length when the plan is close-ended, and a native trial when present.
+	 * Empty when the plan does not resolve, so the box shows only the dates.
 	 *
 	 * @param ContractView $contract The contract.
 	 * @return array<int, array{label: string, value: string}>
 	 */
 	private static function plan_rows( ContractView $contract ): array {
-		$policy = BillingTerms::from_snapshot( $contract->get_plan_snapshot() );
+		$policy = BillingTerms::from_plan( ContractPlans::for_contract( $contract ) );
 		if ( null === $policy ) {
 			return [];
 		}

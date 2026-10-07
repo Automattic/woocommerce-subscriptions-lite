@@ -16,9 +16,9 @@
  * reading its orders, so a foreign or unknown contract is already turned away before any
  * order read runs and no orders can leak across customers.
  *
- * Cadence (`billing_period` / `billing_interval`) is read off the contract's own frozen
- * plan snapshot ({@see ContractView::get_plan_snapshot()}), not a live plan read, and degrades
- * to an empty period / zero interval when the snapshot or its billing policy is absent.
+ * Cadence (`billing_period` / `billing_interval`) is read off the contract's live plan
+ * (one batched read per list page) and degrades to an empty period / zero interval when
+ * the plan does not resolve.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\CustomerPortal
  */
@@ -31,8 +31,10 @@ use DateTimeInterface;
 use WC_Order;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Subscriptions;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
+use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Plan;
 use Automattic\WooCommerce\SubscriptionsLite\Contracts\AddressFields;
 use Automattic\WooCommerce\SubscriptionsLite\Contracts\CustomerVisibility;
+use Automattic\WooCommerce\SubscriptionsLite\Plans\ContractPlans;
 use Automattic\WooCommerce\SubscriptionsLite\Pricing\BillingTerms;
 
 defined( 'ABSPATH' ) || exit;
@@ -55,9 +57,12 @@ final class EngineDataProvider {
 	 * @return array<int, array<string, mixed>>
 	 */
 	public function get_contracts_for_customer( int $customer_id, int $limit = 20, int $offset = 0 ): array {
+		$contracts = Subscriptions::list_for_customer( $customer_id, $limit, $offset, [ 'status' => CustomerVisibility::visible_statuses() ] );
+		$plans     = ContractPlans::for_contracts( $contracts );
+
 		$rows = [];
-		foreach ( Subscriptions::list_for_customer( $customer_id, $limit, $offset, [ 'status' => CustomerVisibility::visible_statuses() ] ) as $contract ) {
-			$rows[] = $this->contract_to_row( $contract );
+		foreach ( $contracts as $contract ) {
+			$rows[] = $this->contract_to_row( $contract, $plans[ (int) $contract->get_selling_plan_id() ] ?? null );
 		}
 		return $rows;
 	}
@@ -111,10 +116,11 @@ final class EngineDataProvider {
 	 * Reduce a contract to the domain-ish list-row array {@see ViewModel::build_row()} reads.
 	 *
 	 * @param ContractView $contract The contract.
+	 * @param Plan|null    $plan     The contract's live plan.
 	 * @return array<string, mixed>
 	 */
-	private function contract_to_row( ContractView $contract ): array {
-		$cadence = $this->billing_cadence( $contract );
+	private function contract_to_row( ContractView $contract, ?Plan $plan ): array {
+		$cadence = $this->billing_cadence( $plan );
 
 		return [
 			'id'               => (int) $contract->get_id(),
@@ -139,7 +145,7 @@ final class EngineDataProvider {
 	 */
 	private function contract_to_detail( ContractView $contract ): array {
 		return array_merge(
-			$this->contract_to_row( $contract ),
+			$this->contract_to_row( $contract, ContractPlans::for_contract( $contract ) ),
 			[
 				'start_gmt'        => $contract->get_start_gmt(),
 				'end_gmt'          => $contract->get_end_gmt(),
@@ -243,19 +249,16 @@ final class EngineDataProvider {
 	}
 
 	/**
-	 * The contract's billing cadence (`period`, `interval`) from its frozen plan snapshot.
+	 * The billing cadence (`period`, `interval`) of a contract's live plan.
 	 *
-	 * Read off the contract's hydrated plan snapshot, so the cadence is the one the contract
-	 * is billed under even after the plan it came from is edited or deleted - no live plan
-	 * read. A contract with no hydrated snapshot (or a snapshot carrying no billing policy)
-	 * degrades to an empty period and a zero interval, which the view-model renders as a
-	 * price with no cadence suffix rather than fataling - matching the engine read model.
+	 * No plan (or an unusable billing policy) degrades to an empty period and a zero
+	 * interval, which the view-model renders as a price with no cadence suffix.
 	 *
-	 * @param ContractView $contract The contract.
+	 * @param Plan|null $plan The contract's live plan.
 	 * @return array{period: string, interval: int}
 	 */
-	private function billing_cadence( ContractView $contract ): array {
-		$terms = BillingTerms::from_snapshot( $contract->get_plan_snapshot() );
+	private function billing_cadence( ?Plan $plan ): array {
+		$terms = BillingTerms::from_plan( $plan );
 		if ( null !== $terms ) {
 			return [
 				'period'   => $terms->get_period(),

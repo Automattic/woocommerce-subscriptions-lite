@@ -95,24 +95,12 @@ final class PricingTerms {
 	}
 
 	/**
-	 * Terms of a live plan; empty terms when the plan carries no payload.
+	 * Terms of a plan; empty terms when there is no plan or it carries no payload.
 	 *
-	 * @param Plan $plan Plan.
+	 * @param Plan|null $plan Plan.
 	 */
-	public static function from_plan( Plan $plan ): self {
-		return self::from_array( $plan->get_pricing_policy() ?? [] );
-	}
-
-	/**
-	 * Terms frozen in a plan snapshot payload; empty terms when the payload or its
-	 * `pricing_policy` is absent, null or not an object.
-	 *
-	 * @param array<string, mixed>|null $plan_snapshot Plan snapshot payload.
-	 */
-	public static function from_snapshot( ?array $plan_snapshot ): self {
-		$data = $plan_snapshot['pricing_policy'] ?? null;
-
-		return self::from_array( is_array( $data ) ? $data : [] );
+	public static function from_plan( ?Plan $plan ): self {
+		return self::from_array( null !== $plan ? $plan->get_pricing_policy() ?? [] : [] );
 	}
 
 	/**

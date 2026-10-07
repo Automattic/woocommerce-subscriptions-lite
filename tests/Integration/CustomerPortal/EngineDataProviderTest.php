@@ -14,7 +14,10 @@ declare( strict_types=1 );
 namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\CustomerPortal;
 
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
-use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\SchemaInstaller;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\Subscriptions;
+use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Plan;
+use Automattic\WooCommerce\SubscriptionsEngine\Core\ValueObject\BillingPolicy;
+use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\PlanRepository;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\CustomerPortal\EngineDataProvider;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
@@ -122,7 +125,7 @@ final class EngineDataProviderTest extends LiteIntegrationTestCase {
 		$this->assertCount( 2, $window, 'limit/offset window through to the read.' );
 	}
 
-	public function test_cadence_is_sourced_from_the_plan_snapshot(): void {
+	public function test_list_cadence_is_read_from_each_contracts_live_plan(): void {
 		$customer_id = $this->create_customer();
 		$this->create_contract(
 			$customer_id,
@@ -131,31 +134,55 @@ final class EngineDataProviderTest extends LiteIntegrationTestCase {
 				'interval' => 1,
 			]
 		);
+		$this->create_contract(
+			$customer_id,
+			[
+				'period'   => 'week',
+				'interval' => 2,
+			]
+		);
 
-		$rows = $this->provider->get_contracts_for_customer( $customer_id );
+		$rows    = $this->provider->get_contracts_for_customer( $customer_id );
+		$cadence = array_map(
+			static function ( array $row ): string {
+				return $row['billing_interval'] . ' ' . $row['billing_period'];
+			},
+			$rows
+		);
 
-		$this->assertSame( 'year', $rows[0]['billing_period'] );
-		$this->assertSame( 1, $rows[0]['billing_interval'] );
+		sort( $cadence );
+		$this->assertSame( [ '1 year', '2 week' ], $cadence );
 	}
 
-	public function test_cadence_degrades_to_empty_when_the_snapshot_is_absent(): void {
-		global $wpdb;
-
+	public function test_detail_cadence_follows_a_live_plan_edit(): void {
 		$customer_id = $this->create_customer();
 		$contract_id = $this->create_contract( $customer_id );
+		$plans       = new PlanRepository();
+		$plan        = $plans->find( (int) Subscriptions::get( $contract_id )->get_selling_plan_id() );
+		$this->assertInstanceOf( Plan::class, $plan );
 
-		// Simulate a contract with no frozen plan snapshot (pre-snapshot data).
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
-		$wpdb->update(
-			SchemaInstaller::get_table_name( SchemaInstaller::TABLE_CONTRACTS ),
-			[ 'plan_snapshot_id' => null ],
-			[ 'id' => $contract_id ]
-		);
+		$plan->set_billing_policy( new BillingPolicy( 'week', 3, null, null, null ) );
+		$plans->update( $plan );
 
 		$detail = $this->provider->get_contract( $contract_id, $customer_id );
 
+		$this->assertSame( 'week', $detail['billing_period'] );
+		$this->assertSame( 3, $detail['billing_interval'] );
+	}
+
+	public function test_cadence_degrades_to_empty_when_the_plan_is_gone(): void {
+		$customer_id = $this->create_customer();
+		$contract_id = $this->create_contract( $customer_id );
+
+		( new PlanRepository() )->delete( (int) Subscriptions::get( $contract_id )->get_selling_plan_id() );
+
+		$detail = $this->provider->get_contract( $contract_id, $customer_id );
+		$rows   = $this->provider->get_contracts_for_customer( $customer_id );
+
 		$this->assertSame( '', $detail['billing_period'] );
 		$this->assertSame( 0, $detail['billing_interval'] );
+		$this->assertSame( '', $rows[0]['billing_period'] );
+		$this->assertSame( 0, $rows[0]['billing_interval'] );
 	}
 
 	public function test_drafts_are_hidden_from_the_customer(): void {

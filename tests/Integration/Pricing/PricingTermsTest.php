@@ -373,19 +373,11 @@ final class PricingTermsTest extends LiteIntegrationTestCase {
 		$this->assertSame( [], $terms->get_one_time_fees() );
 	}
 
-	public function test_from_snapshot_reads_absent_or_null_payloads_as_empty_terms(): void {
-		$no_payload = PricingTerms::from_snapshot( null );
-		$this->assertSame( [], $no_payload->get_policies() );
+	public function test_from_plan_reads_no_plan_as_empty_terms(): void {
+		$terms = PricingTerms::from_plan( null );
 
-		$absent = PricingTerms::from_snapshot( [ 'selling_plan_id' => 1 ] );
-		$this->assertSame( [], $absent->get_policies() );
-		$this->assertSame( [], $absent->get_one_time_fees() );
-
-		$explicit_null = PricingTerms::from_snapshot( [ 'pricing_policy' => null ] );
-		$this->assertSame( [], $explicit_null->get_policies() );
-
-		$present = PricingTerms::from_snapshot( [ 'pricing_policy' => [ 'policies' => [ [ 'type' => 'bogo' ] ] ] ] );
-		$this->assertTrue( $present->has_type( PricingTerms::TYPE_BOGO ) );
+		$this->assertSame( [], $terms->get_policies() );
+		$this->assertSame( [], $terms->get_one_time_fees() );
 	}
 
 	/**

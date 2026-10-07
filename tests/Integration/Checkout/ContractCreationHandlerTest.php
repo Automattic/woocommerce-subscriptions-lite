@@ -128,13 +128,6 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 		$this->assertSame( 'ada@example.com', $addresses['billing']['email'] );
 		$this->assertSame( '1 Engine Court', $addresses['shipping']['address_1'] );
 
-		$snapshot = (array) $contract->get_plan_snapshot();
-		$this->assertSame( (int) $plan->get_id(), $snapshot['selling_plan_id'] );
-		$this->assertSame( $plan->get_name(), $snapshot['name'] );
-		$this->assertSame( 'month', $snapshot['billing_policy']['period'] );
-		$this->assertArrayHasKey( 'pricing_policy', $snapshot );
-		$this->assertArrayNotHasKey( 'category', $snapshot );
-
 		$history = Subscriptions::get_history( $contract->get_id() );
 		$this->assertCount( 1, $history );
 		$this->assertSame( 'billed', $history[0]->get_status() );
