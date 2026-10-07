@@ -26,7 +26,9 @@ use Automattic\WooCommerce\SubscriptionsEngine\Api\Plans;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Subscriptions;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\PlanView;
+use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Checkout\OrderLinkage;
+use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\SchemaInstaller;
 use Automattic\WooCommerce\SubscriptionsLite\Cart\CartPlanHooks;
 use Automattic\WooCommerce\SubscriptionsLite\Checkout\ContractCreationHandler;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
@@ -261,6 +263,59 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 		}
 
 		return $contract_id;
+	}
+
+	/**
+	 * Create a bare Lite-owned contract straight through the engine facade, for flow tests
+	 * that need an exact status and schedule rather than a checkout-shaped contract.
+	 *
+	 * @param array<string, mixed> $args Contract fields overriding the defaults (an active
+	 *                                   USD contract for customer 1, due 2099-01-01).
+	 * @return int Contract id.
+	 */
+	protected function seed_contract( array $args = [] ): int {
+		$contract = Contracts::create(
+			array_merge(
+				[
+					'extension_slug'   => Package::EXTENSION_SLUG,
+					'customer_id'      => 1,
+					'status'           => ContractStatus::ACTIVE,
+					'currency'         => 'USD',
+					'start_gmt'        => '2026-01-01 00:00:00',
+					'next_payment_gmt' => '2099-01-01 00:00:00',
+					'billing_total'    => '19.99',
+				],
+				$args
+			)
+		);
+
+		return $contract->get_id();
+	}
+
+	/**
+	 * Write a raw status to a contract row, bypassing status validation (e.g. an
+	 * unregistered legacy status).
+	 *
+	 * @param int    $contract_id Contract id.
+	 * @param string $status      Stored status value.
+	 */
+	protected function store_raw_status( int $contract_id, string $status ): void {
+		global $wpdb;
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+		$wpdb->update( SchemaInstaller::get_table_name( SchemaInstaller::TABLE_CONTRACTS ), [ 'status' => $status ], [ 'id' => $contract_id ] );
+	}
+
+	/**
+	 * A contract that must exist (narrows the nullable read).
+	 *
+	 * @param int $contract_id Contract id.
+	 */
+	protected function get_contract( int $contract_id ): ContractView {
+		$contract = Contracts::get( $contract_id );
+		$this->assertInstanceOf( ContractView::class, $contract );
+
+		return $contract;
 	}
 
 	/**
