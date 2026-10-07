@@ -121,7 +121,7 @@ final class ProductPlanResolverTest extends LiteIntegrationTestCase {
 
 		$active_id = $this->make_plan()->get_id();
 		$this->make_plan( 'week', 1, null, [ 'status' => PlanStatus::ARCHIVED ] );
-		$this->make_plan( 'year', 1, null, [ 'owner' => 'other-extension' ] );
+		$this->make_plan( 'year', 1, null, [ 'extension_slug' => 'other-extension' ] );
 
 		( new ApplicabilityStore() )->set( $product_id, new ProductApplicability( ProductApplicability::MODE_INHERIT_ALL ) );
 
@@ -219,7 +219,7 @@ final class ProductPlanResolverTest extends LiteIntegrationTestCase {
 
 		$deleted_id = $this->make_plan()->get_id();
 		( new PlanRepository() )->delete( $deleted_id, Package::EXTENSION_SLUG );
-		$foreign_id    = $this->make_plan( 'year', 1, null, [ 'owner' => 'other-extension' ] )->get_id();
+		$foreign_id    = $this->make_plan( 'year', 1, null, [ 'extension_slug' => 'other-extension' ] )->get_id();
 		$unbillable_id = $this->make_unvalidated_plan(
 			'month',
 			1,

@@ -94,12 +94,12 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 	 * @param string               $period     Billing period (day / week / month / year).
 	 * @param int                  $interval   Billing interval.
 	 * @param int|null             $max_cycles Maximum billing cycles, or null for open-ended.
-	 * @param array<string, mixed> $overrides  Facade create keys (name, status, owner, billing_policy, pricing_policy, delivery_policy).
+	 * @param array<string, mixed> $overrides  Facade create keys (name, status, extension_slug, billing_policy, pricing_policy, delivery_policy).
 	 */
 	protected function make_plan( string $period = 'month', int $interval = 1, ?int $max_cycles = null, array $overrides = [] ): PlanView {
 		$args = array_merge(
 			[
-				'owner'          => Package::EXTENSION_SLUG,
+				'extension_slug' => Package::EXTENSION_SLUG,
 				'name'           => ucfirst( $period ) . 'ly plan',
 				'billing_policy' => [
 					'period'     => $period,
@@ -110,7 +110,7 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 			$overrides
 		);
 
-		$plan = ( new SellingPlans( [ (string) $args['owner'] ] ) )->get_plan( Plans::create( $args ) );
+		$plan = ( new SellingPlans( [ (string) $args['extension_slug'] ] ) )->get_plan( Plans::create( $args ) );
 		$this->assertNotNull( $plan );
 
 		return $plan;

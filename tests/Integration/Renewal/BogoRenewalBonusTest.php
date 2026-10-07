@@ -194,7 +194,7 @@ final class BogoRenewalBonusTest extends LiteIntegrationTestCase {
 			null,
 			[
 				'pricing_policy' => $pricing_policy,
-				'owner'          => $extension_slug,
+				'extension_slug' => $extension_slug,
 			]
 		);
 		$order = $this->create_subscription_order(

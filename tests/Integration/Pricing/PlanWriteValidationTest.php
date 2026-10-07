@@ -446,7 +446,7 @@ final class PlanWriteValidationTest extends LiteIntegrationTestCase {
 
 		Plans::create(
 			[
-				'owner'          => Package::EXTENSION_SLUG,
+				'extension_slug' => Package::EXTENSION_SLUG,
 				'name'           => 'Archived on arrival',
 				'status'         => 'archived',
 				'billing_policy' => null,
@@ -458,7 +458,7 @@ final class PlanWriteValidationTest extends LiteIntegrationTestCase {
 		try {
 			Plans::create(
 				[
-					'owner'          => Package::EXTENSION_SLUG,
+					'extension_slug' => Package::EXTENSION_SLUG,
 					'name'           => 'Fortnightly',
 					'billing_policy' => [
 						'period'   => 'fortnight',
@@ -477,8 +477,8 @@ final class PlanWriteValidationTest extends LiteIntegrationTestCase {
 	public function test_a_foreign_extension_plan_without_billing_is_not_checked(): void {
 		$id = Plans::create(
 			[
-				'owner' => 'other-extension',
-				'name'  => 'No cadence',
+				'extension_slug' => 'other-extension',
+				'name'           => 'No cadence',
 			]
 		);
 

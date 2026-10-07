@@ -231,7 +231,7 @@ final class BillingTermsTest extends LiteIntegrationTestCase {
 			1,
 			null,
 			[
-				'owner'          => 'another-extension',
+				'extension_slug' => 'another-extension',
 				'billing_policy' => $billing_policy,
 			]
 		);

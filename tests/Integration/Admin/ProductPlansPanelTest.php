@@ -396,8 +396,8 @@ final class ProductPlansPanelTest extends LiteIntegrationTestCase {
 			1,
 			null,
 			[
-				'owner' => 'another-extension',
-				'name'  => 'Foreign plan',
+				'extension_slug' => 'another-extension',
+				'name'           => 'Foreign plan',
 			]
 		);
 

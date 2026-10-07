@@ -81,7 +81,7 @@ final class PlanOrderControllerTest extends LiteIntegrationTestCase {
 	 */
 	public function test_an_invalid_order_is_rejected_without_writing( string $case ): void {
 		$lite    = $this->make_plan()->get_id();
-		$foreign = $this->make_plan( 'month', 1, null, [ 'owner' => 'another-extension' ] )->get_id();
+		$foreign = $this->make_plan( 'month', 1, null, [ 'extension_slug' => 'another-extension' ] )->get_id();
 		( new PlanOrder() )->set( [ $lite ] );
 
 		$ids = [

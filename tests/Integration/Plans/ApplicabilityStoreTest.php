@@ -218,7 +218,7 @@ final class ApplicabilityStoreTest extends LiteIntegrationTestCase {
 	public function test_set_rejects_plan_owned_by_another_slug_and_writes_nothing(): void {
 		$store      = new ApplicabilityStore();
 		$product_id = $this->simple_product_id();
-		$foreign_id = (int) $this->make_plan( 'month', 1, null, [ 'owner' => 'another-extension' ] )->get_id();
+		$foreign_id = (int) $this->make_plan( 'month', 1, null, [ 'extension_slug' => 'another-extension' ] )->get_id();
 
 		try {
 			$store->set( $product_id, new ProductApplicability( ProductApplicability::MODE_INHERIT_SELECT, [ $foreign_id ] ) );
@@ -234,7 +234,7 @@ final class ApplicabilityStoreTest extends LiteIntegrationTestCase {
 		$store       = new ApplicabilityStore();
 		$product_id  = $this->simple_product_id();
 		$own_plan_id = $this->plan_id();
-		$foreign_id  = (int) $this->make_plan( 'month', 1, null, [ 'owner' => 'another-extension' ] )->get_id();
+		$foreign_id  = (int) $this->make_plan( 'month', 1, null, [ 'extension_slug' => 'another-extension' ] )->get_id();
 
 		try {
 			$store->set( $product_id, new ProductApplicability( ProductApplicability::MODE_INHERIT_SELECT, [ $own_plan_id, $foreign_id, 999999 ] ) );
