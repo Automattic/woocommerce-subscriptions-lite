@@ -97,24 +97,23 @@ final class BillingTermsTest extends LiteIntegrationTestCase {
 		];
 	}
 
-	public function test_an_unusable_trial_and_length_read_as_none(): void {
-		$terms = BillingTerms::from_plan(
-			$this->foreign_plan(
-				[
-					'period'         => 'month',
-					'interval'       => 1,
-					'max_cycles'     => 0,
-					'trial_duration' => [
-						'length' => 0,
-						'unit'   => 'day',
-					],
-				]
+	public function test_an_unusable_trial_and_length_read_as_no_terms(): void {
+		// Plans are read strictly: a payload contract creation cannot parse is not billable.
+		$this->assertNull(
+			BillingTerms::from_plan(
+				$this->foreign_plan(
+					[
+						'period'         => 'month',
+						'interval'       => 1,
+						'max_cycles'     => 0,
+						'trial_duration' => [
+							'length' => 0,
+							'unit'   => 'day',
+						],
+					]
+				)
 			)
 		);
-
-		$this->assertInstanceOf( BillingTerms::class, $terms );
-		$this->assertNull( $terms->get_trial_duration() );
-		$this->assertNull( $terms->get_max_cycles() );
 	}
 
 	public function test_a_live_plan_is_read_strictly(): void {

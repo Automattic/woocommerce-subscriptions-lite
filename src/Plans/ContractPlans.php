@@ -15,7 +15,8 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Plans;
 
 use Automattic\WooCommerce\SubscriptionsEngine\Api\SellingPlans;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
-use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Plan;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\View\PlanView;
+use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\PlanStatus;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 
 defined( 'ABSPATH' ) || exit;
@@ -30,7 +31,7 @@ final class ContractPlans {
 	 *
 	 * @param ContractView $contract Contract.
 	 */
-	public static function for_contract( ContractView $contract ): ?Plan {
+	public static function for_contract( ContractView $contract ): ?PlanView {
 		return self::for_contracts( [ $contract ] )[ (int) $contract->get_selling_plan_id() ] ?? null;
 	}
 
@@ -38,7 +39,7 @@ final class ContractPlans {
 	 * The live plans of several contracts in one read, keyed by plan id.
 	 *
 	 * @param array<int, ContractView> $contracts Contracts.
-	 * @return array<int, Plan>
+	 * @return array<int, PlanView>
 	 */
 	public static function for_contracts( array $contracts ): array {
 		$ids = [];
@@ -54,7 +55,7 @@ final class ContractPlans {
 		}
 
 		$plans = [];
-		foreach ( ( new SellingPlans( [ Package::EXTENSION_SLUG ] ) )->get_plans( array_values( $ids ) ) as $plan ) {
+		foreach ( ( new SellingPlans( [ Package::EXTENSION_SLUG ] ) )->get_plans( array_values( $ids ), [ 'status' => PlanStatus::ACTIVE ] ) as $plan ) {
 			$plans[ (int) $plan->get_id() ] = $plan;
 		}
 

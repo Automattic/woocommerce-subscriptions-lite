@@ -32,7 +32,7 @@ use WC_Order;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Subscriptions;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
-use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Plan;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\View\PlanView;
 use Automattic\WooCommerce\SubscriptionsLite\Contracts\AddressFields;
 use Automattic\WooCommerce\SubscriptionsLite\Contracts\CustomerVisibility;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ContractPlans;
@@ -116,11 +116,11 @@ final class EngineDataProvider {
 	/**
 	 * Reduce a contract to the domain-ish list-row array {@see ViewModel::build_row()} reads.
 	 *
-	 * @param ContractView $contract The contract.
-	 * @param Plan|null    $plan     The contract's live plan.
+	 * @param ContractView  $contract The contract.
+	 * @param PlanView|null $plan     The contract's live plan.
 	 * @return array<string, mixed>
 	 */
-	private function contract_to_row( ContractView $contract, ?Plan $plan ): array {
+	private function contract_to_row( ContractView $contract, ?PlanView $plan ): array {
 		$cadence = $this->billing_cadence( $plan );
 
 		return [
@@ -255,10 +255,10 @@ final class EngineDataProvider {
 	 * No plan (or an unusable billing policy) degrades to an empty period and a zero
 	 * interval, which the view-model renders as a price with no cadence suffix.
 	 *
-	 * @param Plan|null $plan The contract's live plan.
+	 * @param PlanView|null $plan The contract's live plan.
 	 * @return array{period: string, interval: int}
 	 */
-	private function billing_cadence( ?Plan $plan ): array {
+	private function billing_cadence( ?PlanView $plan ): array {
 		$terms = BillingTerms::from_plan( $plan );
 		if ( null !== $terms ) {
 			return [

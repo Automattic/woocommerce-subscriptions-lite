@@ -14,8 +14,7 @@ declare( strict_types=1 );
 namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\CustomerPortal;
 
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
-use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Plan;
-use Automattic\WooCommerce\SubscriptionsEngine\Core\ValueObject\BillingPolicy;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\Plans;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\PlanRepository;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\CustomerPortal\EngineDataProvider;
@@ -156,12 +155,17 @@ final class EngineDataProviderTest extends LiteIntegrationTestCase {
 	public function test_detail_cadence_follows_a_live_plan_edit(): void {
 		$customer_id = $this->create_customer();
 		$contract_id = $this->create_contract( $customer_id );
-		$plans       = new PlanRepository();
-		$plan        = $plans->find( (int) Contracts::get( $contract_id )->get_selling_plan_id() );
-		$this->assertInstanceOf( Plan::class, $plan );
-
-		$plan->set_billing_policy( new BillingPolicy( 'week', 3, null, null, null ) );
-		$plans->update( $plan );
+		$this->assertTrue(
+			Plans::update(
+				(int) Contracts::get( $contract_id )->get_selling_plan_id(),
+				[
+					'billing_policy' => [
+						'period'   => 'week',
+						'interval' => 3,
+					],
+				]
+			)
+		);
 
 		$detail = $this->provider->get_contract( $contract_id, $customer_id );
 
