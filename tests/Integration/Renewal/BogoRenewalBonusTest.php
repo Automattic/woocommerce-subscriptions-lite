@@ -212,7 +212,9 @@ final class BogoRenewalBonusTest extends LiteIntegrationTestCase {
 
 		$this->stamp_plan( $order, $plan );
 
-		$contract_id = ( new ContractCreationHandler() )->create_contract( $order, $plan );
+		$contract = ( new ContractCreationHandler() )->create_contract( $order, $plan );
+		$this->assertNotNull( $contract );
+		$contract_id = $contract->get_id();
 
 		if ( Package::EXTENSION_SLUG !== $extension_slug ) {
 			// Lite's mapping always records Lite's slug, and update() does not take

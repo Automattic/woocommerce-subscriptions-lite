@@ -22,6 +22,7 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration;
 
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Subscriptions;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Plan;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\ValueObject\BillingPolicy;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Checkout\OrderLinkage;
@@ -160,7 +161,9 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 
 		$this->stamp_plan( $order, $plan );
 
-		$contract_id = ( new ContractCreationHandler() )->create_contract( $order, $plan );
+		$contract = ( new ContractCreationHandler() )->create_contract( $order, $plan );
+		$this->assertInstanceOf( ContractView::class, $contract );
+		$contract_id = $contract->get_id();
 
 		switch ( (string) ( $args['status'] ?? 'active' ) ) {
 			case 'on-hold':

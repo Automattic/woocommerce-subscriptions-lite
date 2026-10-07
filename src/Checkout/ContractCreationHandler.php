@@ -30,6 +30,7 @@ use WC_Order_Item_Product;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\SellingPlans;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Subscriptions;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\CycleStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Plan;
@@ -126,7 +127,7 @@ final class ContractCreationHandler {
 		}
 
 		try {
-			$contract_id = $this->create_contract( $order, $outcome['plan'] );
+			$contract = $this->create_contract( $order, $outcome['plan'] );
 		} catch ( Throwable $e ) {
 			$this->log_error( sprintf( 'failed to create a contract for order %d: %s', $order_id, $e->getMessage() ) );
 			try {
@@ -137,18 +138,18 @@ final class ContractCreationHandler {
 			return;
 		}
 
+		if ( null === $contract ) {
+			wc_get_logger()->warning(
+				sprintf( 'ContractCreationHandler: the contract for order %d no longer exists at activation; its first renewal was not scheduled.', $order_id ),
+				[ 'source' => self::LOG_SOURCE ]
+			);
+			return;
+		}
+
 		try {
-			$contract = Subscriptions::get( $contract_id );
-			if ( null === $contract ) {
-				wc_get_logger()->warning(
-					sprintf( 'ContractCreationHandler: contract %d for order %d could not be read back; its first renewal was not scheduled.', $contract_id, $order_id ),
-					[ 'source' => self::LOG_SOURCE ]
-				);
-				return;
-			}
 			( new RenewalWiring() )->schedule_first_renewal( $contract );
 		} catch ( Throwable $e ) {
-			$this->log_error( sprintf( 'failed to schedule the first renewal of contract %d: %s', $contract_id, $e->getMessage() ) );
+			$this->log_error( sprintf( 'failed to schedule the first renewal of contract %d: %s', $contract->get_id(), $e->getMessage() ) );
 		}
 	}
 
@@ -189,10 +190,10 @@ final class ContractCreationHandler {
 	 *
 	 * @param WC_Order $order The paid order.
 	 * @param Plan     $plan  The order's selling plan.
-	 * @return int The contract id.
+	 * @return ContractView|null The active contract; null when it was deleted before activation.
 	 * @throws Throwable When an engine write fails.
 	 */
-	public function create_contract( WC_Order $order, Plan $plan ): int {
+	public function create_contract( WC_Order $order, Plan $plan ): ?ContractView {
 		$plan_id    = (int) $plan->get_id();
 		$plan_lines = [];
 		foreach ( $order->get_items() as $item ) {
@@ -233,7 +234,7 @@ final class ContractCreationHandler {
 					'shipping' => $this->map_address( $order, 'shipping' ),
 				],
 			]
-		);
+		)->get_id();
 
 		Contracts::add_cycle(
 			$contract_id,
@@ -246,15 +247,13 @@ final class ContractCreationHandler {
 			]
 		);
 
-		Contracts::update(
+		return Contracts::update(
 			$contract_id,
 			[
 				'status'           => ContractStatus::ACTIVE,
 				'next_payment_gmt' => $next,
 			]
 		);
-
-		return $contract_id;
 	}
 
 	/**

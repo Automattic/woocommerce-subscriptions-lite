@@ -194,7 +194,7 @@ final class EngineDataProviderTest extends LiteIntegrationTestCase {
 				'customer_id'    => $customer_id,
 				'status'         => 'draft',
 			]
-		);
+		)->get_id();
 
 		$rows = $this->provider->get_contracts_for_customer( $customer_id );
 

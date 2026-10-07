@@ -89,8 +89,11 @@ final class ContractCreationOutcomesTest extends LiteIntegrationTestCase {
 		$plan = $this->make_plan();
 		$this->stamp_plan( $order, $plan );
 
-		$view = Subscriptions::get( ( new ContractCreationHandler() )->create_contract( $order, $plan ) );
-		$this->assertInstanceOf( ContractView::class, $view );
+		$created = ( new ContractCreationHandler() )->create_contract( $order, $plan );
+		$this->assertInstanceOf( ContractView::class, $created );
+
+		$view = Subscriptions::get( $created->get_id() );
+		$this->assertEquals( $view, $created, 'The returned view matches a fresh read.' );
 
 		return $view;
 	}
