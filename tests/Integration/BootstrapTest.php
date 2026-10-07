@@ -22,6 +22,7 @@ use Automattic\WooCommerce\SubscriptionsLite\Pricing\PlanWriteValidation;
 use Automattic\WooCommerce\SubscriptionsLite\ProductPage\PlanPicker;
 use Automattic\WooCommerce\SubscriptionsLite\ProductPage\VariationPlanData;
 use Automattic\WooCommerce\SubscriptionsLite\Renewal\BogoRenewalBonus;
+use Automattic\WooCommerce\SubscriptionsLite\Rest\ContractActionsController;
 
 /**
  * @covers \Automattic\WooCommerce\SubscriptionsLite\Bootstrap
@@ -47,6 +48,10 @@ final class BootstrapTest extends LiteIntegrationTestCase {
 		$this->assertNotFalse( has_filter( 'woocommerce_account_menu_items' ) );
 		$this->assertNotFalse( has_action( 'woocommerce_account_' . Endpoints::LIST_ENDPOINT . '_endpoint' ) );
 		$this->assertNotFalse( has_action( 'woocommerce_account_' . Endpoints::DETAIL_ENDPOINT . '_endpoint' ) );
+		$this->assertTrue(
+			$this->hook_has_callback_on( 'rest_api_init', ContractActionsController::class ),
+			'The customer action routes register on every request, not only in wp-admin.'
+		);
 	}
 
 	public function test_the_admin_module_stays_out_of_a_front_end_request(): void {
