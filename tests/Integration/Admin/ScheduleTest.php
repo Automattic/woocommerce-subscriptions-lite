@@ -2,9 +2,9 @@
 /**
  * Integration tests for the Schedule meta box.
  *
- * Contracts are seeded through the real checkout path, so the plan snapshot the
- * box reads (cadence, length, trial) is frozen exactly as production freezes it,
- * and the schedule dates come from the real contract.
+ * Contracts are seeded through the real checkout path, so the box reads the
+ * cadence, length and trial off the contract's live plan as production does, and
+ * the schedule dates come from the real contract.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Tests
  */
@@ -13,7 +13,8 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Admin;
 
-use Automattic\WooCommerce\SubscriptionsEngine\Api\Subscriptions;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
+use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\PlanRepository;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\MetaBoxes\Schedule;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
 
@@ -65,13 +66,27 @@ final class ScheduleTest extends LiteIntegrationTestCase {
 		$this->assertStringNotContainsString( 'cycles', $html );
 	}
 
+	public function test_a_contract_whose_plan_is_gone_shows_only_the_dates(): void {
+		$customer = $this->create_customer();
+		$id       = $this->create_contract( $customer );
+		$contract = Contracts::get( $id );
+		$this->assertNotNull( $contract );
+
+		( new PlanRepository() )->delete( (int) $contract->get_selling_plan_id() );
+		$html = $this->render( $id );
+
+		$this->assertStringNotContainsString( 'Billing', $html );
+		$this->assertStringContainsString( 'Start date', $html );
+		$this->assertStringContainsString( 'End date', $html );
+	}
+
 	/**
 	 * Capture the meta box output for a seeded contract.
 	 *
 	 * @param int $id Contract id.
 	 */
 	private function render( int $id ): string {
-		$contract = Subscriptions::get( $id );
+		$contract = Contracts::get( $id );
 		$this->assertNotNull( $contract );
 
 		ob_start();

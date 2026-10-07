@@ -6,7 +6,8 @@
  * contract whose terms carry an in-scope `bogo` entry for the renewal's cycle,
  * each product line's quantity grows by its bonus units. Money-neutral: line
  * and order totals are never touched, so the cycle's expected total stays the
- * price authority. Terms come only from the contract's frozen plan snapshot.
+ * price authority. Terms come from the contract's live plan, resolved off the contract
+ * read through the subscriptions facade; only the id is read off the hook's contract.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Renewal
  */
@@ -15,9 +16,10 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Renewal;
 
-use Automattic\WooCommerce\SubscriptionsEngine\Api\Subscriptions;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Contract;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
+use Automattic\WooCommerce\SubscriptionsLite\Plans\ContractPlans;
 use Automattic\WooCommerce\SubscriptionsLite\Pricing\PriceCalculator;
 use Automattic\WooCommerce\SubscriptionsLite\Pricing\PricingTerms;
 use WC_Order;
@@ -44,21 +46,22 @@ final class BogoRenewalBonus {
 	 * @param mixed $contract Contract being renewed.
 	 */
 	public function apply_bonus( $order, $contract ): void {
-		if ( ! $order instanceof WC_Order || ! $contract instanceof Contract || Package::EXTENSION_SLUG !== $contract->get_extension_slug() ) {
+		if ( ! $order instanceof WC_Order || ! $contract instanceof Contract || null === $contract->get_id()
+			|| Package::EXTENSION_SLUG !== $contract->get_extension_slug() ) {
 			return;
 		}
 
-		$snapshot = $contract->get_plan_snapshot();
-		if ( null === $snapshot ) {
+		$view = Contracts::get( $contract->get_id() );
+		if ( null === $view ) {
 			return;
 		}
 
-		$terms = PricingTerms::from_snapshot( $snapshot );
+		$terms = PricingTerms::from_plan( ContractPlans::for_contract( $view ) );
 		if ( ! $terms->has_type( PricingTerms::TYPE_BOGO ) ) {
 			return;
 		}
 
-		$cycle = self::cycle_count( (int) $contract->get_id(), $order->get_id() );
+		$cycle = self::cycle_count( $view->get_id(), $order->get_id() );
 		if ( null === $cycle ) {
 			return;
 		}
@@ -84,7 +87,7 @@ final class BogoRenewalBonus {
 	 * @param int $order_id    Renewal order id.
 	 */
 	private static function cycle_count( int $contract_id, int $order_id ): ?int {
-		foreach ( Subscriptions::get_history( $contract_id ) as $cycle ) {
+		foreach ( Contracts::get_cycles( $contract_id ) as $cycle ) {
 			if ( $cycle->get_order_id() === $order_id ) {
 				return $cycle->get_count();
 			}

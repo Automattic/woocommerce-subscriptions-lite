@@ -14,7 +14,11 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Admin;
 
-use Automattic\WooCommerce\SubscriptionsEngine\Api\Subscriptions;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
+use Automattic\WooCommerce\SubscriptionsLite\Admin\MetaBoxes\Customer;
+use Automattic\WooCommerce\SubscriptionsLite\Admin\MetaBoxes\Items;
+use Automattic\WooCommerce\SubscriptionsLite\Admin\MetaBoxes\Schedule;
+use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\MetaBoxes\SubscriptionData;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
 
@@ -53,13 +57,28 @@ final class SubscriptionDataTest extends LiteIntegrationTestCase {
 		$this->assertStringNotContainsString( 'Next payment', $html );
 	}
 
+	public function test_a_draft_without_customer_currency_or_payment_renders(): void {
+		$contract = Contracts::create( [ 'extension_slug' => Package::EXTENSION_SLUG ] );
+
+		ob_start();
+		SubscriptionData::output( $contract );
+		Customer::output( $contract );
+		Items::output( $contract );
+		Schedule::output( $contract );
+		$html = (string) ob_get_clean();
+
+		$this->assertStringContainsString( 'Payment method', $html );
+		$this->assertStringContainsString( '(no customer)', $html );
+		$this->assertStringContainsString( 'No items on this subscription.', $html );
+	}
+
 	/**
 	 * Capture the meta box output for a seeded contract.
 	 *
 	 * @param int $id Contract id.
 	 */
 	private function render( int $id ): string {
-		$contract = Subscriptions::get( $id );
+		$contract = Contracts::get( $id );
 		$this->assertNotNull( $contract );
 
 		ob_start();

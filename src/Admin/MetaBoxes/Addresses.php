@@ -15,7 +15,7 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Admin\MetaBoxes;
 
-use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Contract;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -27,12 +27,12 @@ final class Addresses {
 	/**
 	 * Render the box body.
 	 *
-	 * @param Contract $contract The contract being viewed.
+	 * @param ContractView $contract The contract being viewed.
 	 */
-	public static function output( Contract $contract ): void {
-		$addresses = $contract->get_addresses();
-		$billing   = self::address_of( $addresses, Contract::ADDRESS_BILLING );
-		$shipping  = self::address_of( $addresses, Contract::ADDRESS_SHIPPING );
+	public static function output( ContractView $contract ): void {
+		$addresses = $contract->get_addresses() ?? [];
+		$billing   = self::address_of( $addresses, 'billing' );
+		$shipping  = self::address_of( $addresses, 'shipping' );
 		?>
 		<div class="wc-subs-lite-addresses">
 			<div class="wc-subs-lite-address">
@@ -51,7 +51,7 @@ final class Addresses {
 	 * One address array from the contract's address map, or an empty array.
 	 *
 	 * @param array<string, mixed> $addresses The contract address map.
-	 * @param string               $type      Contract::ADDRESS_BILLING | ADDRESS_SHIPPING.
+	 * @param string               $type      `billing` or `shipping`.
 	 * @return array<string, mixed>
 	 */
 	private static function address_of( array $addresses, string $type ): array {

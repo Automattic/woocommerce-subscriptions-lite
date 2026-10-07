@@ -16,7 +16,7 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Admin\MetaBoxes;
 
 use Automattic\WooCommerce\SubscriptionsLite\Admin\PageController;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\StatusLabels;
-use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Contract;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -28,9 +28,9 @@ final class Actions {
 	/**
 	 * Render the box body.
 	 *
-	 * @param Contract $contract The contract being viewed.
+	 * @param ContractView $contract The contract being viewed.
 	 */
-	public static function output( Contract $contract ): void {
+	public static function output( ContractView $contract ): void {
 		$id     = (int) $contract->get_id();
 		$status = $contract->get_status();
 		// Back-to-list navigation lives in this box, not in the page title.

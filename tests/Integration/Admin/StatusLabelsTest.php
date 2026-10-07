@@ -23,6 +23,7 @@ use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTe
 final class StatusLabelsTest extends LiteIntegrationTestCase {
 
 	public function test_contract_label_uses_merchant_wording(): void {
+		$this->assertSame( 'Draft', StatusLabels::contract_label( ContractStatus::DRAFT ) );
 		$this->assertSame( 'Active', StatusLabels::contract_label( ContractStatus::ACTIVE ) );
 		$this->assertSame( 'Pending cancellation', StatusLabels::contract_label( ContractStatus::PENDING_CANCELLATION ) );
 	}
@@ -42,10 +43,12 @@ final class StatusLabelsTest extends LiteIntegrationTestCase {
 		$this->assertTrue( StatusLabels::is_cancellable( ContractStatus::PENDING_CANCELLATION ) );
 		$this->assertFalse( StatusLabels::is_cancellable( ContractStatus::CANCELLED ) );
 		$this->assertFalse( StatusLabels::is_cancellable( ContractStatus::EXPIRED ) );
+		$this->assertTrue( StatusLabels::is_cancellable( ContractStatus::DRAFT ), 'A stuck draft can be cancelled.' );
 	}
 
-	public function test_is_renewable_excludes_terminal_statuses(): void {
+	public function test_is_renewable_excludes_terminal_statuses_and_drafts(): void {
 		$this->assertTrue( StatusLabels::is_renewable( ContractStatus::ACTIVE ) );
+		$this->assertFalse( StatusLabels::is_renewable( ContractStatus::DRAFT ), 'The engine never renews a draft.' );
 		$this->assertFalse( StatusLabels::is_renewable( ContractStatus::CANCELLED ) );
 		$this->assertFalse( StatusLabels::is_renewable( ContractStatus::EXPIRED ) );
 	}

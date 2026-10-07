@@ -20,7 +20,7 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Renewal;
 
-use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Contract;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Renewal\RenewalDispatcher;
 
 defined( 'ABSPATH' ) || exit;
@@ -42,17 +42,17 @@ final class RenewalWiring {
 	/**
 	 * Engine scheduler. Production: `RenewalDispatcher::ensure_scheduled()`.
 	 *
-	 * @var callable(Contract): bool
+	 * @var callable(ContractView): bool
 	 */
 	private $scheduler;
 
 	/**
 	 * Construct the wiring.
 	 *
-	 * @param (callable(Contract): bool)|null $scheduler Scheduler; defaults to arming the engine dispatcher's recurring scan.
+	 * @param (callable(ContractView): bool)|null $scheduler Scheduler; defaults to arming the engine dispatcher's recurring scan.
 	 */
 	public function __construct( ?callable $scheduler = null ) {
-		$this->scheduler = $scheduler ?? static function ( Contract $contract ): bool {
+		$this->scheduler = $scheduler ?? static function ( ContractView $contract ): bool {
 			unset( $contract ); // The batch scan covers all due contracts; nothing per-contract to enqueue.
 			RenewalDispatcher::ensure_scheduled();
 			return true;
@@ -67,23 +67,23 @@ final class RenewalWiring {
 	 * contract is created and active, but nothing will charge it until the
 	 * cause (typically a gateway without the `recurring` capability) is fixed.
 	 *
-	 * @param Contract $contract The contract to arm. Must have an id and a next-payment date.
+	 * @param ContractView $contract The contract to arm.
 	 * @return bool True when renewals are armed; false when turned down.
 	 */
-	public function schedule_first_renewal( Contract $contract ): bool {
+	public function schedule_first_renewal( ContractView $contract ): bool {
 		$scheduled = ( $this->scheduler )( $contract );
 
 		if ( ! $scheduled ) {
-			$gateway = $contract->get_payment_instrument()->get_gateway();
+			$gateway = $contract->get_payment_method();
 			wc_get_logger()->warning(
 				sprintf(
 					'RenewalWiring: the engine did not schedule a first renewal for contract %d (gateway "%s"). The contract is active but no renewal is armed - the gateway likely does not declare the "recurring" capability.',
-					(int) $contract->get_id(),
+					$contract->get_id(),
 					(string) ( $gateway ?? '' )
 				),
 				[
 					'source'      => self::LOG_SOURCE,
-					'contract_id' => (int) $contract->get_id(),
+					'contract_id' => $contract->get_id(),
 				]
 			);
 		}

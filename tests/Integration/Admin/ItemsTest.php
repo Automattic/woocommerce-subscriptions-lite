@@ -12,7 +12,7 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Admin;
 
-use Automattic\WooCommerce\SubscriptionsEngine\Api\Subscriptions;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\MetaBoxes\Items;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
 
@@ -66,7 +66,7 @@ final class ItemsTest extends LiteIntegrationTestCase {
 	 * @param int $id Contract id.
 	 */
 	private function render( int $id ): string {
-		$contract = Subscriptions::get( $id );
+		$contract = Contracts::get( $id );
 		$this->assertNotNull( $contract );
 
 		ob_start();

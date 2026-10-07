@@ -27,8 +27,8 @@ use Automattic\WooCommerce\SubscriptionsLite\Admin\MetaBoxes\Customer;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\MetaBoxes\Items;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\MetaBoxes\Schedule;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\MetaBoxes\SubscriptionData;
-use Automattic\WooCommerce\SubscriptionsEngine\Api\Subscriptions;
-use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Contract;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -41,7 +41,7 @@ final class DetailRenderer {
 	 * Per-request cache of fetched contracts, so the load-time setup and the
 	 * render pass share a single facade read.
 	 *
-	 * @var array<int, Contract|null>
+	 * @var array<int, ContractView|null>
 	 */
 	private static $cache = [];
 
@@ -146,7 +146,7 @@ final class DetailRenderer {
 		 * can add their own boxes to this screen. Mirrors WordPress core's
 		 * per-screen `add_meta_boxes_<screen>` hook.
 		 *
-		 * @param Contract|null $contract The contract being viewed, or null when it could not be loaded.
+		 * @param ContractView|null $contract The contract being viewed, or null when it could not be loaded.
 		 */
 		// phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- mirrors WordPress core's per-screen add_meta_boxes_<screen> hook so extensions register boxes the standard way.
 		do_action( 'add_meta_boxes_' . $screen_id, self::fetch( $contract_id ) );
@@ -231,7 +231,7 @@ final class DetailRenderer {
 	 *
 	 * @param int $contract_id Contract id.
 	 */
-	private static function fetch( int $contract_id ): ?Contract {
+	private static function fetch( int $contract_id ): ?ContractView {
 		if ( $contract_id <= 0 ) {
 			return null;
 		}
@@ -240,7 +240,7 @@ final class DetailRenderer {
 		}
 
 		try {
-			$contract = Subscriptions::get( $contract_id );
+			$contract = Contracts::get( $contract_id );
 		} catch ( Throwable $e ) {
 			wc_get_logger()->error(
 				'Admin subscription detail could not be loaded for #' . $contract_id . ': ' . $e->getMessage(),

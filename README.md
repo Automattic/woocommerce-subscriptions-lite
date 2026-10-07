@@ -38,8 +38,8 @@ npm run lint:css         # SCSS
 
 The suite bootstrap installs WooCommerce and the engine schema once, and
 `WP_UnitTestCase` wraps each test in a rolled-back transaction. Tests seed
-contracts through the production checkout path (a real order through the
-engine factory) and assert observable behavior - rendered markup, facade
+contracts through the production checkout path (a real order through
+`ContractCreationHandler::create_contract()`) and assert observable behavior - rendered markup, facade
 reads, hook effects - not implementation internals.
 
 ## License

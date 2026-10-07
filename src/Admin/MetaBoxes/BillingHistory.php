@@ -19,9 +19,9 @@ use Automattic\WooCommerce\SubscriptionsLite\Utilities\Formatter;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\OrderLinks;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\PageController;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\StatusLabels;
-use Automattic\WooCommerce\SubscriptionsEngine\Api\Subscriptions;
-use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Contract;
-use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Cycle;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\View\CycleView;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -33,13 +33,13 @@ final class BillingHistory {
 	/**
 	 * Render the box body.
 	 *
-	 * @param Contract $contract The contract being viewed.
+	 * @param ContractView $contract The contract being viewed.
 	 */
-	public static function output( Contract $contract ): void {
+	public static function output( ContractView $contract ): void {
 		$contract_id = (int) $contract->get_id();
 
 		try {
-			$cycles = Subscriptions::get_history( $contract_id, PageController::PER_PAGE );
+			$cycles = Contracts::get_cycles( $contract_id, PageController::PER_PAGE );
 		} catch ( Throwable $e ) {
 			wc_get_logger()->error(
 				'Admin subscription history could not be loaded for #' . $contract_id . ': ' . $e->getMessage(),
@@ -81,9 +81,9 @@ final class BillingHistory {
 	/**
 	 * Render one cycle-history row.
 	 *
-	 * @param Cycle $cycle One billing cycle.
+	 * @param CycleView $cycle One billing cycle.
 	 */
-	private static function row( Cycle $cycle ): void {
+	private static function row( CycleView $cycle ): void {
 		$count    = $cycle->get_count();
 		$order_id = $cycle->get_order_id();
 		$period   = sprintf(
@@ -100,7 +100,7 @@ final class BillingHistory {
 		<tr>
 			<td><?php echo esc_html( (string) $cycle->get_sequence_no() ); ?></td>
 			<td><?php echo esc_html( null === $count ? Formatter::PLACEHOLDER : (string) $count ); ?></td>
-			<td><?php echo esc_html( StatusLabels::cycle_label( $cycle->get_status()->get_value() ) ); ?></td>
+			<td><?php echo esc_html( StatusLabels::cycle_label( $cycle->get_status() ) ); ?></td>
 			<td><?php echo esc_html( $period ); ?></td>
 			<td><?php echo Formatting::price( $cycle->get_expected_total(), $cycle->get_currency() ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- price markup escaped at source. ?></td>
 			<td><?php echo wp_kses_post( $order_value ); ?></td>

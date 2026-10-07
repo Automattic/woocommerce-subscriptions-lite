@@ -10,11 +10,14 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Renewal;
 
+use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Subscriptions;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Plan;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Gateway\GatewayCapabilities;
-use Automattic\WooCommerce\SubscriptionsEngine\Integration\Checkout\ContractFactory;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\PlanRepository;
+use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\SchemaInstaller;
+use Automattic\WooCommerce\SubscriptionsLite\Checkout\ContractCreationHandler;
+use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Renewal\BogoRenewalBonus;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
 use WC_Order;
@@ -84,7 +87,7 @@ final class BogoRenewalBonusTest extends LiteIntegrationTestCase {
 	public function test_a_fractional_paid_quantity_earns_a_fractional_bonus(): void {
 		remove_filter( 'woocommerce_stock_amount', 'intval' );
 		add_filter( 'woocommerce_stock_amount', 'floatval' );
-		$contract_id = $this->sign_up( [ 'policies' => [ [ 'type' => 'bogo' ] ] ], 'woocommerce-subscriptions-lite', 1.5 );
+		$contract_id = $this->sign_up( [ 'policies' => [ [ 'type' => 'bogo' ] ] ], Package::EXTENSION_SLUG, 1.5 );
 
 		$item = $this->only_line( $this->renew( $contract_id ) );
 
@@ -124,26 +127,18 @@ final class BogoRenewalBonusTest extends LiteIntegrationTestCase {
 		$this->assertSame( 2, $this->only_line( $this->renew( $contract_id ) )->get_quantity() );
 	}
 
-	public function test_the_snapshot_terms_apply_after_the_live_plan_is_deleted(): void {
-		$contract_id = $this->sign_up( [ 'policies' => [ [ 'type' => 'bogo' ] ] ] );
+	public function test_a_bogo_added_to_the_live_plan_later_applies_on_renewal(): void {
+		$contract_id = $this->sign_up( null );
 
-		$contract = Subscriptions::get( $contract_id );
-		$this->assertNotNull( $contract );
-		( new PlanRepository() )->delete( $contract->get_selling_plan_id() );
+		$this->set_live_pricing_policy( $contract_id, [ 'policies' => [ [ 'type' => 'bogo' ] ] ] );
 
 		$this->assertSame( 4, $this->only_line( $this->renew( $contract_id ) )->get_quantity() );
 	}
 
-	public function test_a_snapshot_without_terms_ignores_a_bogo_added_to_the_live_plan_later(): void {
-		$contract_id = $this->sign_up( null );
+	public function test_a_bogo_removed_from_the_live_plan_grants_nothing(): void {
+		$contract_id = $this->sign_up( [ 'policies' => [ [ 'type' => 'bogo' ] ] ] );
 
-		$contract = Subscriptions::get( $contract_id );
-		$this->assertNotNull( $contract );
-		$plans = new PlanRepository();
-		$plan  = $plans->find( $contract->get_selling_plan_id() );
-		$this->assertInstanceOf( Plan::class, $plan );
-		$plan->set_pricing_policy( [ 'policies' => [ [ 'type' => 'bogo' ] ] ] );
-		$this->assertTrue( $plans->update( $plan ) );
+		$this->set_live_pricing_policy( $contract_id, null );
 
 		$this->assertSame( 2, $this->only_line( $this->renew( $contract_id ) )->get_quantity() );
 	}
@@ -173,14 +168,31 @@ final class BogoRenewalBonusTest extends LiteIntegrationTestCase {
 	}
 
 	/**
-	 * Sign up a contract for `$quantity` x 19.99 on a monthly plan with the given terms.
+	 * Replace the pricing payload of the contract's live plan.
+	 *
+	 * @param int                       $contract_id    Contract id.
+	 * @param array<string, mixed>|null $pricing_policy New pricing payload.
+	 */
+	private function set_live_pricing_policy( int $contract_id, ?array $pricing_policy ): void {
+		$contract = Contracts::get( $contract_id );
+		$this->assertNotNull( $contract );
+		$plans = new PlanRepository();
+		$plan  = $plans->find( (int) $contract->get_selling_plan_id() );
+		$this->assertInstanceOf( Plan::class, $plan );
+		$plan->set_pricing_policy( $pricing_policy );
+		$this->assertTrue( $plans->update( $plan ) );
+	}
+
+	/**
+	 * Sign up a contract for `$quantity` x 19.99 on a monthly plan with the given terms,
+	 * through Lite's checkout mapping.
 	 *
 	 * @param array<string, mixed>|null $pricing_policy Plan pricing payload.
-	 * @param string                    $extension_slug Plan owner.
+	 * @param string                    $extension_slug Plan and contract owner.
 	 * @param int|float                 $quantity       Origin line quantity.
 	 * @return int Contract id.
 	 */
-	private function sign_up( ?array $pricing_policy, string $extension_slug = 'woocommerce-subscriptions-lite', $quantity = 2 ): int {
+	private function sign_up( ?array $pricing_policy, string $extension_slug = Package::EXTENSION_SLUG, $quantity = 2 ): int {
 		$plan  = $this->make_plan(
 			'month',
 			1,
@@ -199,7 +211,25 @@ final class BogoRenewalBonusTest extends LiteIntegrationTestCase {
 			]
 		);
 
-		return (int) ( new ContractFactory() )->create_from_order( $order, $plan )->get_id();
+		$this->stamp_plan( $order, $plan );
+
+		$contract = ( new ContractCreationHandler() )->create_contract( $order, $plan );
+		$this->assertNotNull( $contract );
+		$contract_id = $contract->get_id();
+
+		if ( Package::EXTENSION_SLUG !== $extension_slug ) {
+			// Lite's mapping always records Lite's slug, and update() does not take
+			// `extension_slug`; reassign the row directly to model another extension's contract.
+			global $wpdb;
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Test seeding for a state the facade does not produce.
+			$wpdb->update(
+				SchemaInstaller::get_table_name( SchemaInstaller::TABLE_CONTRACTS ),
+				[ 'extension_slug' => $extension_slug ],
+				[ 'id' => $contract_id ]
+			);
+		}
+
+		return $contract_id;
 	}
 
 	/**

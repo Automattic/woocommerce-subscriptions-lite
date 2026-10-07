@@ -6,12 +6,12 @@
  * a transaction and rolls it back, so seeded rows do not leak between tests.
  *
  * Seeding philosophy: contracts are created through the REAL production path -
- * a WooCommerce order run through the engine's checkout factory - and moved to
- * other statuses through the engine's public facade verbs, so the data under
- * test is shaped exactly like production data. The engine's `Integration\`
- * classes used here (plan repositories, checkout factory) are a documented
- * test-only exemption from the "consume the engine via the `Api\` facade only"
- * production rule; the engine's own integration tests seed the same way.
+ * a WooCommerce order mapped by Lite's checkout handler onto the engine's
+ * contracts facade - and moved to other statuses through the engine's public
+ * facade verbs, so the data under test is shaped exactly like production data.
+ * The engine's `Integration\` classes used here (plan repository, order
+ * linkage for renewal orders) are a documented test-only exemption from the
+ * "consume the engine via the `Api\` facade only" production rule.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Tests
  */
@@ -20,13 +20,16 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration;
 
+use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Subscriptions;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Plan;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\ValueObject\BillingPolicy;
-use Automattic\WooCommerce\SubscriptionsEngine\Integration\Checkout\ContractFactory;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Checkout\OrderLinkage;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\PlanRepository;
-use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\SchemaInstaller;
+use Automattic\WooCommerce\SubscriptionsLite\Cart\CartPlanHooks;
+use Automattic\WooCommerce\SubscriptionsLite\Checkout\ContractCreationHandler;
+use Automattic\WooCommerce\SubscriptionsLite\Package;
 use WC_Order;
 use WC_Product_Simple;
 use WP_UnitTestCase;
@@ -99,7 +102,7 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 					'name'           => ucfirst( $period ) . 'ly plan',
 					'billing_policy' => new BillingPolicy( $period, $interval, null, $max_cycles, null ),
 					'category'       => Plan::DEFAULT_CATEGORY,
-					'extension_slug' => 'woocommerce-subscriptions-lite',
+					'extension_slug' => Package::EXTENSION_SLUG,
 				],
 				$overrides
 			)
@@ -156,8 +159,11 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 		);
 		$order = $this->create_subscription_order( $customer_id, $args );
 
-		$contract    = ( new ContractFactory() )->create_from_order( $order, $plan );
-		$contract_id = (int) $contract->get_id();
+		$this->stamp_plan( $order, $plan );
+
+		$contract = ( new ContractCreationHandler() )->create_contract( $order, $plan );
+		$this->assertInstanceOf( ContractView::class, $contract );
+		$contract_id = $contract->get_id();
 
 		switch ( (string) ( $args['status'] ?? 'active' ) ) {
 			case 'on-hold':
@@ -177,20 +183,27 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 	}
 
 	/**
-	 * Force a contract's raw status column - for states no facade verb produces
+	 * Stamp every order line with `$plan`, as the cart writer does at checkout.
+	 *
+	 * @param WC_Order $order The order.
+	 * @param Plan     $plan  The selling plan.
+	 */
+	protected function stamp_plan( WC_Order $order, Plan $plan ): void {
+		foreach ( $order->get_items() as $item ) {
+			$item->update_meta_data( CartPlanHooks::SELLING_PLAN_ID_KEY, (string) $plan->get_id() );
+			$item->save();
+		}
+	}
+
+	/**
+	 * Set a contract's status directly - for states no lifecycle verb produces
 	 * (e.g. `expired`). Prefer {@see self::create_contract()} status transitions.
 	 *
 	 * @param int    $contract_id Contract id.
-	 * @param string $status      Raw status value.
+	 * @param string $status      A registered contract status.
 	 */
 	protected function force_contract_status( int $contract_id, string $status ): void {
-		global $wpdb;
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Test seeding shortcut for states without a transition verb.
-		$wpdb->update(
-			SchemaInstaller::get_table_name( SchemaInstaller::TABLE_CONTRACTS ),
-			[ 'status' => $status ],
-			[ 'id' => $contract_id ]
-		);
+		Contracts::update( $contract_id, [ 'status' => $status ] );
 	}
 
 	/**

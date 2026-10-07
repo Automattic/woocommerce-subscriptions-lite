@@ -20,7 +20,7 @@ use Automattic\WooCommerce\SubscriptionsLite\Admin\Formatting;
 use Automattic\WooCommerce\SubscriptionsLite\Utilities\Formatter;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\OrderLinks;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\StatusLabels;
-use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Contract;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -35,9 +35,9 @@ final class SubscriptionData {
 	 * Receives the contract as the object `do_meta_boxes()` passes to the box
 	 * callback.
 	 *
-	 * @param Contract $contract The contract being viewed.
+	 * @param ContractView $contract The contract being viewed.
 	 */
-	public static function output( Contract $contract ): void {
+	public static function output( ContractView $contract ): void {
 		DetailTable::render( self::rows( $contract ) );
 	}
 
@@ -47,10 +47,10 @@ final class SubscriptionData {
 	 * dates live in the side "Schedule" box, so this box stays the at-a-glance
 	 * summary the merchant reads first.
 	 *
-	 * @param Contract $contract The contract.
+	 * @param ContractView $contract The contract.
 	 * @return array<int, array{label: string, value: string}>
 	 */
-	private static function rows( Contract $contract ): array {
+	private static function rows( ContractView $contract ): array {
 		$origin_order_id = $contract->get_origin_order_id();
 		$origin_value    = null !== $origin_order_id
 			? sprintf( '<a href="%s">#%d</a>', esc_url( OrderLinks::edit_url( $origin_order_id ) ), $origin_order_id )
@@ -63,7 +63,7 @@ final class SubscriptionData {
 			],
 			[
 				'label' => __( 'Recurring total', 'woocommerce-subscriptions-lite' ),
-				'value' => Formatting::price( $contract->get_billing_total(), $contract->get_currency() ),
+				'value' => Formatting::price( $contract->get_billing_total(), (string) ( $contract->get_currency() ?? '' ) ),
 			],
 			[
 				'label' => __( 'Payment method', 'woocommerce-subscriptions-lite' ),
@@ -77,13 +77,12 @@ final class SubscriptionData {
 	}
 
 	/**
-	 * Merchant-facing payment method label: the instrument's stored title, falling back to its
-	 * gateway id, then a placeholder when neither is known.
+	 * Merchant-facing payment method label: the stored title, falling back to the gateway id,
+	 * then a placeholder when neither is known.
 	 *
-	 * @param Contract $contract The contract.
+	 * @param ContractView $contract The contract.
 	 */
-	private static function payment_method_label( Contract $contract ): string {
-		$instrument = $contract->get_payment_instrument();
-		return $instrument->get_title() ?? $instrument->get_gateway() ?? Formatter::PLACEHOLDER;
+	private static function payment_method_label( ContractView $contract ): string {
+		return $contract->get_payment_method_title() ?? $contract->get_payment_method() ?? Formatter::PLACEHOLDER;
 	}
 }

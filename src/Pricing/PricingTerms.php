@@ -25,7 +25,6 @@ declare( strict_types=1 );
 namespace Automattic\WooCommerce\SubscriptionsLite\Pricing;
 
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Plan;
-use Automattic\WooCommerce\SubscriptionsEngine\Core\ValueObject\PlanSnapshot;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -96,24 +95,12 @@ final class PricingTerms {
 	}
 
 	/**
-	 * Terms of a live plan; empty terms when the plan carries no payload.
+	 * Terms of a plan; empty terms when there is no plan or it carries no payload.
 	 *
-	 * @param Plan $plan Plan.
+	 * @param Plan|null $plan Plan.
 	 */
-	public static function from_plan( Plan $plan ): self {
-		return self::from_array( $plan->get_pricing_policy() ?? [] );
-	}
-
-	/**
-	 * Terms frozen in a plan snapshot; empty terms when its `pricing_policy` is
-	 * absent, null or not an object.
-	 *
-	 * @param PlanSnapshot $snapshot Plan snapshot.
-	 */
-	public static function from_snapshot( PlanSnapshot $snapshot ): self {
-		$data = $snapshot->to_array()['pricing_policy'] ?? null;
-
-		return self::from_array( is_array( $data ) ? $data : [] );
+	public static function from_plan( ?Plan $plan ): self {
+		return self::from_array( null !== $plan ? $plan->get_pricing_policy() ?? [] : [] );
 	}
 
 	/**

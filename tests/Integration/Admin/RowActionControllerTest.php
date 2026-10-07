@@ -16,9 +16,13 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Admin;
 
+use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
+use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
+use Automattic\WooCommerce\SubscriptionsLite\Admin\MetaBoxes\Actions;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\PageController;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\RowActionController;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\RowActionResult;
+use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
 use RuntimeException;
 use WC_Order;
@@ -143,6 +147,26 @@ final class RowActionControllerTest extends LiteIntegrationTestCase {
 
 		$this->assertTrue( $result->is_success() );
 		$this->assertSame( [ 100 ], $cancel_calls, 'The facade cancel runs for the authorised contract.' );
+	}
+
+	public function test_a_draft_offers_cancel_and_the_real_cancel_resolves_it(): void {
+		$draft = Contracts::create( [ 'extension_slug' => Package::EXTENSION_SLUG ] );
+		$id    = $draft->get_id();
+
+		ob_start();
+		Actions::output( $draft );
+		$html = (string) ob_get_clean();
+		$this->assertStringContainsString( PageController::ACTION_CANCEL, $html, 'The detail screen offers Cancel for a draft.' );
+		$this->assertStringNotContainsString( PageController::ACTION_RENEW_NOW, $html, 'Renew now stays hidden for a draft.' );
+
+		// Default canceller: the real engine facade.
+		$controller = new RowActionController( null, null, static fn (): bool => true );
+		$result     = $controller->handle_cancel( [ 'contract_id' => $id ] );
+
+		$this->assertTrue( $result->is_success() );
+		$stored = Contracts::get( $id );
+		$this->assertNotNull( $stored );
+		$this->assertSame( ContractStatus::CANCELLED, $stored->get_status() );
 	}
 
 	public function test_cancel_reports_a_missing_contract_as_an_error(): void {

@@ -18,7 +18,7 @@ declare( strict_types=1 );
 namespace Automattic\WooCommerce\SubscriptionsLite\Admin\MetaBoxes;
 
 use Automattic\WooCommerce\SubscriptionsLite\Admin\Formatting;
-use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Contract;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -30,16 +30,16 @@ final class Items {
 	/**
 	 * Render the box body.
 	 *
-	 * @param Contract $contract The contract being viewed.
+	 * @param ContractView $contract The contract being viewed.
 	 */
-	public static function output( Contract $contract ): void {
-		$items = $contract->get_items();
+	public static function output( ContractView $contract ): void {
+		$items = $contract->get_items() ?? [];
 		if ( empty( $items ) ) {
 			echo '<p>' . esc_html__( 'No items on this subscription.', 'woocommerce-subscriptions-lite' ) . '</p>';
 			return;
 		}
 
-		$currency = $contract->get_currency();
+		$currency = (string) ( $contract->get_currency() ?? '' );
 		?>
 		<table class="widefat striped wc-subs-lite-items-table">
 			<thead>
