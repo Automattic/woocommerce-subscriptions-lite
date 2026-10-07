@@ -207,9 +207,9 @@ final class ContractCreationHandler {
 			: new DateTimeImmutable( 'now', new DateTimeZone( 'UTC' ) );
 		$next  = $plan->get_billing_policy()->compute_first_renewal_from( $start );
 
-		$totals = $this->recurring_totals( $order, $plan_lines );
+		$totals = $this->get_recurring_totals( $order, $plan_lines );
 		$items  = $this->map_items( $plan_lines );
-		$token  = $this->payment_token_id( $order );
+		$token  = $this->get_payment_token_id( $order );
 
 		$contract_id = Contracts::create(
 			[
@@ -265,7 +265,7 @@ final class ContractCreationHandler {
 	 * @param array<int, WC_Order_Item_Product> $plan_lines The order's plan lines.
 	 * @return array{billing_total: string, discount_total: string, shipping_total: string, tax_total: string}
 	 */
-	private function recurring_totals( WC_Order $order, array $plan_lines ): array {
+	private function get_recurring_totals( WC_Order $order, array $plan_lines ): array {
 		$lines    = 0.0;
 		$line_tax = 0.0;
 		$discount = 0.0;
@@ -327,7 +327,7 @@ final class ContractCreationHandler {
 	 *
 	 * @param WC_Order $order The order.
 	 */
-	private function payment_token_id( WC_Order $order ): ?int {
+	private function get_payment_token_id( WC_Order $order ): ?int {
 		$tokens = $order->get_payment_tokens();
 		$token  = [] !== $tokens ? (int) end( $tokens ) : 0;
 
