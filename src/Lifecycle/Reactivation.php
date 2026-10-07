@@ -3,7 +3,7 @@
  * Reactivation - resume a held subscription (resume billing).
  *
  * Moves the contract on-hold -> active and re-arms its next-due moment, recomputed
- * forward from the {@see HoldAnchor} so a long hold never fires a back-dated renewal.
+ * forward from the {@see HoldAnchor} so the next renewal is never due at a past date.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Lifecycle
  */
@@ -85,7 +85,7 @@ final class Reactivation {
 	 *
 	 * A future anchor is kept; a past-due one is rolled forward by whole plan cadences until
 	 * it is in the future, floored at `$now` when there is no cadence or the roll cap runs
-	 * out (logged); no anchor leaves the contract unscheduled. No catch-up charge.
+	 * out (logged); no anchor leaves the contract unscheduled.
 	 *
 	 * @param ContractView      $contract The contract being reactivated.
 	 * @param string|null       $anchor   GMT moment to recompute from, or null.
