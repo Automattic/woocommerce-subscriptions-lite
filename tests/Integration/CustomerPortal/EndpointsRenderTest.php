@@ -226,6 +226,7 @@ final class EndpointsRenderTest extends LiteIntegrationTestCase {
 		$this->assertArrayHasKey( 'i18n', $state );
 		$this->assertSame( '', $state['error'] );
 		$this->assertSame( '', $state['actionError'] );
+		$this->assertSame( rest_url( 'wc-subscriptions-lite/v1/contracts/' ), $state['restBase'], 'Actions post to Lite\'s own routes.' );
 	}
 
 	public function test_on_hold_admin_path_shows_reactivate(): void {

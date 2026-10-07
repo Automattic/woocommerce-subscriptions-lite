@@ -9,8 +9,9 @@
  * The store namespace is part of the public extension contract: a premium
  * overlay imports this same store to add actions without forking the renderer.
  *
- * Transport: lifecycle actions POST to the engine's authenticated `wc/v3` REST
- * routes with the `X-WP-Nonce` cookie-auth header. There is NO Store API path.
+ * Transport: lifecycle actions POST to Lite's authenticated
+ * `wc-subscriptions-lite/v1` REST routes with the `X-WP-Nonce` cookie-auth header.
+ * There is NO Store API path.
  *
  * Translatable copy is seeded into `state.i18n` from PHP rather than called via
  * `@wordpress/i18n` in the module, so the strings stay in the text domain and

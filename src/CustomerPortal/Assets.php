@@ -86,14 +86,13 @@ final class Assets {
 	}
 
 	/**
-	 * The REST base the iAPI store posts lifecycle actions to: the engine's
-	 * contracts route - the one implementation of the lifecycle transitions,
-	 * which consumers call rather than re-route.
+	 * The REST base the iAPI store posts lifecycle actions to: Lite's own contract
+	 * action routes ({@see \Automattic\WooCommerce\SubscriptionsLite\Rest\ContractActionsController}).
 	 *
 	 * @return string Absolute REST base URL, no trailing contract id.
 	 */
 	public static function rest_base(): string {
-		return rest_url( 'wc/v3/subscriptions-engine/contracts/' );
+		return rest_url( 'wc-subscriptions-lite/v1/contracts/' );
 	}
 
 	/**
