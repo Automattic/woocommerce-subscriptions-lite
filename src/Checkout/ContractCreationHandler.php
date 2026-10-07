@@ -213,7 +213,7 @@ final class ContractCreationHandler {
 
 		$contract_id = Contracts::create(
 			[
-				'owner'                => Package::EXTENSION_SLUG,
+				'extension_slug'       => Package::EXTENSION_SLUG,
 				'status'               => ContractStatus::DRAFT,
 				'customer_id'          => $order->get_customer_id() > 0 ? $order->get_customer_id() : null,
 				'currency'             => $order->get_currency(),

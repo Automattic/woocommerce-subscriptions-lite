@@ -207,8 +207,8 @@ final class BogoRenewalBonusTest extends LiteIntegrationTestCase {
 		$contract_id = ( new ContractCreationHandler() )->create_contract( $order, $plan );
 
 		if ( Package::EXTENSION_SLUG !== $extension_slug ) {
-			// Lite's mapping always records Lite as the owner, and the facade has no owner
-			// update; reassign the row directly to model another extension's contract.
+			// Lite's mapping always records Lite's slug, and update() does not take
+			// `extension_slug`; reassign the row directly to model another extension's contract.
 			global $wpdb;
 			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Test seeding for a state the facade does not produce.
 			$wpdb->update(

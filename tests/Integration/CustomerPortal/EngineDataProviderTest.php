@@ -163,9 +163,9 @@ final class EngineDataProviderTest extends LiteIntegrationTestCase {
 		$active_id   = $this->create_contract( $customer_id );
 		$draft_id    = Contracts::create(
 			[
-				'owner'       => Package::EXTENSION_SLUG,
-				'customer_id' => $customer_id,
-				'status'      => 'draft',
+				'extension_slug' => Package::EXTENSION_SLUG,
+				'customer_id'    => $customer_id,
+				'status'         => 'draft',
 			]
 		);
 
@@ -181,8 +181,8 @@ final class EngineDataProviderTest extends LiteIntegrationTestCase {
 		$older_id    = $this->create_contract( $customer_id );
 		Contracts::create(
 			[
-				'owner'       => Package::EXTENSION_SLUG,
-				'customer_id' => $customer_id,
+				'extension_slug' => Package::EXTENSION_SLUG,
+				'customer_id'    => $customer_id,
 			]
 		);
 		$newer_id = $this->create_contract( $customer_id );

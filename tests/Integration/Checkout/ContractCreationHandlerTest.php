@@ -107,7 +107,7 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 		$contract = Subscriptions::get_for_customer( (int) $contracts[0]->get_id(), $customer_id );
 		$this->assertInstanceOf( ContractView::class, $contract );
 		$this->assertSame( 'active', $contract->get_status() );
-		$this->assertSame( Package::EXTENSION_SLUG, $contract->get_owner() );
+		$this->assertSame( Package::EXTENSION_SLUG, $contract->get_extension_slug() );
 		$this->assertSame( $customer_id, $contract->get_customer_id() );
 		$this->assertSame( 'USD', $contract->get_currency() );
 		$this->assertSame( (int) $plan->get_id(), $contract->get_selling_plan_id() );
