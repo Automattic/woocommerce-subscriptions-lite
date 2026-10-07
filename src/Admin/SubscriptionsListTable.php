@@ -22,7 +22,7 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Admin;
 use Throwable;
 use WP_List_Table;
 use WP_User;
-use Automattic\WooCommerce\SubscriptionsEngine\Api\Subscriptions;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
 
@@ -108,7 +108,7 @@ final class SubscriptionsListTable extends WP_List_Table {
 		$sort   = $this->current_sort();
 
 		try {
-			$rows  = Subscriptions::list(
+			$rows  = Contracts::list(
 				[
 					'limit'   => $per_page,
 					'offset'  => $offset,
@@ -118,7 +118,7 @@ final class SubscriptionsListTable extends WP_List_Table {
 					'order'   => $sort['order'],
 				]
 			);
-			$total = Subscriptions::count(
+			$total = Contracts::count(
 				[
 					'status' => $status,
 					'search' => $search,
@@ -148,7 +148,7 @@ final class SubscriptionsListTable extends WP_List_Table {
 				foreach ( $rows as $row ) {
 					$ids[] = (int) $row->get_id();
 				}
-				$this->item_counts = Subscriptions::item_counts( $ids );
+				$this->item_counts = Contracts::item_counts( $ids );
 			} catch ( Throwable $e ) {
 				$this->item_counts = [];
 			}
@@ -173,7 +173,7 @@ final class SubscriptionsListTable extends WP_List_Table {
 	 */
 	protected function get_views(): array {
 		try {
-			$counts = Subscriptions::count_by_status();
+			$counts = Contracts::count_by_status();
 		} catch ( Throwable $e ) {
 			return [];
 		}

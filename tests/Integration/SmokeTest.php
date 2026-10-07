@@ -14,7 +14,6 @@ declare( strict_types=1 );
 namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration;
 
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
-use Automattic\WooCommerce\SubscriptionsEngine\Api\Subscriptions;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 
@@ -39,7 +38,7 @@ final class SmokeTest extends LiteIntegrationTestCase {
 			]
 		);
 
-		$contract = Subscriptions::get_for_customer( $contract_id, $customer_id );
+		$contract = Contracts::get_for_customer( $contract_id, $customer_id );
 
 		$this->assertInstanceOf( ContractView::class, $contract );
 		$this->assertSame( 'active', $contract->get_status() );
@@ -52,7 +51,7 @@ final class SmokeTest extends LiteIntegrationTestCase {
 		$this->assertNotNull( $contract->get_selling_plan_id(), 'The contract records its selling plan.' );
 
 		$this->assertNull(
-			Subscriptions::get_for_customer( $contract_id, $customer_id + 1 ),
+			Contracts::get_for_customer( $contract_id, $customer_id + 1 ),
 			'A foreign customer reads null (ownership asymmetry).'
 		);
 	}

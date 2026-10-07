@@ -10,7 +10,7 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Checkout;
 
-use Automattic\WooCommerce\SubscriptionsEngine\Api\Subscriptions;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\SchemaInstaller;
@@ -92,7 +92,7 @@ final class ContractCreationOutcomesTest extends LiteIntegrationTestCase {
 		$created = ( new ContractCreationHandler() )->create_contract( $order, $plan );
 		$this->assertInstanceOf( ContractView::class, $created );
 
-		$view = Subscriptions::get( $created->get_id() );
+		$view = Contracts::get( $created->get_id() );
 		$this->assertEquals( $view, $created, 'The returned view matches a fresh read.' );
 
 		return $view;
@@ -151,12 +151,12 @@ final class ContractCreationOutcomesTest extends LiteIntegrationTestCase {
 			remove_filter( 'query', $break );
 		}
 
-		$contracts = Subscriptions::find_by_origin_order( $order->get_id() );
+		$contracts = Contracts::find_by_origin_order( $order->get_id() );
 		$this->assertCount( 1, $contracts );
 		$draft = $contracts[0];
 		$this->assertSame( ContractStatus::DRAFT, $draft->get_status() );
 		$this->assertNull( $draft->get_next_payment_gmt() );
-		$this->assertCount( 1, Subscriptions::get_history( (int) $draft->get_id() ) );
+		$this->assertCount( 1, Contracts::get_cycles( (int) $draft->get_id() ) );
 
 		$notes = array_map(
 			static fn ( $note ): string => (string) $note->content,

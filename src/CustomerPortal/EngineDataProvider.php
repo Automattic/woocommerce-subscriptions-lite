@@ -29,6 +29,7 @@ namespace Automattic\WooCommerce\SubscriptionsLite\CustomerPortal;
 
 use DateTimeInterface;
 use WC_Order;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Subscriptions;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Plan;
@@ -57,7 +58,7 @@ final class EngineDataProvider {
 	 * @return array<int, array<string, mixed>>
 	 */
 	public function get_contracts_for_customer( int $customer_id, int $limit = 20, int $offset = 0 ): array {
-		$contracts = Subscriptions::list_for_customer( $customer_id, $limit, $offset, [ 'status' => CustomerVisibility::visible_statuses() ] );
+		$contracts = Contracts::list_for_customer( $customer_id, $limit, $offset, [ 'status' => CustomerVisibility::visible_statuses() ] );
 		$plans     = ContractPlans::for_contracts( $contracts );
 
 		$rows = [];
@@ -80,7 +81,7 @@ final class EngineDataProvider {
 	 * @return array<string, mixed>|null
 	 */
 	public function get_contract( int $contract_id, int $customer_id ): ?array {
-		$contract = Subscriptions::get_for_customer( $contract_id, $customer_id );
+		$contract = Contracts::get_for_customer( $contract_id, $customer_id );
 		if ( null === $contract || ! CustomerVisibility::is_visible( $contract ) ) {
 			return null;
 		}

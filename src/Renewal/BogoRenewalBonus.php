@@ -16,7 +16,7 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Renewal;
 
-use Automattic\WooCommerce\SubscriptionsEngine\Api\Subscriptions;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Contract;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ContractPlans;
@@ -51,7 +51,7 @@ final class BogoRenewalBonus {
 			return;
 		}
 
-		$view = Subscriptions::get( $contract->get_id() );
+		$view = Contracts::get( $contract->get_id() );
 		if ( null === $view ) {
 			return;
 		}
@@ -87,7 +87,7 @@ final class BogoRenewalBonus {
 	 * @param int $order_id    Renewal order id.
 	 */
 	private static function cycle_count( int $contract_id, int $order_id ): ?int {
-		foreach ( Subscriptions::get_history( $contract_id ) as $cycle ) {
+		foreach ( Contracts::get_cycles( $contract_id ) as $cycle ) {
 			if ( $cycle->get_order_id() === $order_id ) {
 				return $cycle->get_count();
 			}

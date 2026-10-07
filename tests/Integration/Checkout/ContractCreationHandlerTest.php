@@ -14,7 +14,7 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Checkout;
 
-use Automattic\WooCommerce\SubscriptionsEngine\Api\Subscriptions;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Plan;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\SchemaInstaller;
@@ -101,10 +101,10 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 
 		$order->update_status( 'processing' ); // Fires the bootstrap-bound handler.
 
-		$contracts = Subscriptions::list_for_customer( $customer_id );
+		$contracts = Contracts::list_for_customer( $customer_id );
 		$this->assertCount( 1, $contracts, 'One contract for a single-plan order.' );
 
-		$contract = Subscriptions::get_for_customer( (int) $contracts[0]->get_id(), $customer_id );
+		$contract = Contracts::get_for_customer( (int) $contracts[0]->get_id(), $customer_id );
 		$this->assertInstanceOf( ContractView::class, $contract );
 		$this->assertSame( 'active', $contract->get_status() );
 		$this->assertSame( Package::EXTENSION_SLUG, $contract->get_extension_slug() );
@@ -128,7 +128,7 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 		$this->assertSame( 'ada@example.com', $addresses['billing']['email'] );
 		$this->assertSame( '1 Engine Court', $addresses['shipping']['address_1'] );
 
-		$history = Subscriptions::get_history( $contract->get_id() );
+		$history = Contracts::get_cycles( $contract->get_id() );
 		$this->assertCount( 1, $history );
 		$this->assertSame( 'billed', $history[0]->get_status() );
 		$this->assertSame( 1, $history[0]->get_count() );
@@ -158,11 +158,11 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 
 		$order->update_status( 'processing' );
 
-		$contracts = Subscriptions::find_by_origin_order( $order->get_id() );
+		$contracts = Contracts::find_by_origin_order( $order->get_id() );
 		$this->assertCount( 1, $contracts );
 		$this->assertSame( '24.00000000', $contracts[0]->get_billing_total(), 'Plan line + shipping; the one-time fee is not billed again.' );
 		$this->assertSame( '4.00000000', $contracts[0]->get_shipping_total() );
-		$this->assertSame( '24.00000000', Subscriptions::get_history( $contracts[0]->get_id() )[0]->get_expected_total() );
+		$this->assertSame( '24.00000000', Contracts::get_cycles( $contracts[0]->get_id() )[0]->get_expected_total() );
 	}
 
 	public function test_a_failed_cycle_write_leaves_a_draft(): void {
@@ -182,11 +182,11 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 			remove_filter( 'query', $fail );
 		}
 
-		$contracts = Subscriptions::find_by_origin_order( $order->get_id() );
+		$contracts = Contracts::find_by_origin_order( $order->get_id() );
 		$this->assertCount( 1, $contracts );
 		$this->assertSame( 'draft', $contracts[0]->get_status() );
 		$this->assertNull( $contracts[0]->get_next_payment_gmt(), 'A draft is never armed.' );
-		$this->assertSame( [], Subscriptions::get_history( $contracts[0]->get_id() ) );
+		$this->assertSame( [], Contracts::get_cycles( $contracts[0]->get_id() ) );
 
 		$notes       = wp_list_pluck( wc_get_order_notes( [ 'order_id' => $order->get_id() ] ), 'content' );
 		$draft_notes = array_filter(
@@ -205,10 +205,10 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 
 		$order->update_status( 'processing' );
 
-		$contracts = Subscriptions::list_for_customer( $customer_id );
+		$contracts = Contracts::list_for_customer( $customer_id );
 		$this->assertCount( 1, $contracts, 'Same-plan lines consolidate into one contract.' );
 
-		$contract = Subscriptions::get_for_customer( (int) $contracts[0]->get_id(), $customer_id );
+		$contract = Contracts::get_for_customer( (int) $contracts[0]->get_id(), $customer_id );
 		$this->assertEqualsCanonicalizing(
 			[ 'First Box', 'Second Box' ],
 			array_column( $contract->get_items(), 'item_name' ),
@@ -223,10 +223,10 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 		$this->apply_and_stamp( $order, $plan );
 
 		$order->update_status( 'on-hold' ); // BACS/cheque: awaiting the transfer.
-		$this->assertSame( [], Subscriptions::list_for_customer( $customer_id ), 'An on-hold offline order has no contract yet.' );
+		$this->assertSame( [], Contracts::list_for_customer( $customer_id ), 'An on-hold offline order has no contract yet.' );
 
 		$order->update_status( 'processing' ); // Merchant confirms the payment.
-		$this->assertCount( 1, Subscriptions::list_for_customer( $customer_id ), 'Confirming the offline payment creates the contract.' );
+		$this->assertCount( 1, Contracts::list_for_customer( $customer_id ), 'Confirming the offline payment creates the contract.' );
 	}
 
 	public function test_two_different_plans_defer_without_a_contract(): void {
@@ -239,7 +239,7 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 
 		$order->update_status( 'processing' );
 
-		$this->assertSame( [], Subscriptions::list_for_customer( $customer_id ), 'No contract for divergent plans.' );
+		$this->assertSame( [], Contracts::list_for_customer( $customer_id ), 'No contract for divergent plans.' );
 		$this->assertSame( ContractCreationHandler::REASON_DIVERGENT_PLANS, $this->deferral_reason( $order ) );
 	}
 
@@ -252,7 +252,7 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 
 		$order->update_status( 'processing' );
 
-		$this->assertSame( [], Subscriptions::list_for_customer( $customer_id ), 'No contract for a mixed cart.' );
+		$this->assertSame( [], Contracts::list_for_customer( $customer_id ), 'No contract for a mixed cart.' );
 		$this->assertSame( ContractCreationHandler::REASON_MIXED_CART, $this->deferral_reason( $order ) );
 	}
 
@@ -269,7 +269,7 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 
 		$order->update_status( 'processing' );
 
-		$this->assertSame( [], Subscriptions::list_for_customer( $customer_id ) );
+		$this->assertSame( [], Contracts::list_for_customer( $customer_id ) );
 		$this->assertSame( ContractCreationHandler::REASON_DIVERGENT_PLANS, $this->deferral_reason( $order ) );
 	}
 
@@ -282,7 +282,7 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 		$order->update_status( 'processing' ); // Creates the contract.
 		$order->update_status( 'completed' );  // Fires again - must be a no-op.
 
-		$this->assertCount( 1, Subscriptions::list_for_customer( $customer_id ), 'A second paid transition creates no second contract.' );
+		$this->assertCount( 1, Contracts::list_for_customer( $customer_id ), 'A second paid transition creates no second contract.' );
 		$this->assertSame( '', (string) wc_get_order( $order->get_id() )->get_meta( '_subscription_contract_id' ), 'The guard reads the contract by origin order, not order meta.' );
 	}
 
@@ -292,7 +292,7 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 
 		$order->update_status( 'processing' );
 
-		$this->assertSame( [], Subscriptions::list_for_customer( $customer_id ) );
+		$this->assertSame( [], Contracts::list_for_customer( $customer_id ) );
 	}
 
 	public function test_a_plan_not_applicable_to_the_product_creates_nothing(): void {
@@ -308,7 +308,7 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 
 		$order->update_status( 'processing' );
 
-		$this->assertSame( [], Subscriptions::list_for_customer( $customer_id ), 'A non-applicable plan is excluded.' );
+		$this->assertSame( [], Contracts::list_for_customer( $customer_id ), 'A non-applicable plan is excluded.' );
 	}
 
 	public function test_an_order_that_never_reaches_a_paid_status_creates_nothing(): void {
@@ -319,7 +319,7 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 
 		$order->update_status( 'on-hold' ); // Not a paid status.
 
-		$this->assertSame( [], Subscriptions::list_for_customer( $customer_id ), 'An unpaid order creates no contract.' );
+		$this->assertSame( [], Contracts::list_for_customer( $customer_id ), 'An unpaid order creates no contract.' );
 	}
 
 	public function test_the_handler_is_bound_to_the_paid_status_transition(): void {

@@ -17,7 +17,6 @@ declare( strict_types=1 );
 namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Admin;
 
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
-use Automattic\WooCommerce\SubscriptionsEngine\Api\Subscriptions;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\MetaBoxes\Actions;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\PageController;
@@ -165,7 +164,7 @@ final class RowActionControllerTest extends LiteIntegrationTestCase {
 		$result     = $controller->handle_cancel( [ 'contract_id' => $id ] );
 
 		$this->assertTrue( $result->is_success() );
-		$stored = Subscriptions::get( $id );
+		$stored = Contracts::get( $id );
 		$this->assertNotNull( $stored );
 		$this->assertSame( ContractStatus::CANCELLED, $stored->get_status() );
 	}

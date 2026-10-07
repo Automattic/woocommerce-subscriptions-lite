@@ -13,7 +13,7 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Admin;
 
-use Automattic\WooCommerce\SubscriptionsEngine\Api\Subscriptions;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\PlanRepository;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\MetaBoxes\Schedule;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
@@ -69,7 +69,7 @@ final class ScheduleTest extends LiteIntegrationTestCase {
 	public function test_a_contract_whose_plan_is_gone_shows_only_the_dates(): void {
 		$customer = $this->create_customer();
 		$id       = $this->create_contract( $customer );
-		$contract = Subscriptions::get( $id );
+		$contract = Contracts::get( $id );
 		$this->assertNotNull( $contract );
 
 		( new PlanRepository() )->delete( (int) $contract->get_selling_plan_id() );
@@ -86,7 +86,7 @@ final class ScheduleTest extends LiteIntegrationTestCase {
 	 * @param int $id Contract id.
 	 */
 	private function render( int $id ): string {
-		$contract = Subscriptions::get( $id );
+		$contract = Contracts::get( $id );
 		$this->assertNotNull( $contract );
 
 		ob_start();

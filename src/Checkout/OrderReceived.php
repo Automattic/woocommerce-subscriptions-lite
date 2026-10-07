@@ -24,7 +24,7 @@ declare( strict_types=1 );
 namespace Automattic\WooCommerce\SubscriptionsLite\Checkout;
 
 use Automattic\WooCommerce\SubscriptionsEngine\Api\SellingPlans;
-use Automattic\WooCommerce\SubscriptionsEngine\Api\Subscriptions;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 use Automattic\WooCommerce\SubscriptionsLite\Contracts\CustomerVisibility;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Plan;
@@ -86,7 +86,7 @@ final class OrderReceived {
 			return null;
 		}
 
-		foreach ( Subscriptions::find_by_origin_order( $order->get_id() ) as $contract ) {
+		foreach ( Contracts::find_by_origin_order( $order->get_id() ) as $contract ) {
 			if ( $customer_id === $contract->get_customer_id() && CustomerVisibility::is_visible( $contract ) ) {
 				return $contract;
 			}

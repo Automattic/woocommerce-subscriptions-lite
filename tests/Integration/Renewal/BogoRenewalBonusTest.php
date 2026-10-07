@@ -10,6 +10,7 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Renewal;
 
+use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Subscriptions;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Plan;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Gateway\GatewayCapabilities;
@@ -173,7 +174,7 @@ final class BogoRenewalBonusTest extends LiteIntegrationTestCase {
 	 * @param array<string, mixed>|null $pricing_policy New pricing payload.
 	 */
 	private function set_live_pricing_policy( int $contract_id, ?array $pricing_policy ): void {
-		$contract = Subscriptions::get( $contract_id );
+		$contract = Contracts::get( $contract_id );
 		$this->assertNotNull( $contract );
 		$plans = new PlanRepository();
 		$plan  = $plans->find( (int) $contract->get_selling_plan_id() );

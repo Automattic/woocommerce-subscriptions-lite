@@ -14,7 +14,7 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Renewal;
 
-use Automattic\WooCommerce\SubscriptionsEngine\Api\Subscriptions;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 use Automattic\WooCommerce\SubscriptionsLite\Renewal\RenewalWiring;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
@@ -49,7 +49,7 @@ final class RenewalWiringTest extends LiteIntegrationTestCase {
 	 * @param string $gateway Gateway id to set as the payment method.
 	 */
 	private function make_contract( string $gateway = 'dummy' ): ContractView {
-		$contract = Subscriptions::get( $this->create_contract( $this->create_customer(), [ 'payment_method' => $gateway ] ) );
+		$contract = Contracts::get( $this->create_contract( $this->create_customer(), [ 'payment_method' => $gateway ] ) );
 		$this->assertInstanceOf( ContractView::class, $contract );
 
 		return $contract;

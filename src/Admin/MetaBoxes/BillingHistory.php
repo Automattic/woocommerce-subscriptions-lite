@@ -19,7 +19,7 @@ use Automattic\WooCommerce\SubscriptionsLite\Utilities\Formatter;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\OrderLinks;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\PageController;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\StatusLabels;
-use Automattic\WooCommerce\SubscriptionsEngine\Api\Subscriptions;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\CycleView;
 
@@ -39,7 +39,7 @@ final class BillingHistory {
 		$contract_id = (int) $contract->get_id();
 
 		try {
-			$cycles = Subscriptions::get_history( $contract_id, PageController::PER_PAGE );
+			$cycles = Contracts::get_cycles( $contract_id, PageController::PER_PAGE );
 		} catch ( Throwable $e ) {
 			wc_get_logger()->error(
 				'Admin subscription history could not be loaded for #' . $contract_id . ': ' . $e->getMessage(),

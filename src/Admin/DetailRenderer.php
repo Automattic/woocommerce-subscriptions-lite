@@ -27,7 +27,7 @@ use Automattic\WooCommerce\SubscriptionsLite\Admin\MetaBoxes\Customer;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\MetaBoxes\Items;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\MetaBoxes\Schedule;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\MetaBoxes\SubscriptionData;
-use Automattic\WooCommerce\SubscriptionsEngine\Api\Subscriptions;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 
 defined( 'ABSPATH' ) || exit;
@@ -240,7 +240,7 @@ final class DetailRenderer {
 		}
 
 		try {
-			$contract = Subscriptions::get( $contract_id );
+			$contract = Contracts::get( $contract_id );
 		} catch ( Throwable $e ) {
 			wc_get_logger()->error(
 				'Admin subscription detail could not be loaded for #' . $contract_id . ': ' . $e->getMessage(),

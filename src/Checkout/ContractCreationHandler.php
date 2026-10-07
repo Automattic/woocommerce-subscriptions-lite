@@ -29,7 +29,6 @@ use WC_Order;
 use WC_Order_Item_Product;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\SellingPlans;
-use Automattic\WooCommerce\SubscriptionsEngine\Api\Subscriptions;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\CycleStatus;
@@ -117,7 +116,7 @@ final class ContractCreationHandler {
 		// Idempotency: a repeat paid-status transition (e.g. processing -> completed)
 		// must neither double-create a contract nor duplicate a deferral note.
 		if ( '' !== (string) $order->get_meta( self::CREATION_DEFERRED_META )
-			|| [] !== Subscriptions::find_by_origin_order( $order_id ) ) {
+			|| [] !== Contracts::find_by_origin_order( $order_id ) ) {
 			return;
 		}
 
@@ -169,7 +168,7 @@ final class ContractCreationHandler {
 	 * @param WC_Order $order The order.
 	 */
 	private function note_stuck_draft( WC_Order $order ): void {
-		foreach ( Subscriptions::find_by_origin_order( $order->get_id() ) as $contract ) {
+		foreach ( Contracts::find_by_origin_order( $order->get_id() ) as $contract ) {
 			if ( ContractStatus::DRAFT !== $contract->get_status() ) {
 				continue;
 			}
