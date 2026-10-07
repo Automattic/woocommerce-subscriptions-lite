@@ -67,7 +67,7 @@ final class EndpointsRenderTest extends LiteIntegrationTestCase {
 
 	/**
 	 * Set (or clear) a contract's next payment date directly, so each on-hold shape is
-	 * seeded explicitly rather than depending on what the engine's hold does with the
+	 * seeded explicitly rather than depending on what the hold flow does with the
 	 * date: no next payment is the "admin action" shape (no missed charge pending); a
 	 * next payment is the failed-payment retry shape.
 	 *
