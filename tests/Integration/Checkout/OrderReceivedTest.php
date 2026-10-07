@@ -60,6 +60,17 @@ final class OrderReceivedTest extends LiteIntegrationTestCase {
 		$this->assertStringContainsString( '/ week', $this->render( (int) $contract->get_origin_order_id() ) );
 	}
 
+	public function test_shows_no_cadence_for_a_plan_owned_by_another_extension(): void {
+		$contract_id = $this->create_contract( $this->create_customer() );
+		$foreign     = $this->make_plan( 'week', 1, null, [ 'extension_slug' => 'other-extension' ] );
+		$this->assertNotNull( Contracts::update( $contract_id, [ 'selling_plan_id' => $foreign->get_id() ] ) );
+
+		$html = $this->render( (int) Contracts::get( $contract_id )->get_origin_order_id() );
+
+		$this->assertStringContainsString( 'Related subscriptions', $html, 'The summary still renders.' );
+		$this->assertStringNotContainsString( '/ week', $html, 'Another extension\'s plan is not read as the contract\'s terms.' );
+	}
+
 	public function test_shows_no_cadence_when_the_plan_billing_is_unusable(): void {
 		$contract = Contracts::get( $this->create_contract( $this->create_customer() ) );
 		$this->update_plan_unvalidated(

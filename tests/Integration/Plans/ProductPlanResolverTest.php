@@ -4,7 +4,7 @@
  *
  * Resolution runs END TO END: real products and variations, applicability in
  * real postmeta through the Lite store, and plans read back through the
- * engine's catalog facade.
+ * engine's plan facade.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Tests
  */
