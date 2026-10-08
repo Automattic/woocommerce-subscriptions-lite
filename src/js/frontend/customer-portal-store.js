@@ -9,9 +9,9 @@
  * The store namespace is part of the public extension contract: a premium
  * overlay imports this same store to add actions without forking the renderer.
  *
- * Transport: lifecycle actions POST to Lite's authenticated
- * `wc-subscriptions-lite/v1` REST routes with the `X-WP-Nonce` cookie-auth header.
- * There is NO Store API path.
+ * Transport: lifecycle actions POST to the engine's contract action endpoint
+ * (`wc/v3/subscriptions-engine/contracts/{id}/action`), which dispatches the actions
+ * Lite registers, with the `X-WP-Nonce` cookie-auth header. There is NO Store API path.
  *
  * Translatable copy is seeded into `state.i18n` from PHP rather than called via
  * `@wordpress/i18n` in the module, so the strings stay in the text domain and
@@ -29,16 +29,16 @@ import './style.scss';
 const STORE_NAMESPACE = 'woocommerce-subscriptions-lite/customer-portal';
 
 /**
- * POST a lifecycle action to `{restBase}{contractId}/{action}` with the REST nonce.
+ * POST a lifecycle action to `{restBase}{contractId}/action` with the REST nonce.
  *
  * @param {Object} currentState The store state.
- * @param {string} action       The action segment ('cancel' | 'hold' | 'reactivate').
- * @param {Object} body         The JSON request body.
+ * @param {string} action       The action slug ('cancel' | 'hold' | 'reactivate').
+ * @param {Object} actionArgs   The action's arguments.
  * @return {Promise<void>} Resolves on success; rejects with an Error on failure.
  */
-function performAction( currentState, action, body ) {
+function performAction( currentState, action, actionArgs ) {
 	return fetch(
-		`${ currentState.restBase }${ currentState.contractId }/${ action }`,
+		`${ currentState.restBase }${ currentState.contractId }/action`,
 		{
 			method: 'POST',
 			credentials: 'same-origin',
@@ -46,7 +46,11 @@ function performAction( currentState, action, body ) {
 				'Content-Type': 'application/json',
 				'X-WP-Nonce': currentState.nonce,
 			},
-			body: JSON.stringify( body ),
+			body: JSON.stringify( {
+				action,
+				extension_slug: currentState.extensionSlug,
+				action_args: actionArgs,
+			} ),
 		}
 	).then( ( response ) => {
 		if ( ! response.ok ) {
@@ -165,11 +169,11 @@ const { state } = store( STORE_NAMESPACE, {
  * double-submit, runs the transport, refreshes on success, and surfaces an
  * inline retryable error on failure.
  *
- * @param {string} action The action segment.
- * @param {Object} body   The JSON request body.
+ * @param {string} action     The action slug.
+ * @param {Object} actionArgs The action's arguments.
  * @return {Promise<void>} Resolves when the submit completes (success or handled failure).
  */
-function runLifecycle( action, body ) {
+function runLifecycle( action, actionArgs ) {
 	if ( state.submitting ) {
 		return Promise.resolve();
 	}
@@ -181,7 +185,7 @@ function runLifecycle( action, body ) {
 	state.submitting = true;
 	state[ errorField ] = '';
 
-	return performAction( state, action, body ).then(
+	return performAction( state, action, actionArgs ).then(
 		() => {
 			refresh();
 		},
@@ -196,7 +200,7 @@ function runLifecycle( action, body ) {
  * Compose the customer-facing error message for a failed action from the
  * server-seeded copy, wrapping any server-supplied detail.
  *
- * @param {string} action The action segment.
+ * @param {string} action The action slug.
  * @param {string} detail Server-supplied detail (may be empty).
  * @return {string} The error message.
  */

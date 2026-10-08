@@ -15,6 +15,7 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\CustomerPor
 
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsLite\CustomerPortal\Endpoints;
+use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
 
 /**
@@ -226,7 +227,8 @@ final class EndpointsRenderTest extends LiteIntegrationTestCase {
 		$this->assertArrayHasKey( 'i18n', $state );
 		$this->assertSame( '', $state['error'] );
 		$this->assertSame( '', $state['actionError'] );
-		$this->assertSame( rest_url( 'wc-subscriptions-lite/v1/contracts/' ), $state['restBase'], 'Actions post to Lite\'s own routes.' );
+		$this->assertSame( rest_url( 'wc/v3/subscriptions-engine/contracts/' ), $state['restBase'], 'Actions post to the engine\'s contract routes.' );
+		$this->assertSame( Package::EXTENSION_SLUG, $state['extensionSlug'], 'Actions name Lite as the owning extension.' );
 	}
 
 	public function test_on_hold_admin_path_shows_reactivate(): void {
