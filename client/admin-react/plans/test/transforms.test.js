@@ -9,6 +9,7 @@ import {
 	formErrors,
 	makeDefaultFormData,
 	planToFormData,
+	viewToQuery,
 } from '../transforms';
 
 const samplePlan = {
@@ -84,6 +85,80 @@ describe( 'registry transforms', () => {
 		expect( payload.pricing_policy.one_time_fees ).toEqual(
 			samplePlan.pricing_policy.one_time_fees
 		);
+	} );
+
+	it( 'keeps billing keys the form does not edit when editing', () => {
+		const registry = buildFieldRegistry();
+		const plan = {
+			...samplePlan,
+			billing_policy: {
+				...samplePlan.billing_policy,
+				trial_duration: { length: 7, unit: 'day' },
+				min_cycles: 2,
+			},
+		};
+		const formData = {
+			...planToFormData( registry, plan ),
+			interval: 3,
+			expires: false,
+		};
+
+		expect(
+			formDataToPayload( registry, formData, plan ).billing_policy
+		).toEqual( {
+			period: 'month',
+			interval: 3,
+			max_cycles: null,
+			trial_duration: { length: 7, unit: 'day' },
+			min_cycles: 2,
+		} );
+	} );
+
+	it( 'keeps pricing keys the form does not own when editing', () => {
+		const registry = buildFieldRegistry();
+		const plan = {
+			...samplePlan,
+			pricing_policy: {
+				...samplePlan.pricing_policy,
+				custom_key: { kept: true },
+			},
+		};
+		const formData = planToFormData( registry, plan );
+
+		const pricing = formDataToPayload(
+			registry,
+			formData,
+			plan
+		).pricing_policy;
+
+		expect( pricing.custom_key ).toEqual( { kept: true } );
+		expect( pricing.policies ).toEqual( [
+			{ type: 'percentage', value: 10, duration_cycles: 3 },
+		] );
+		expect( pricing.one_time_fees ).toEqual(
+			samplePlan.pricing_policy.one_time_fees
+		);
+	} );
+
+	it( 'sends only the edited billing keys for a new plan', () => {
+		const registry = buildFieldRegistry();
+		const payload = formDataToPayload(
+			registry,
+			makeDefaultFormData( registry )
+		);
+
+		expect( payload.billing_policy ).toEqual( {
+			period: 'month',
+			interval: 1,
+			max_cycles: null,
+		} );
+	} );
+
+	it( 'queries the list in id order by default', () => {
+		expect( viewToQuery( {} ) ).toMatchObject( {
+			orderby: 'id',
+			order: 'asc',
+		} );
 	} );
 
 	it( 'sets the default status when creating', () => {

@@ -18,10 +18,11 @@ declare( strict_types=1 );
 namespace Automattic\WooCommerce\SubscriptionsLite\Cart\Blocks;
 
 use WC_Product;
-use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Plan;
-use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\PlanRepository;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\View\PlanView;
 use Automattic\WooCommerce\SubscriptionsLite\Cart\CartPlanHooks;
+use Automattic\WooCommerce\SubscriptionsLite\Plans\ProductPlanResolver;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
+use Automattic\WooCommerce\SubscriptionsLite\Pricing\BillingTerms;
 use Automattic\WooCommerce\SubscriptionsLite\Pricing\PriceCalculator;
 use Automattic\WooCommerce\SubscriptionsLite\ProductPage\PlanOptionFormatter;
 
@@ -39,19 +40,17 @@ final class StoreApiExtension {
 	private const DATA_NAMESPACE = Package::EXTENSION_SLUG;
 
 	/**
-	 * Reads Lite's selling plans by id.
+	 * Resolves a line's plan with the rule cart pricing uses.
 	 *
-	 * @var PlanRepository
+	 * @var ProductPlanResolver
 	 */
-	private PlanRepository $plans;
+	private ProductPlanResolver $resolver;
 
 	/**
-	 * Build the extension over the plan store it reads.
-	 *
-	 * @param PlanRepository|null $plans Plan store; defaults to a new repository.
+	 * Build the extension over the plan resolver.
 	 */
-	public function __construct( ?PlanRepository $plans = null ) {
-		$this->plans = $plans ?? new PlanRepository();
+	public function __construct() {
+		$this->resolver = new ProductPlanResolver();
 	}
 
 	/**
@@ -93,12 +92,12 @@ final class StoreApiExtension {
 	 * @return array<string, mixed>
 	 */
 	public function get_item_data( array $cart_item ): array {
-		$plan = $this->resolve_line_plan( $cart_item );
-		if ( ! $plan instanceof Plan ) {
+		$plan  = $this->resolve_line_plan( $cart_item );
+		$terms = null === $plan ? null : BillingTerms::from_plan( $plan );
+		if ( null === $plan || null === $terms ) {
 			return [];
 		}
 
-		$policy  = $plan->get_billing_policy();
 		$product = $cart_item['data'] ?? null;
 		$base    = $product instanceof WC_Product ? (float) $product->get_regular_price() : 0.0;
 
@@ -106,8 +105,8 @@ final class StoreApiExtension {
 			'plan_id'          => (int) $plan->get_id(),
 			'plan_label'       => PlanOptionFormatter::plan_label( $plan ),
 			'price_cadence'    => PlanOptionFormatter::cadence_suffix( $plan ),
-			'billing_period'   => $policy->get_period(),
-			'billing_interval' => $policy->get_interval(),
+			'billing_period'   => $terms->get_period(),
+			'billing_interval' => $terms->get_interval(),
 			'recurring_amount' => PriceCalculator::for_plan( $plan )->unit_price( $base, 1 ),
 		];
 	}
@@ -171,7 +170,7 @@ final class StoreApiExtension {
 			// Resolve the plan (not just the raw meta) so the flag agrees with
 			// pricing: a line whose plan no longer resolves is priced as one-time
 			// and must not read as a subscription here.
-			if ( $this->resolve_line_plan( $cart_item ) instanceof Plan ) {
+			if ( $this->resolve_line_plan( $cart_item ) instanceof PlanView ) {
 				$has = true;
 				break;
 			}
@@ -196,17 +195,14 @@ final class StoreApiExtension {
 	}
 
 	/**
-	 * Resolve the `Plan` for a cart item, or null for a one-time line or a plan
-	 * that no longer resolves. Scoped to Lite's own plans.
+	 * Resolve the plan for a cart item ({@see ProductPlanResolver::get_line_plan()}),
+	 * or null for a one-time line.
 	 *
 	 * @param array<string, mixed> $cart_item Cart item row.
-	 * @return Plan|null
 	 */
-	private function resolve_line_plan( array $cart_item ): ?Plan {
+	private function resolve_line_plan( array $cart_item ): ?PlanView {
 		$plan_id = isset( $cart_item[ CartPlanHooks::SELLING_PLAN_ID_KEY ] ) ? (int) $cart_item[ CartPlanHooks::SELLING_PLAN_ID_KEY ] : 0;
-		if ( $plan_id <= 0 ) {
-			return null;
-		}
-		return $this->plans->find( $plan_id, Package::EXTENSION_SLUG );
+
+		return $plan_id > 0 ? $this->resolver->get_line_plan( $plan_id ) : null;
 	}
 }

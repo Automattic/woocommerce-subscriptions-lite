@@ -2,7 +2,7 @@
 /**
  * Integration tests for the plan option formatter.
  *
- * The formatter turns an engine Plan into the PDP option text and the admin
+ * The formatter turns an engine plan view into the PDP option text and the admin
  * panel's Frequency / Discount column strings. It runs against the real
  * wc_price(): the assertions compare the tag-stripped, entity-decoded text so
  * the expected strings stay readable while the real price HTML still flows
@@ -15,8 +15,7 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\ProductPage;
 
-use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Plan;
-use Automattic\WooCommerce\SubscriptionsEngine\Core\ValueObject\BillingPolicy;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\View\PlanView;
 use Automattic\WooCommerce\SubscriptionsLite\Utilities\Formatter;
 use Automattic\WooCommerce\SubscriptionsLite\ProductPage\PlanOptionFormatter;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
@@ -27,23 +26,23 @@ use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTe
 final class PlanOptionFormatterTest extends LiteIntegrationTestCase {
 
 	/**
-	 * Build a plan with the given pricing policies and cadence. The formatter
-	 * never touches storage, so the plan stays unsaved.
+	 * Create a plan with the given pricing policies and cadence, unvalidated:
+	 * the formatter reads whatever a plan stores.
 	 *
 	 * @param array<int, array<string, mixed>>|null $policies Pricing-policy entries, or null for no pricing policy.
 	 * @param string                                $period   Billing period unit.
 	 * @param int                                   $interval Billing interval count.
 	 */
-	private function make_priced_plan( ?array $policies = null, string $period = 'month', int $interval = 1 ): Plan {
-		return Plan::create(
+	private function make_priced_plan( ?array $policies = null, string $period = 'month', int $interval = 1 ): PlanView {
+		return $this->make_unvalidated_plan(
+			$period,
+			$interval,
+			null,
 			[
-				'name'           => 'Test plan',
-				'billing_policy' => new BillingPolicy( $period, $interval, null, null, null ),
 				'pricing_policy' => null === $policies ? null : [
 					'policies'      => $policies,
 					'one_time_fees' => [],
 				],
-				'extension_slug' => 'woocommerce-subscriptions-lite',
 			]
 		);
 	}
@@ -239,5 +238,29 @@ final class PlanOptionFormatterTest extends LiteIntegrationTestCase {
 		);
 
 		$this->assertSame( '10% off', PlanOptionFormatter::format_discount( $plan, 24.0 ) );
+	}
+
+	public function test_a_plan_without_usable_billing_formats_the_price_only(): void {
+		$plan = $this->make_unvalidated_plan(
+			'month',
+			1,
+			null,
+			[
+				'billing_policy' => null,
+				'pricing_policy' => [
+					'policies' => [
+						[
+							'type'  => 'percentage',
+							'value' => 10.0,
+						],
+					],
+				],
+			]
+		);
+
+		$this->assertSame( '$21.60 (10% off)', self::as_text( PlanOptionFormatter::format( $plan, 24.0 ) ) );
+		$this->assertSame( '', PlanOptionFormatter::cadence_suffix( $plan ) );
+		$this->assertSame( '', PlanOptionFormatter::plan_label( $plan ) );
+		$this->assertSame( '', PlanOptionFormatter::format_frequency( $plan ) );
 	}
 }

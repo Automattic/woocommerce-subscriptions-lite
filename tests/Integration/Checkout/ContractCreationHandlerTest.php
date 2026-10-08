@@ -15,8 +15,11 @@ declare( strict_types=1 );
 namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Checkout;
 
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\Plans;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
-use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Plan;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\View\PlanView;
+use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\PlanStatus;
+use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\PlanRepository;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\SchemaInstaller;
 use Automattic\WooCommerce\SubscriptionsLite\Checkout\ContractCreationHandler;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
@@ -40,9 +43,9 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 	 * `$plan` on each - the production shape after add-to-cart.
 	 *
 	 * @param WC_Order $order The order.
-	 * @param Plan     $plan  The plan to stamp.
+	 * @param PlanView $plan  The plan to stamp.
 	 */
-	private function apply_and_stamp( WC_Order $order, Plan $plan ): void {
+	private function apply_and_stamp( WC_Order $order, PlanView $plan ): void {
 		foreach ( $order->get_items() as $item ) {
 			( new ApplicabilityStore() )->set(
 				$item->get_product_id(),
@@ -58,11 +61,11 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 	 * Add a product line to an order. With a plan it is made applicable + stamped;
 	 * without one it is a plain (one-time) line.
 	 *
-	 * @param WC_Order  $order The order.
-	 * @param string    $name  Product name.
-	 * @param Plan|null $plan  Plan to stamp, or null for a one-time line.
+	 * @param WC_Order      $order The order.
+	 * @param string        $name  Product name.
+	 * @param PlanView|null $plan  Plan to stamp, or null for a one-time line.
 	 */
-	private function add_line( WC_Order $order, string $name, ?Plan $plan ): void {
+	private function add_line( WC_Order $order, string $name, ?PlanView $plan ): void {
 		$product = new WC_Product_Simple();
 		$product->set_name( $name );
 		$product->set_regular_price( '5.00' );
@@ -70,7 +73,7 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 
 		$item_id = $order->add_product( $product, 1 );
 
-		if ( $plan instanceof Plan ) {
+		if ( $plan instanceof PlanView ) {
 			( new ApplicabilityStore() )->set(
 				$product->get_id(),
 				new ProductApplicability( ProductApplicability::MODE_INHERIT_ALL )
@@ -295,11 +298,12 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 		$this->assertSame( [], Contracts::list_for_customer( $customer_id ) );
 	}
 
-	public function test_a_plan_not_applicable_to_the_product_creates_nothing(): void {
+	public function test_a_stamped_plan_creates_the_contract_without_an_applicability_recheck(): void {
 		$customer_id = $this->create_customer();
 		$plan        = $this->make_plan();
 		$order       = $this->create_subscription_order( $customer_id );
-		// Stamp the plan but never make the product applicable (mode stays 'disable').
+		// Stamp the plan but leave the product's mode at 'disable': the cart priced the
+		// line on the stamped plan, so checkout trusts the stamp like the cart does.
 		foreach ( $order->get_items() as $item ) {
 			$item->add_meta_data( self::SELLING_PLAN_META, (string) $plan->get_id(), true );
 			$item->save();
@@ -308,7 +312,129 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 
 		$order->update_status( 'processing' );
 
-		$this->assertSame( [], Contracts::list_for_customer( $customer_id ), 'A non-applicable plan is excluded.' );
+		$contracts = Contracts::list_for_customer( $customer_id );
+		$this->assertCount( 1, $contracts );
+		$this->assertSame( (int) $plan->get_id(), $contracts[0]->get_selling_plan_id() );
+		$this->assertSame( '', $this->deferral_reason( $order ) );
+	}
+
+	/**
+	 * A plan selected under 'inherit_select' at add-to-cart, then detached from the
+	 * product before the payment lands, still becomes the contract. Archiving has its
+	 * own tests below.
+	 */
+	public function test_an_inherit_select_plan_detached_after_add_to_cart_still_creates_the_contract(): void {
+		$customer_id = $this->create_customer();
+		$plan        = $this->make_plan();
+		$other       = $this->make_plan( 'week' );
+		$order       = $this->create_subscription_order( $customer_id );
+		$store       = new ApplicabilityStore();
+		foreach ( $order->get_items() as $item ) {
+			$store->set( $item->get_product_id(), new ProductApplicability( ProductApplicability::MODE_INHERIT_SELECT, [ $plan->get_id(), $other->get_id() ] ) );
+			$item->add_meta_data( self::SELLING_PLAN_META, (string) $plan->get_id(), true );
+			$item->save();
+		}
+		$order->save();
+		$order->update_status( 'on-hold' ); // Awaiting the offline payment.
+
+		foreach ( $order->get_items() as $item ) {
+			$store->set( $item->get_product_id(), new ProductApplicability( ProductApplicability::MODE_INHERIT_SELECT, [ $other->get_id() ] ) );
+		}
+
+		$order->update_status( 'processing' );
+
+		$contracts = Contracts::list_for_customer( $customer_id );
+		$this->assertCount( 1, $contracts, 'The line was charged the plan price, so its contract is created.' );
+		$this->assertSame( (int) $plan->get_id(), $contracts[0]->get_selling_plan_id() );
+		$this->assertSame( '', $this->deferral_reason( $order ) );
+	}
+
+	public function test_a_deleted_plan_defers_without_a_contract(): void {
+		$customer_id = $this->create_customer();
+		$plan        = $this->make_plan();
+		$order       = $this->create_subscription_order( $customer_id );
+		$this->apply_and_stamp( $order, $plan );
+
+		( new PlanRepository() )->delete( $plan->get_id(), Package::EXTENSION_SLUG );
+		$order->update_status( 'processing' );
+
+		$this->assertSame( [], Contracts::list_for_customer( $customer_id ) );
+		$this->assertSame( ContractCreationHandler::REASON_PLAN_UNAVAILABLE, $this->deferral_reason( $order ) );
+	}
+
+	/**
+	 * The order classification checks plan-unavailable before divergent plans and mixed carts:
+	 * a line whose plan is gone defers the whole order even beside a billable line.
+	 *
+	 * @testWith [false]
+	 *           [true]
+	 *
+	 * @param bool $with_one_time_line Whether the order also has a one-time line.
+	 */
+	public function test_a_deleted_plan_beside_a_billable_line_defers_as_plan_unavailable( bool $with_one_time_line ): void {
+		$customer_id = $this->create_customer();
+		$monthly     = $this->make_plan( 'month' );
+		$doomed      = $this->make_plan( 'week' );
+		$order       = $this->create_subscription_order( $customer_id );
+		$this->apply_and_stamp( $order, $monthly );
+		$this->add_line( $order, 'Weekly Box', $doomed );
+		if ( $with_one_time_line ) {
+			$this->add_line( $order, 'One-time Mug', null );
+		}
+
+		( new PlanRepository() )->delete( $doomed->get_id(), Package::EXTENSION_SLUG );
+		$order->update_status( 'processing' );
+
+		$this->assertSame( [], Contracts::list_for_customer( $customer_id ), 'No contract for the remaining billable line.' );
+		$this->assertSame( ContractCreationHandler::REASON_PLAN_UNAVAILABLE, $this->deferral_reason( $order ) );
+	}
+
+	public function test_a_plan_archived_after_add_to_cart_still_creates_the_contract(): void {
+		$customer_id = $this->create_customer();
+		$plan        = $this->make_plan();
+		$order       = $this->create_subscription_order( $customer_id );
+		$this->apply_and_stamp( $order, $plan );
+
+		$this->assertInstanceOf(
+			PlanView::class,
+			Plans::update(
+				$plan->get_id(),
+				[
+					'extension_slug' => Package::EXTENSION_SLUG,
+					'status'         => PlanStatus::ARCHIVED,
+				]
+			)
+		);
+		$order->update_status( 'processing' );
+
+		$contracts = Contracts::list_for_customer( $customer_id );
+		$this->assertCount( 1, $contracts, 'The cart priced the line on the plan, so checkout honours it.' );
+		$this->assertSame( (int) $plan->get_id(), $contracts[0]->get_selling_plan_id() );
+		$this->assertSame( '', $this->deferral_reason( $order ) );
+	}
+
+	public function test_an_offline_order_confirmed_after_the_plan_is_archived_creates_the_contract(): void {
+		$customer_id = $this->create_customer();
+		$plan        = $this->make_plan();
+		$order       = $this->create_subscription_order( $customer_id );
+		$this->apply_and_stamp( $order, $plan );
+		$order->update_status( 'on-hold' ); // Awaiting the offline payment.
+
+		$this->assertInstanceOf(
+			PlanView::class,
+			Plans::update(
+				$plan->get_id(),
+				[
+					'extension_slug' => Package::EXTENSION_SLUG,
+					'status'         => PlanStatus::ARCHIVED,
+				]
+			)
+		);
+		$order->update_status( 'processing' ); // The merchant confirms the payment.
+
+		$contracts = Contracts::list_for_customer( $customer_id );
+		$this->assertCount( 1, $contracts );
+		$this->assertSame( 'active', $contracts[0]->get_status() );
 	}
 
 	public function test_an_order_that_never_reaches_a_paid_status_creates_nothing(): void {

@@ -11,10 +11,11 @@ declare( strict_types=1 );
 namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Renewal;
 
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\Plans;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\View\PlanView;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Subscriptions;
-use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Plan;
+use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\PlanStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Gateway\GatewayCapabilities;
-use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\PlanRepository;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\SchemaInstaller;
 use Automattic\WooCommerce\SubscriptionsLite\Checkout\ContractCreationHandler;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
@@ -143,6 +144,16 @@ final class BogoRenewalBonusTest extends LiteIntegrationTestCase {
 		$this->assertSame( 2, $this->only_line( $this->renew( $contract_id ) )->get_quantity() );
 	}
 
+	public function test_a_bogo_on_an_archived_plan_still_applies_on_renewal(): void {
+		$contract_id = $this->sign_up( [ 'policies' => [ [ 'type' => 'bogo' ] ] ] );
+		$contract    = Contracts::get( $contract_id );
+		$this->assertNotNull( $contract );
+
+		$this->set_plan_status( (int) $contract->get_selling_plan_id(), PlanStatus::ARCHIVED );
+
+		$this->assertSame( 4, $this->only_line( $this->renew( $contract_id ) )->get_quantity(), 'Archiving stops new sign-ups, not the bonus of existing subscribers.' );
+	}
+
 	public function test_a_contract_owned_by_another_extension_is_left_alone(): void {
 		$contract_id = $this->sign_up( [ 'policies' => [ [ 'type' => 'bogo' ] ] ], 'other-extension' );
 
@@ -176,11 +187,16 @@ final class BogoRenewalBonusTest extends LiteIntegrationTestCase {
 	private function set_live_pricing_policy( int $contract_id, ?array $pricing_policy ): void {
 		$contract = Contracts::get( $contract_id );
 		$this->assertNotNull( $contract );
-		$plans = new PlanRepository();
-		$plan  = $plans->find( (int) $contract->get_selling_plan_id() );
-		$this->assertInstanceOf( Plan::class, $plan );
-		$plan->set_pricing_policy( $pricing_policy );
-		$this->assertTrue( $plans->update( $plan ) );
+		$this->assertInstanceOf(
+			PlanView::class,
+			Plans::update(
+				(int) $contract->get_selling_plan_id(),
+				[
+					'extension_slug' => Package::EXTENSION_SLUG,
+					'pricing_policy' => $pricing_policy,
+				]
+			)
+		);
 	}
 
 	/**

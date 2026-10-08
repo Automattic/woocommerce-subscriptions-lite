@@ -285,7 +285,7 @@ final class PriceCalculatorTest extends LiteIntegrationTestCase {
 	}
 
 	public function test_for_plan_skips_an_unknown_stored_entry_type(): void {
-		$plan = $this->make_plan(
+		$plan = $this->make_unvalidated_plan(
 			'month',
 			1,
 			null,
@@ -314,7 +314,7 @@ final class PriceCalculatorTest extends LiteIntegrationTestCase {
 	 * @param array<string, mixed> $entry Stored entry a write would reject.
 	 */
 	public function test_an_out_of_range_stored_entry_leaves_the_price_unchanged( array $entry ): void {
-		$plan = $this->make_plan( 'month', 1, null, [ 'pricing_policy' => [ 'policies' => [ $entry ] ] ] );
+		$plan = $this->make_unvalidated_plan( 'month', 1, null, [ 'pricing_policy' => [ 'policies' => [ $entry ] ] ] );
 
 		$calculator = PriceCalculator::for_plan( $plan );
 

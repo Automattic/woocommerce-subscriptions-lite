@@ -17,6 +17,7 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\ProductPlansPanel;
 use Automattic\WooCommerce\SubscriptionsLite\Bootstrap;
 use Automattic\WooCommerce\SubscriptionsLite\CustomerPortal\Endpoints;
+use Automattic\WooCommerce\SubscriptionsLite\Plans\PlanOrderController;
 use Automattic\WooCommerce\SubscriptionsLite\Pricing\PlanWriteValidation;
 use Automattic\WooCommerce\SubscriptionsLite\ProductPage\PlanPicker;
 use Automattic\WooCommerce\SubscriptionsLite\ProductPage\VariationPlanData;
@@ -79,6 +80,13 @@ final class BootstrapTest extends LiteIntegrationTestCase {
 		$this->assertTrue(
 			$this->hook_has_callback_on( 'woocommerce_subscriptions_engine_renewal_order_created', BogoRenewalBonus::class ),
 			'Engine-built renewal orders get the BOGO bonus.'
+		);
+	}
+
+	public function test_the_plan_order_route_is_wired_outside_wp_admin(): void {
+		$this->assertTrue(
+			$this->hook_has_callback_on( 'rest_api_init', PlanOrderController::class ),
+			'The plan order route registers on every request, not only in wp-admin.'
 		);
 	}
 

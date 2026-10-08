@@ -24,18 +24,19 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Checkout;
 
 use DateTimeImmutable;
 use DateTimeZone;
+use LogicException;
 use Throwable;
 use WC_Order;
 use WC_Order_Item_Product;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
-use Automattic\WooCommerce\SubscriptionsEngine\Api\SellingPlans;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\View\PlanView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\CycleStatus;
-use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Plan;
 use Automattic\WooCommerce\SubscriptionsLite\Contracts\AddressFields;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ProductPlanResolver;
+use Automattic\WooCommerce\SubscriptionsLite\Pricing\BillingTerms;
 use Automattic\WooCommerce\SubscriptionsLite\Renewal\RenewalWiring;
 
 defined( 'ABSPATH' ) || exit;
@@ -43,7 +44,7 @@ defined( 'ABSPATH' ) || exit;
 /**
  * Create one contract per paid subscription order.
  *
- * Collaborators (the engine facades, applicability resolver, and renewal wiring)
+ * Collaborators (the engine facades, plan resolver, and renewal wiring)
  * are called directly; the grouping, mapping, idempotency, and error paths are
  * covered by integration tests against real WooCommerce.
  */
@@ -68,10 +69,22 @@ final class ContractCreationHandler {
 	public const REASON_DIVERGENT_PLANS = 'divergent_plans';
 
 	/**
-	 * Deferral reason: the order mixes a plan line with a one-time (or now
-	 * unresolvable) line. Mixed carts are WOOSUBS-1775.
+	 * Deferral reason: the order mixes a plan line with a one-time line; mixed
+	 * carts are not supported yet.
 	 */
 	public const REASON_MIXED_CART = 'mixed_cart';
+
+	/**
+	 * Deferral reason: a line carries a plan that no longer resolves as a billable
+	 * Lite plan (deleted or not billable).
+	 */
+	public const REASON_PLAN_UNAVAILABLE = 'plan_unavailable';
+
+	/**
+	 * Deferral reason: contract creation was refused before any contract was written,
+	 * for a reason that would repeat on every retry (an invalid field or billing).
+	 */
+	public const REASON_CREATION_FAILED = 'creation_failed';
 
 	/**
 	 * Logger source tag.
@@ -109,7 +122,7 @@ final class ContractCreationHandler {
 		}
 
 		$outcome = $this->classify_order( $order );
-		if ( null === $outcome['reason'] && ! $outcome['plan'] instanceof Plan ) {
+		if ( null === $outcome['reason'] && ! $outcome['plan'] instanceof PlanView ) {
 			return; // No subscription line on the order.
 		}
 
@@ -130,9 +143,20 @@ final class ContractCreationHandler {
 		} catch ( Throwable $e ) {
 			$this->log_error( sprintf( 'failed to create a contract for order %d: %s', $order_id, $e->getMessage() ) );
 			try {
-				$this->note_stuck_draft( $order );
+				// A draft blocks retries through the idempotency check. Without one, a refused
+				// input (a LogicException: the engine rejected a field, or the billing does not
+				// parse) fails the same way every time, so the deferral flag stops the retries;
+				// any other failure (a database error) may be transient: it gets a note but no
+				// flag, so a later paid transition still retries.
+				if ( ! $this->note_stuck_draft( $order ) ) {
+					if ( $e instanceof LogicException ) {
+						$this->record_deferral( $order, self::REASON_CREATION_FAILED );
+					} else {
+						$order->add_order_note( __( 'The subscription for this order could not be created. It will be retried on the next paid status change. If it keeps failing, this order needs manual review.', 'woocommerce-subscriptions-lite' ) );
+					}
+				}
 			} catch ( Throwable $note_error ) {
-				$this->log_error( sprintf( 'failed to note the draft contract on order %d: %s', $order_id, $note_error->getMessage() ) );
+				$this->log_error( sprintf( 'failed to record the failed creation on order %d: %s', $order_id, $note_error->getMessage() ) );
 			}
 			return;
 		}
@@ -166,9 +190,11 @@ final class ContractCreationHandler {
 	 * leave a merchant-visible order note naming the draft.
 	 *
 	 * @param WC_Order $order The order.
+	 * @return bool Whether the order has a contract (a draft was noted, or another exists).
 	 */
-	private function note_stuck_draft( WC_Order $order ): void {
-		foreach ( Contracts::find_by_origin_order( $order->get_id() ) as $contract ) {
+	private function note_stuck_draft( WC_Order $order ): bool {
+		$contracts = Contracts::find_by_origin_order( $order->get_id() );
+		foreach ( $contracts as $contract ) {
 			if ( ContractStatus::DRAFT !== $contract->get_status() ) {
 				continue;
 			}
@@ -180,6 +206,8 @@ final class ContractCreationHandler {
 				)
 			);
 		}
+
+		return [] !== $contracts;
 	}
 
 	/**
@@ -187,13 +215,16 @@ final class ContractCreationHandler {
 	 * then cycle 1 (billed by the order), then activation with the first renewal date.
 	 * Activation comes last, so a failure part-way leaves a draft that is never due.
 	 *
+	 * The first renewal date comes from {@see BillingTerms::first_renewal_from()}, the
+	 * same parse that decides whether a plan is billable.
+	 *
 	 * @param WC_Order $order The paid order.
-	 * @param Plan     $plan  The order's selling plan.
+	 * @param PlanView $plan  The order's selling plan.
 	 * @return ContractView|null The active contract; null when it was deleted before activation.
-	 * @throws Throwable When an engine write fails.
+	 * @throws Throwable When the billing payload does not parse or an engine write fails.
 	 */
-	public function create_contract( WC_Order $order, Plan $plan ): ?ContractView {
-		$plan_id    = (int) $plan->get_id();
+	public function create_contract( WC_Order $order, PlanView $plan ): ?ContractView {
+		$plan_id    = $plan->get_id();
 		$plan_lines = [];
 		foreach ( $order->get_items() as $item ) {
 			if ( $item instanceof WC_Order_Item_Product && $plan_id === (int) $item->get_meta( self::SELLING_PLAN_META ) ) {
@@ -205,7 +236,7 @@ final class ContractCreationHandler {
 		$start = null !== $paid
 			? new DateTimeImmutable( '@' . $paid->getTimestamp() )
 			: new DateTimeImmutable( 'now', new DateTimeZone( 'UTC' ) );
-		$next  = $plan->get_billing_policy()->compute_first_renewal_from( $start );
+		$next  = BillingTerms::first_renewal_from( $plan, $start );
 
 		$totals = $this->get_recurring_totals( $order, $plan_lines );
 
@@ -335,18 +366,27 @@ final class ContractCreationHandler {
 	/**
 	 * Inspect the order's product lines and decide the outcome.
 	 *
-	 * Returns the single `Plan` when one re-validated plan covers every plan line
-	 * and there is no other product line; a `reason` when a subscription was
-	 * intended but the order cannot be one contract; or neither when there is no
-	 * subscription line at all.
+	 * A line's plan resolves with the rule cart pricing and the Store API use
+	 * ({@see ProductPlanResolver::get_line_plan()}: any status, billable). The line's
+	 * plan stamp is trusted as the plan the shopper was charged for: applicability is
+	 * not re-checked, so a plan archived or detached from the product after
+	 * add-to-cart, or before an offline payment is confirmed, still becomes a
+	 * contract. Lite writes the stamp only at add-to-cart, from a plan that passed
+	 * the applicability check, but a stamp from any writer is trusted the same way
+	 * (privileged edits such as REST line meta or import tools); the plan must
+	 * still be a billable Lite plan. Returns the single plan when it covers every plan line and
+	 * there is no other product line; a `reason` when a subscription was intended but
+	 * the order cannot be one contract (including a line whose plan no longer
+	 * resolves); or neither when there is no subscription line at all.
 	 *
 	 * @param WC_Order $order The paid order.
-	 * @return array{plan: Plan|null, reason: string|null}
+	 * @return array{plan: PlanView|null, reason: string|null}
 	 */
 	private function classify_order( WC_Order $order ): array {
-		$resolver  = new ProductPlanResolver();
-		$plan_ids  = [];
-		$has_plain = false; // A product line with no plan, or one whose plan no longer applies.
+		$resolver    = new ProductPlanResolver();
+		$plans       = [];
+		$has_plain   = false; // A product line with no plan.
+		$unavailable = false; // A line whose stamped plan no longer resolves.
 
 		foreach ( $order->get_items() as $item ) {
 			if ( ! $item instanceof WC_Order_Item_Product ) {
@@ -354,41 +394,32 @@ final class ContractCreationHandler {
 			}
 
 			$plan_id = (int) $item->get_meta( self::SELLING_PLAN_META );
-			if ( $plan_id <= 0 || ! $resolver->is_plan_applicable_to_product( $plan_id, $item->get_product_id() ) ) {
+			if ( $plan_id <= 0 ) {
 				$has_plain = true;
 				continue;
 			}
 
-			$plan_ids[ $plan_id ] = true;
+			$plan = $resolver->get_line_plan( $plan_id );
+			if ( null === $plan ) {
+				$unavailable = true;
+				continue;
+			}
+
+			$plans[ $plan_id ] = $plan;
 		}
 
-		if ( empty( $plan_ids ) ) {
-			return [
-				'plan'   => null,
-				'reason' => null,
-			];
+		$reason = null;
+		if ( $unavailable ) {
+			$reason = self::REASON_PLAN_UNAVAILABLE;
+		} elseif ( count( $plans ) > 1 ) {
+			$reason = self::REASON_DIVERGENT_PLANS;
+		} elseif ( [] !== $plans && $has_plain ) {
+			$reason = self::REASON_MIXED_CART;
 		}
-
-		if ( count( $plan_ids ) > 1 ) {
-			return [
-				'plan'   => null,
-				'reason' => self::REASON_DIVERGENT_PLANS,
-			];
-		}
-
-		if ( $has_plain ) {
-			return [
-				'plan'   => null,
-				'reason' => self::REASON_MIXED_CART,
-			];
-		}
-
-		$plans = ( new SellingPlans( [ Package::EXTENSION_SLUG ] ) )->get_plans( [ (int) array_key_first( $plan_ids ) ] );
-		$plan  = reset( $plans );
 
 		return [
-			'plan'   => $plan instanceof Plan ? $plan : null,
-			'reason' => null,
+			'plan'   => null === $reason && [] !== $plans ? reset( $plans ) : null,
+			'reason' => $reason,
 		];
 	}
 

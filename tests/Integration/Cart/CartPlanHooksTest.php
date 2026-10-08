@@ -16,7 +16,8 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Cart;
 
-use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Plan;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\View\PlanView;
+use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\PlanStatus;
 use Automattic\WooCommerce\SubscriptionsLite\Cart\CartPlanHooks;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ApplicabilityStore;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ProductApplicability;
@@ -75,7 +76,7 @@ final class CartPlanHooksTest extends LiteIntegrationTestCase {
 	 *
 	 * @param float $percent Percentage off.
 	 */
-	private function make_percentage_plan( float $percent ): Plan {
+	private function make_percentage_plan( float $percent ): PlanView {
 		return $this->make_plan(
 			'month',
 			1,
@@ -317,7 +318,7 @@ final class CartPlanHooksTest extends LiteIntegrationTestCase {
 
 	public function test_line_price_reflects_a_fixed_amount_discount(): void {
 		$product_id = $this->make_product( '20.00' );
-		$plan_id    = (int) $this->make_plan(
+		$plan       = $this->make_plan(
 			'month',
 			1,
 			null,
@@ -332,7 +333,8 @@ final class CartPlanHooksTest extends LiteIntegrationTestCase {
 					'one_time_fees' => [],
 				],
 			]
-		)->get_id();
+		);
+		$plan_id    = $plan->get_id();
 		( new ApplicabilityStore() )->set( $product_id, new ProductApplicability( ProductApplicability::MODE_INHERIT_ALL ) );
 
 		$this->add_to_cart( $product_id, $plan_id );
@@ -344,7 +346,7 @@ final class CartPlanHooksTest extends LiteIntegrationTestCase {
 
 	public function test_line_price_reflects_a_price_replacement(): void {
 		$product_id = $this->make_product( '20.00' );
-		$plan_id    = (int) $this->make_plan(
+		$plan       = $this->make_plan(
 			'month',
 			1,
 			null,
@@ -359,7 +361,8 @@ final class CartPlanHooksTest extends LiteIntegrationTestCase {
 					'one_time_fees' => [],
 				],
 			]
-		)->get_id();
+		);
+		$plan_id    = $plan->get_id();
 		( new ApplicabilityStore() )->set( $product_id, new ProductApplicability( ProductApplicability::MODE_INHERIT_ALL ) );
 
 		$this->add_to_cart( $product_id, $plan_id );
@@ -393,6 +396,22 @@ final class CartPlanHooksTest extends LiteIntegrationTestCase {
 
 		$this->assertCount( 1, $rows );
 		$this->assertSame( 'Monthly', $rows[0]['value'] );
+	}
+
+	public function test_a_line_on_an_archived_plan_still_resolves(): void {
+		$plan = $this->make_plan( 'month', 1 );
+		$this->set_plan_status( $plan->get_id(), PlanStatus::ARCHIVED );
+
+		$rows = ( new CartPlanHooks() )->get_item_data( [], [ CartPlanHooks::SELLING_PLAN_ID_KEY => $plan->get_id() ] );
+
+		$this->assertCount( 1, $rows );
+		$this->assertSame( 'Monthly', $rows[0]['value'] );
+	}
+
+	public function test_a_line_on_a_plan_without_usable_billing_reads_as_one_time(): void {
+		$plan = $this->make_unvalidated_plan( 'month', 1, null, [ 'billing_policy' => null ] );
+
+		$this->assertSame( [], ( new CartPlanHooks() )->get_item_data( [], [ CartPlanHooks::SELLING_PLAN_ID_KEY => $plan->get_id() ] ) );
 	}
 
 	public function test_get_item_data_leaves_one_time_lines_untouched(): void {

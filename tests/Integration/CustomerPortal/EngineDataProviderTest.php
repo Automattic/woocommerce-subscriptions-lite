@@ -14,8 +14,9 @@ declare( strict_types=1 );
 namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\CustomerPortal;
 
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
-use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Plan;
-use Automattic\WooCommerce\SubscriptionsEngine\Core\ValueObject\BillingPolicy;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\Plans;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\View\PlanView;
+use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\PlanStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\PlanRepository;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\CustomerPortal\EngineDataProvider;
@@ -156,17 +157,56 @@ final class EngineDataProviderTest extends LiteIntegrationTestCase {
 	public function test_detail_cadence_follows_a_live_plan_edit(): void {
 		$customer_id = $this->create_customer();
 		$contract_id = $this->create_contract( $customer_id );
-		$plans       = new PlanRepository();
-		$plan        = $plans->find( (int) Contracts::get( $contract_id )->get_selling_plan_id() );
-		$this->assertInstanceOf( Plan::class, $plan );
-
-		$plan->set_billing_policy( new BillingPolicy( 'week', 3, null, null, null ) );
-		$plans->update( $plan );
+		$plan        = Plans::update(
+			(int) Contracts::get( $contract_id )->get_selling_plan_id(),
+			[
+				'extension_slug' => Package::EXTENSION_SLUG,
+				'billing_policy' => [
+					'period'   => 'week',
+					'interval' => 3,
+				],
+			]
+		);
+		$this->assertInstanceOf( PlanView::class, $plan );
 
 		$detail = $this->provider->get_contract( $contract_id, $customer_id );
 
 		$this->assertSame( 'week', $detail['billing_period'] );
 		$this->assertSame( 3, $detail['billing_interval'] );
+	}
+
+	public function test_cadence_is_kept_when_the_plan_is_archived(): void {
+		$customer_id = $this->create_customer();
+		$contract_id = $this->create_contract(
+			$customer_id,
+			[
+				'period'   => 'week',
+				'interval' => 2,
+			]
+		);
+
+		$this->set_plan_status( (int) Contracts::get( $contract_id )->get_selling_plan_id(), PlanStatus::ARCHIVED );
+
+		$detail = $this->provider->get_contract( $contract_id, $customer_id );
+		$rows   = $this->provider->get_contracts_for_customer( $customer_id );
+
+		$this->assertSame( 'week', $detail['billing_period'] );
+		$this->assertSame( 2, $detail['billing_interval'] );
+		$this->assertSame( 'week', $rows[0]['billing_period'] );
+		$this->assertSame( 2, $rows[0]['billing_interval'] );
+	}
+
+	public function test_cadence_is_empty_for_a_plan_owned_by_another_extension(): void {
+		$customer_id = $this->create_customer();
+		$contract_id = $this->create_contract( $customer_id );
+		$foreign     = $this->make_plan( 'week', 2, null, [ 'extension_slug' => 'other-extension' ] );
+		$this->assertNotNull( Contracts::update( $contract_id, [ 'selling_plan_id' => $foreign->get_id() ] ) );
+
+		$detail = $this->provider->get_contract( $contract_id, $customer_id );
+		$rows   = $this->provider->get_contracts_for_customer( $customer_id );
+
+		$this->assertSame( '', $detail['billing_period'] );
+		$this->assertSame( '', $rows[0]['billing_period'] );
 	}
 
 	public function test_cadence_degrades_to_empty_when_the_plan_is_gone(): void {
@@ -187,13 +227,14 @@ final class EngineDataProviderTest extends LiteIntegrationTestCase {
 	public function test_drafts_are_hidden_from_the_customer(): void {
 		$customer_id = $this->create_customer();
 		$active_id   = $this->create_contract( $customer_id );
-		$draft_id    = Contracts::create(
+		$draft       = Contracts::create(
 			[
 				'extension_slug' => Package::EXTENSION_SLUG,
 				'customer_id'    => $customer_id,
 				'status'         => 'draft',
 			]
-		)->get_id();
+		);
+		$draft_id    = $draft->get_id();
 
 		$rows = $this->provider->get_contracts_for_customer( $customer_id );
 

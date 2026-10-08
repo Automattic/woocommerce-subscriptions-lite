@@ -9,9 +9,10 @@
  * a WooCommerce order mapped by Lite's checkout handler onto the engine's
  * contracts facade - and moved to other statuses through the engine's public
  * facade verbs, so the data under test is shaped exactly like production data.
- * The engine's `Integration\` classes used here (plan repository, order
- * linkage for renewal orders) are a documented test-only exemption from the
- * "consume the engine via the `Api\` facade only" production rule.
+ * Plans are created through the engine's plan write facade and read back as
+ * views, as production code reads them. The engine's `Integration\` classes
+ * used here (order linkage for renewal orders) are a documented test-only
+ * exemption from the "consume the engine via the `Api\` facade only" rule.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Tests
  */
@@ -21,12 +22,11 @@ declare( strict_types=1 );
 namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration;
 
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\Plans;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Subscriptions;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
-use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Plan;
-use Automattic\WooCommerce\SubscriptionsEngine\Core\ValueObject\BillingPolicy;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\View\PlanView;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Checkout\OrderLinkage;
-use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\PlanRepository;
 use Automattic\WooCommerce\SubscriptionsLite\Cart\CartPlanHooks;
 use Automattic\WooCommerce\SubscriptionsLite\Checkout\ContractCreationHandler;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
@@ -88,28 +88,109 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 	}
 
 	/**
-	 * Persist a plan and return the entity (with its id stamped by the insert).
+	 * Create a plan through the engine plan facade and return its view.
+	 *
+	 * A `billing_policy` in `$overrides` replaces the whole payload, so the positional
+	 * `$period`, `$interval` and `$max_cycles` are then ignored (except `$period` in the
+	 * default name).
 	 *
 	 * @param string               $period     Billing period (day / week / month / year).
 	 * @param int                  $interval   Billing interval.
 	 * @param int|null             $max_cycles Maximum billing cycles, or null for open-ended.
-	 * @param array<string, mixed> $overrides  Plan attribute overrides (name, status, sort_order, extension_slug, ...).
+	 * @param array<string, mixed> $overrides  Facade create keys (name, status, extension_slug, billing_policy, pricing_policy, delivery_policy).
 	 */
-	protected function make_plan( string $period = 'month', int $interval = 1, ?int $max_cycles = null, array $overrides = [] ): Plan {
-		$plan = Plan::create(
+	protected function make_plan( string $period = 'month', int $interval = 1, ?int $max_cycles = null, array $overrides = [] ): PlanView {
+		return Plans::create(
 			array_merge(
 				[
-					'name'           => ucfirst( $period ) . 'ly plan',
-					'billing_policy' => new BillingPolicy( $period, $interval, null, $max_cycles, null ),
-					'category'       => Plan::DEFAULT_CATEGORY,
 					'extension_slug' => Package::EXTENSION_SLUG,
+					'name'           => ucfirst( $period ) . 'ly plan',
+					'billing_policy' => [
+						'period'     => $period,
+						'interval'   => $interval,
+						'max_cycles' => $max_cycles,
+					],
 				],
 				$overrides
 			)
 		);
-		( new PlanRepository() )->insert( $plan );
+	}
 
-		return $plan;
+	/**
+	 * Create a plan with the plan validation action unhooked, as a row written
+	 * before a validation rule existed would be stored. Same arguments as
+	 * {@see self::make_plan()}, including a `billing_policy` override replacing the
+	 * positional billing arguments.
+	 *
+	 * @param string               $period     Billing period.
+	 * @param int                  $interval   Billing interval.
+	 * @param int|null             $max_cycles Maximum billing cycles.
+	 * @param array<string, mixed> $overrides  Facade create keys.
+	 */
+	protected function make_unvalidated_plan( string $period = 'month', int $interval = 1, ?int $max_cycles = null, array $overrides = [] ): PlanView {
+		return $this->without_plan_validation(
+			function () use ( $period, $interval, $max_cycles, $overrides ): PlanView {
+				return $this->make_plan( $period, $interval, $max_cycles, $overrides );
+			}
+		);
+	}
+
+	/**
+	 * Update a plan with the plan validation action unhooked, as an out-of-band
+	 * write would store it.
+	 *
+	 * @param int                  $id   Plan id.
+	 * @param array<string, mixed> $args Facade update keys.
+	 */
+	protected function update_plan_unvalidated( int $id, array $args ): void {
+		$plan = $this->without_plan_validation(
+			static function () use ( $id, $args ): ?PlanView {
+				return Plans::update( $id, [ 'extension_slug' => Package::EXTENSION_SLUG ] + $args );
+			}
+		);
+		$this->assertInstanceOf( PlanView::class, $plan );
+	}
+
+	/**
+	 * Run `$write` with the plan validation action unhooked, then restore it.
+	 *
+	 * @template T
+	 * @param callable(): T $write The write.
+	 * @return T
+	 */
+	private function without_plan_validation( callable $write ) {
+		global $wp_filter;
+
+		$hook  = 'woocommerce_subscriptions_engine_validate_plan';
+		$saved = isset( $wp_filter[ $hook ] ) ? clone $wp_filter[ $hook ] : null;
+		remove_all_actions( $hook );
+
+		try {
+			return $write();
+		} finally {
+			if ( null !== $saved ) {
+				$wp_filter[ $hook ] = $saved; // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited -- restores the hook this helper unhooked.
+			}
+		}
+	}
+
+	/**
+	 * Set a plan's status through the engine plan facade.
+	 *
+	 * @param int    $id     Plan id.
+	 * @param string $status A registered plan status.
+	 */
+	protected function set_plan_status( int $id, string $status ): void {
+		$this->assertInstanceOf(
+			PlanView::class,
+			Plans::update(
+				$id,
+				[
+					'extension_slug' => Package::EXTENSION_SLUG,
+					'status'         => $status,
+				]
+			)
+		);
 	}
 
 	/**
@@ -186,9 +267,9 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 	 * Stamp every order line with `$plan`, as the cart writer does at checkout.
 	 *
 	 * @param WC_Order $order The order.
-	 * @param Plan     $plan  The selling plan.
+	 * @param PlanView $plan  The selling plan.
 	 */
-	protected function stamp_plan( WC_Order $order, Plan $plan ): void {
+	protected function stamp_plan( WC_Order $order, PlanView $plan ): void {
 		foreach ( $order->get_items() as $item ) {
 			$item->update_meta_data( CartPlanHooks::SELLING_PLAN_ID_KEY, (string) $plan->get_id() );
 			$item->save();

@@ -14,12 +14,11 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Admin;
 
-use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Plan;
-use Automattic\WooCommerce\SubscriptionsEngine\Core\ValueObject\BillingPolicy;
-use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\PlanRepository;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\View\PlanView;
+use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\PlanStatus;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\ProductPlansPanel;
-use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ApplicabilityStore;
+use Automattic\WooCommerce\SubscriptionsLite\Plans\PlanOrder;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ProductApplicability;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
 use WC_Admin_Meta_Boxes;
@@ -57,17 +56,8 @@ final class ProductPlansPanelTest extends LiteIntegrationTestCase {
 	 * @param string $name   Plan name.
 	 * @param string $period Billing period unit.
 	 */
-	private function named_plan( string $name, string $period = 'month' ): Plan {
-		$plan = Plan::create(
-			[
-				'name'           => $name,
-				'billing_policy' => new BillingPolicy( $period, 1, null, null, null ),
-				'extension_slug' => Package::EXTENSION_SLUG,
-			]
-		);
-		( new PlanRepository() )->insert( $plan );
-
-		return $plan;
+	private function named_plan( string $name, string $period = 'month' ): PlanView {
+		return $this->make_plan( $period, 1, null, [ 'name' => $name ] );
 	}
 
 	/**
@@ -401,14 +391,15 @@ final class ProductPlansPanelTest extends LiteIntegrationTestCase {
 
 	public function test_a_plan_owned_by_another_extension_is_rejected(): void {
 		$product = $this->simple_product();
-		$foreign = Plan::create(
+		$foreign = $this->make_plan(
+			'month',
+			1,
+			null,
 			[
-				'name'           => 'Foreign plan',
-				'billing_policy' => new BillingPolicy( 'month', 1, null, null, null ),
 				'extension_slug' => 'another-extension',
+				'name'           => 'Foreign plan',
 			]
 		);
-		( new PlanRepository() )->insert( $foreign );
 
 		$this->seed_post(
 			[
@@ -495,6 +486,24 @@ final class ProductPlansPanelTest extends LiteIntegrationTestCase {
 		$this->assertStringContainsString( 'Every 1 month', $html );
 		$this->assertStringContainsString( 'Every 1 year', $html );
 		$this->assertStringContainsString( 'Every 1 week', $html );
+	}
+
+	public function test_selection_table_lists_active_plans_in_the_lite_plan_order(): void {
+		$product  = $this->simple_product();
+		$monthly  = $this->named_plan( 'Monthly' );
+		$yearly   = $this->named_plan( 'Yearly', 'year' );
+		$archived = $this->named_plan( 'Weekly', 'week' );
+		$this->set_plan_status( $archived->get_id(), PlanStatus::ARCHIVED );
+		( new PlanOrder() )->set( [ $yearly->get_id(), $monthly->get_id() ] );
+
+		$html = $this->render_panel_for( $product );
+
+		$this->assertStringNotContainsString( 'value="' . $archived->get_id() . '"', $html, 'Archived plans are not offered.' );
+		$yearly_at  = strpos( $html, 'value="' . $yearly->get_id() . '"' );
+		$monthly_at = strpos( $html, 'value="' . $monthly->get_id() . '"' );
+		$this->assertIsInt( $yearly_at );
+		$this->assertIsInt( $monthly_at );
+		$this->assertLessThan( $monthly_at, $yearly_at, 'Rows follow the Lite plan order.' );
 	}
 
 	/**

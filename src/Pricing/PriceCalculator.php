@@ -20,7 +20,7 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Pricing;
 
-use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Plan;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\View\PlanView;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -48,9 +48,9 @@ final class PriceCalculator {
 	/**
 	 * Calculator for a live plan's stored terms.
 	 *
-	 * @param Plan $plan Plan.
+	 * @param PlanView $plan Plan.
 	 */
-	public static function for_plan( Plan $plan ): self {
+	public static function for_plan( PlanView $plan ): self {
 		return new self( PricingTerms::from_plan( $plan ) );
 	}
 

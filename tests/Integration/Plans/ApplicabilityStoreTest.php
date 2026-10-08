@@ -14,7 +14,7 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Plans;
 
-use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Plan;
+use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\PlanStatus;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ApplicabilityStore;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ProductApplicability;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
@@ -252,7 +252,7 @@ final class ApplicabilityStoreTest extends LiteIntegrationTestCase {
 	public function test_set_rejects_an_archived_plan_id(): void {
 		$store       = new ApplicabilityStore();
 		$product_id  = $this->simple_product_id();
-		$archived_id = (int) $this->make_plan( 'month', 1, null, [ 'status' => Plan::STATUS_ARCHIVED ] )->get_id();
+		$archived_id = (int) $this->make_plan( 'month', 1, null, [ 'status' => PlanStatus::ARCHIVED ] )->get_id();
 
 		try {
 			$store->set( $product_id, new ProductApplicability( ProductApplicability::MODE_INHERIT_SELECT, [ $archived_id ] ) );

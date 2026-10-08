@@ -1,7 +1,9 @@
 <?php
 /**
  * Integration tests for ContractCreationHandler: recurring money facts of taxed,
- * discounted and multi-line orders, and an activation write that fails.
+ * discounted and multi-line orders, an activation write that fails, a contract
+ * insert that fails (noted, retried on the next paid status), a contract field the engine refuses (deferred),
+ * and a plan billing payload that does not parse.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Tests
  */
@@ -166,5 +168,133 @@ final class ContractCreationOutcomesTest extends LiteIntegrationTestCase {
 			array_filter( $notes, static fn ( string $note ): bool => false !== strpos( $note, '#' . $draft->get_id() ) ),
 			'An order note names the draft.'
 		);
+		$this->assertSame( '', $this->deferral_reason( $order ), 'The draft, not a deferral flag, holds the retries.' );
+		$this->assertSame( [], $this->notes_containing( $order, 'creation_failed' ) );
+	}
+
+	public function test_an_unparseable_plan_billing_payload_defers_the_order(): void {
+		$order = $this->create_subscription_order( $this->create_customer() );
+		$order->set_status( 'processing' );
+		$order->save();
+
+		// A digit-string interval: the strict billing parser contract creation uses
+		// refuses it, so the line's plan does not resolve as billable.
+		$plan = $this->make_unvalidated_plan(
+			'month',
+			1,
+			null,
+			[
+				'billing_policy' => [
+					'period'   => 'month',
+					'interval' => '1',
+				],
+			]
+		);
+		$this->stamp_plan( $order, $plan );
+		$this->make_lines_applicable( $order );
+
+		( new ContractCreationHandler() )->create_contracts_for_order( $order->get_id() );
+
+		$this->assertSame( [], Contracts::find_by_origin_order( $order->get_id() ) );
+		$this->assertSame( ContractCreationHandler::REASON_PLAN_UNAVAILABLE, $this->deferral_reason( $order ), 'The stamped line whose plan is not billable defers the order.' );
+		$this->assertNotEmpty( $this->notes_containing( $order, 'plan_unavailable' ), 'An order note records the deferral.' );
+	}
+
+	public function test_a_failed_contract_insert_is_noted_and_retried_on_the_next_paid_status(): void {
+		global $wpdb;
+
+		$order = $this->create_subscription_order( $this->create_customer() );
+		$this->stamp_plan( $order, $this->make_plan() );
+		$this->make_lines_applicable( $order );
+
+		$table = SchemaInstaller::get_table_name( SchemaInstaller::TABLE_CONTRACTS );
+		$break = static function ( string $query ) use ( $table ): string {
+			return 0 === strpos( ltrim( $query ), "INSERT INTO `{$table}`" ) ? 'SELECT broken syntax (' : $query;
+		};
+		add_filter( 'query', $break );
+		$suppressed = $wpdb->suppress_errors( true );
+
+		try {
+			$order->update_status( 'processing' ); // Fires the bootstrap-bound handler.
+		} finally {
+			$wpdb->suppress_errors( $suppressed );
+			remove_filter( 'query', $break );
+		}
+
+		$this->assertSame( [], Contracts::find_by_origin_order( $order->get_id() ), 'The insert failed, so no contract exists.' );
+		$this->assertSame( '', $this->deferral_reason( $order ), 'A database failure may be transient, so nothing blocks a retry.' );
+		$this->assertSame( [], $this->notes_containing( $order, 'creation_failed' ) );
+		$this->assertCount( 1, $this->notes_containing( $order, 'will be retried on the next paid status change' ), 'The merchant can see the failure.' );
+
+		// The next paid transition retries and, with the database back, creates the contract.
+		$order->update_status( 'completed' );
+
+		$this->assertCount( 1, Contracts::find_by_origin_order( $order->get_id() ) );
+		$this->assertSame( '', $this->deferral_reason( $order ) );
+	}
+
+	public function test_a_refused_contract_field_defers_the_order_and_is_not_retried(): void {
+		$order = $this->create_subscription_order( $this->create_customer() );
+		$order->set_status( 'processing' );
+		$order->save();
+
+		$this->stamp_plan( $order, $this->make_plan() );
+		$this->make_lines_applicable( $order );
+
+		// The engine refuses a lowercase currency code: the same order fails the same way on every retry.
+		$lowercase = static fn (): string => 'usd';
+		add_filter( 'woocommerce_order_get_currency', $lowercase );
+
+		try {
+			( new ContractCreationHandler() )->create_contracts_for_order( $order->get_id() );
+			( new ContractCreationHandler() )->create_contracts_for_order( $order->get_id() );
+		} finally {
+			remove_filter( 'woocommerce_order_get_currency', $lowercase );
+		}
+
+		$this->assertSame( [], Contracts::find_by_origin_order( $order->get_id() ) );
+		$this->assertSame( ContractCreationHandler::REASON_CREATION_FAILED, $this->deferral_reason( $order ) );
+		$this->assertCount( 1, $this->notes_containing( $order, 'creation_failed' ), 'The deferral flag stops the retry.' );
+	}
+
+	/**
+	 * Make every product line's product accept every Lite plan.
+	 *
+	 * @param WC_Order $order The order.
+	 */
+	private function make_lines_applicable( WC_Order $order ): void {
+		foreach ( $order->get_items() as $item ) {
+			if ( $item instanceof WC_Order_Item_Product ) {
+				( new ApplicabilityStore() )->set( $item->get_product_id(), new ProductApplicability( ProductApplicability::MODE_INHERIT_ALL ) );
+			}
+		}
+	}
+
+	/**
+	 * The order's deferral reason, read fresh.
+	 *
+	 * @param WC_Order $order The order.
+	 */
+	private function deferral_reason( WC_Order $order ): string {
+		$fresh = wc_get_order( $order->get_id() );
+		$this->assertInstanceOf( WC_Order::class, $fresh );
+
+		return (string) $fresh->get_meta( ContractCreationHandler::CREATION_DEFERRED_META );
+	}
+
+	/**
+	 * The order notes containing `$needle`.
+	 *
+	 * @param WC_Order $order  The order.
+	 * @param string   $needle Text to look for.
+	 * @return array<int, string>
+	 */
+	private function notes_containing( WC_Order $order, string $needle ): array {
+		$notes = array_map(
+			static fn ( $note ): string => (string) $note->content,
+			wc_get_order_notes( [ 'order_id' => $order->get_id() ] )
+		);
+
+		return array_values( array_filter( $notes, static fn ( string $note ): bool => false !== strpos( $note, $needle ) ) );
 	}
 }

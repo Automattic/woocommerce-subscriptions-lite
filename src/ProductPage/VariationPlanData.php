@@ -41,7 +41,7 @@ final class VariationPlanData {
 	 * the plans belong to the shared parent - without the cache each
 	 * variation would re-run the same resolution.
 	 *
-	 * @var array<int, array<int, \Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Plan>>
+	 * @var array<int, array<int, \Automattic\WooCommerce\SubscriptionsEngine\Api\View\PlanView>>
 	 */
 	private static $plans_cache = [];
 

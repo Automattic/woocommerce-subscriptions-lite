@@ -13,7 +13,7 @@
  * Applicability is Lite-owned: reads and writes go through Lite's
  * {@see \Automattic\WooCommerce\SubscriptionsLite\Plans\ApplicabilityStore},
  * and the plans list comes from the engine's public
- * {@see \Automattic\WooCommerce\SubscriptionsEngine\Api\SellingPlans} catalog
+ * {@see \Automattic\WooCommerce\SubscriptionsEngine\Api\Plans} plan
  * read. The store validates writes (product type, plan ownership) and its
  * rejection surfaces as a product-screen admin error via
  * WC_Admin_Meta_Boxes::add_error().
@@ -28,9 +28,11 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Admin;
 use InvalidArgumentException;
 use WC_Admin_Meta_Boxes;
 use WC_Product;
-use Automattic\WooCommerce\SubscriptionsEngine\Api\SellingPlans;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\Plans;
+use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\PlanStatus;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ApplicabilityStore;
+use Automattic\WooCommerce\SubscriptionsLite\Plans\PlanOrder;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ProductApplicability;
 use Automattic\WooCommerce\SubscriptionsLite\ProductPage\PlanOptionFormatter;
 
@@ -97,20 +99,6 @@ final class ProductPlansPanel {
 	const SCOPE_SELECT = 'select';
 
 	/**
-	 * Engine catalog read facade, scoped to Lite's slug.
-	 *
-	 * @var SellingPlans
-	 */
-	private $catalog;
-
-	/**
-	 * Construct the panel.
-	 */
-	public function __construct() {
-		$this->catalog = new SellingPlans( [ Package::EXTENSION_SLUG ] );
-	}
-
-	/**
 	 * Wire the tab, panel, save, and asset hooks. Called once from the
 	 * bootstrap in an admin context.
 	 *
@@ -156,7 +144,13 @@ final class ProductPlansPanel {
 
 		$product_id    = isset( $post->ID ) ? (int) $post->ID : 0;
 		$applicability = ( new ApplicabilityStore() )->get( $product_id );
-		$plans         = $this->catalog->list_plans();
+		$active_plans  = Plans::list(
+			[
+				'extension_slug' => Package::EXTENSION_SLUG,
+				'status'         => PlanStatus::ACTIVE,
+			]
+		);
+		$plans         = ( new PlanOrder() )->sort( $active_plans );
 
 		$is_plans_mode = ProductApplicability::MODE_DISABLE !== $applicability->get_mode();
 		$is_select     = ProductApplicability::MODE_INHERIT_SELECT === $applicability->get_mode();

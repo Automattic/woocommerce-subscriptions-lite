@@ -35,9 +35,7 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Cart;
 
 use WC_Cart;
 use WC_Product;
-use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Plan;
-use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\PlanRepository;
-use Automattic\WooCommerce\SubscriptionsLite\Package;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\View\PlanView;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ProductPlanResolver;
 use Automattic\WooCommerce\SubscriptionsLite\Pricing\PriceCalculator;
 use Automattic\WooCommerce\SubscriptionsLite\ProductPage\PlanOptionFormatter;
@@ -65,22 +63,12 @@ final class CartPlanHooks {
 	private $resolver;
 
 	/**
-	 * Reads Lite's selling plans by id, for pricing/display of a line already in
-	 * the cart.
-	 *
-	 * @var PlanRepository
-	 */
-	private PlanRepository $plans;
-
-	/**
-	 * Construct the module with the collaborators it resolves plans through.
+	 * Construct the module with the applicability resolver it gates adds through.
 	 *
 	 * @param ProductPlanResolver|null $resolver Applicability resolver; defaults to a real one.
-	 * @param PlanRepository|null      $plans    Plan store; defaults to a new repository.
 	 */
-	public function __construct( ?ProductPlanResolver $resolver = null, ?PlanRepository $plans = null ) {
+	public function __construct( ?ProductPlanResolver $resolver = null ) {
 		$this->resolver = $resolver ?? new ProductPlanResolver();
-		$this->plans    = $plans ?? new PlanRepository();
 	}
 
 	/**
@@ -172,7 +160,7 @@ final class CartPlanHooks {
 	public function apply_plan_pricing( WC_Cart $cart ): void {
 		foreach ( $cart->get_cart() as $cart_item ) {
 			$plan = $this->resolve_line_plan( $cart_item );
-			if ( ! $plan instanceof Plan ) {
+			if ( ! $plan instanceof PlanView ) {
 				continue;
 			}
 
@@ -200,7 +188,7 @@ final class CartPlanHooks {
 	 */
 	public function get_item_data( array $item_data, array $cart_item ): array {
 		$plan = $this->resolve_line_plan( $cart_item );
-		if ( ! $plan instanceof Plan ) {
+		if ( ! $plan instanceof PlanView ) {
 			return $item_data;
 		}
 		$item_data[] = [
@@ -252,7 +240,7 @@ final class CartPlanHooks {
 	 */
 	public function copy_to_line_item_meta( $order_item, string $cart_item_key, array $values ): void {
 		$plan = $this->resolve_line_plan( $values );
-		if ( ! $plan instanceof Plan ) {
+		if ( ! $plan instanceof PlanView ) {
 			return;
 		}
 		$order_item->add_meta_data( self::SELLING_PLAN_ID_KEY, (int) $plan->get_id(), true );
@@ -267,7 +255,7 @@ final class CartPlanHooks {
 	 */
 	private function append_cadence( string $html, array $cart_item ): string {
 		$plan = $this->resolve_line_plan( $cart_item );
-		if ( ! $plan instanceof Plan ) {
+		if ( ! $plan instanceof PlanView ) {
 			return $html;
 		}
 		// Wrap the suffix so it is styleable and does not inherit stray styling
@@ -276,18 +264,15 @@ final class CartPlanHooks {
 	}
 
 	/**
-	 * Resolve the `Plan` for a cart item, or null for a one-time line or a plan
-	 * that no longer resolves.
+	 * Resolve the plan for a cart item ({@see ProductPlanResolver::get_line_plan()}),
+	 * or null for a one-time line.
 	 *
 	 * @param array<string, mixed> $cart_item Cart item row.
-	 * @return Plan|null
 	 */
-	private function resolve_line_plan( array $cart_item ): ?Plan {
+	private function resolve_line_plan( array $cart_item ): ?PlanView {
 		$plan_id = isset( $cart_item[ self::SELLING_PLAN_ID_KEY ] ) ? (int) $cart_item[ self::SELLING_PLAN_ID_KEY ] : 0;
-		if ( $plan_id <= 0 ) {
-			return null;
-		}
-		return $this->plans->find( $plan_id, Package::EXTENSION_SLUG );
+
+		return $plan_id > 0 ? $this->resolver->get_line_plan( $plan_id ) : null;
 	}
 
 	/**

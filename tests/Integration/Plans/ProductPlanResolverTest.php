@@ -4,7 +4,7 @@
  *
  * Resolution runs END TO END: real products and variations, applicability in
  * real postmeta through the Lite store, and plans read back through the
- * engine's catalog facade.
+ * engine's plan facade.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Tests
  */
@@ -13,9 +13,12 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Plans;
 
-use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Plan;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\View\PlanView;
+use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\PlanStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\PlanRepository;
+use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ApplicabilityStore;
+use Automattic\WooCommerce\SubscriptionsLite\Plans\PlanOrder;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ProductApplicability;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ProductPlanResolver;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
@@ -42,12 +45,12 @@ final class ProductPlanResolverTest extends LiteIntegrationTestCase {
 	/**
 	 * Map resolved plans to their ids.
 	 *
-	 * @param array<int, Plan> $plans Resolved plans.
-	 * @return array<int, int|null>
+	 * @param array<int, PlanView> $plans Resolved plans.
+	 * @return array<int, int>
 	 */
 	private static function plan_ids( array $plans ): array {
 		return array_map(
-			static function ( Plan $plan ): ?int {
+			static function ( PlanView $plan ): int {
 				return $plan->get_id();
 			},
 			$plans
@@ -71,8 +74,8 @@ final class ProductPlanResolverTest extends LiteIntegrationTestCase {
 	public function test_inherit_all_resolves_every_active_lite_plan(): void {
 		$product_id = $this->make_product();
 
-		$first_id  = (int) $this->make_plan( 'month', 1, null, [ 'sort_order' => 1 ] )->get_id();
-		$second_id = (int) $this->make_plan( 'week', 1, null, [ 'sort_order' => 2 ] )->get_id();
+		$first_id  = $this->make_plan( 'month' )->get_id();
+		$second_id = $this->make_plan( 'week' )->get_id();
 
 		( new ApplicabilityStore() )->set( $product_id, new ProductApplicability( ProductApplicability::MODE_INHERIT_ALL ) );
 
@@ -84,7 +87,7 @@ final class ProductPlanResolverTest extends LiteIntegrationTestCase {
 	public function test_inherit_select_resolves_only_attached_active_plans(): void {
 		$product_id = $this->make_product();
 
-		$attached_id = (int) $this->make_plan()->get_id();
+		$attached_id = $this->make_plan()->get_id();
 		$this->make_plan( 'week' ); // Unattached.
 		$archived = $this->make_plan( 'year' );
 
@@ -92,10 +95,9 @@ final class ProductPlanResolverTest extends LiteIntegrationTestCase {
 		// stay in meta but drop out of resolution.
 		( new ApplicabilityStore() )->set(
 			$product_id,
-			new ProductApplicability( ProductApplicability::MODE_INHERIT_SELECT, [ $attached_id, (int) $archived->get_id() ] )
+			new ProductApplicability( ProductApplicability::MODE_INHERIT_SELECT, [ $attached_id, $archived->get_id() ] )
 		);
-		$archived->set_status( Plan::STATUS_ARCHIVED );
-		( new PlanRepository() )->update( $archived );
+		$this->set_plan_status( $archived->get_id(), PlanStatus::ARCHIVED );
 
 		$plans = ( new ProductPlanResolver() )->get_plans_for_product( $product_id );
 
@@ -117,8 +119,8 @@ final class ProductPlanResolverTest extends LiteIntegrationTestCase {
 	public function test_archived_and_foreign_slug_plans_are_excluded(): void {
 		$product_id = $this->make_product();
 
-		$active_id = (int) $this->make_plan()->get_id();
-		$this->make_plan( 'week', 1, null, [ 'status' => Plan::STATUS_ARCHIVED ] );
+		$active_id = $this->make_plan()->get_id();
+		$this->make_plan( 'week', 1, null, [ 'status' => PlanStatus::ARCHIVED ] );
 		$this->make_plan( 'year', 1, null, [ 'extension_slug' => 'other-extension' ] );
 
 		( new ApplicabilityStore() )->set( $product_id, new ProductApplicability( ProductApplicability::MODE_INHERIT_ALL ) );
@@ -129,7 +131,7 @@ final class ProductPlanResolverTest extends LiteIntegrationTestCase {
 	}
 
 	public function test_variation_id_resolves_to_the_parent_applicability(): void {
-		$plan_id = (int) $this->make_plan()->get_id();
+		$plan_id = $this->make_plan()->get_id();
 
 		$parent = new WC_Product_Variable();
 		$parent->set_name( 'Coffee subscription box' );
@@ -147,11 +149,12 @@ final class ProductPlanResolverTest extends LiteIntegrationTestCase {
 		$this->assertSame( [ $plan_id ], self::plan_ids( $plans ) );
 	}
 
-	public function test_plans_come_back_in_sort_order(): void {
+	public function test_plans_come_back_in_lite_plan_order(): void {
 		$product_id = $this->make_product();
 
-		$last_id  = (int) $this->make_plan( 'month', 1, null, [ 'sort_order' => 9 ] )->get_id();
-		$first_id = (int) $this->make_plan( 'week', 1, null, [ 'sort_order' => 1 ] )->get_id();
+		$last_id  = $this->make_plan( 'month' )->get_id();
+		$first_id = $this->make_plan( 'week' )->get_id();
+		( new PlanOrder() )->set( [ $first_id, $last_id ] );
 
 		( new ApplicabilityStore() )->set( $product_id, new ProductApplicability( ProductApplicability::MODE_INHERIT_ALL ) );
 
@@ -160,10 +163,32 @@ final class ProductPlanResolverTest extends LiteIntegrationTestCase {
 		$this->assertSame( [ $first_id, $last_id ], self::plan_ids( $plans ) );
 	}
 
+	public function test_a_plan_without_usable_billing_is_skipped(): void {
+		$product_id = $this->make_product();
+
+		$usable_id = $this->make_plan()->get_id();
+		$this->make_unvalidated_plan( 'month', 1, null, [ 'billing_policy' => null ] );
+		$this->make_unvalidated_plan(
+			'month',
+			1,
+			null,
+			[
+				'billing_policy' => [
+					'period'   => 'fortnight',
+					'interval' => 1,
+				],
+			]
+		);
+
+		( new ApplicabilityStore() )->set( $product_id, new ProductApplicability( ProductApplicability::MODE_INHERIT_ALL ) );
+
+		$this->assertSame( [ $usable_id ], self::plan_ids( ( new ProductPlanResolver() )->get_plans_for_product( $product_id ) ) );
+	}
+
 	public function test_is_plan_applicable_to_product_tracks_resolution(): void {
 		$product_id = $this->make_product();
-		$applicable = (int) $this->make_plan()->get_id();
-		$other      = (int) $this->make_plan( 'week' )->get_id();
+		$applicable = $this->make_plan()->get_id();
+		$other      = $this->make_plan( 'week' )->get_id();
 		( new ApplicabilityStore() )->set(
 			$product_id,
 			new ProductApplicability( ProductApplicability::MODE_INHERIT_SELECT, [ $applicable ] )
@@ -173,5 +198,44 @@ final class ProductPlanResolverTest extends LiteIntegrationTestCase {
 		$this->assertTrue( $resolver->is_plan_applicable_to_product( $applicable, $product_id ) );
 		$this->assertFalse( $resolver->is_plan_applicable_to_product( $other, $product_id ), 'A plan not attached to the product does not apply.' );
 		$this->assertFalse( $resolver->is_plan_applicable_to_product( $applicable, 999999 ), 'No plan applies to an unknown product.' );
+	}
+
+	public function test_get_line_plan_resolves_a_billable_lite_plan_in_any_status(): void {
+		$resolver = new ProductPlanResolver();
+		$active   = $this->make_plan();
+		$archived = $this->make_plan( 'week', 1, null, [ 'status' => PlanStatus::ARCHIVED ] );
+
+		$resolved = $resolver->get_line_plan( $active->get_id() );
+		$this->assertInstanceOf( PlanView::class, $resolved );
+		$this->assertSame( $active->get_id(), $resolved->get_id() );
+
+		$resolved = $resolver->get_line_plan( $archived->get_id() );
+		$this->assertInstanceOf( PlanView::class, $resolved, 'An archived plan still resolves for the lines that carry it.' );
+		$this->assertSame( $archived->get_id(), $resolved->get_id() );
+	}
+
+	public function test_get_line_plan_is_null_for_a_plan_a_line_cannot_carry(): void {
+		$resolver = new ProductPlanResolver();
+
+		$deleted_id = $this->make_plan()->get_id();
+		( new PlanRepository() )->delete( $deleted_id, Package::EXTENSION_SLUG );
+		$foreign_id    = $this->make_plan( 'year', 1, null, [ 'extension_slug' => 'other-extension' ] )->get_id();
+		$unbillable    = $this->make_unvalidated_plan(
+			'month',
+			1,
+			null,
+			[
+				'billing_policy' => [
+					'period'   => 'month',
+					'interval' => 0,
+				],
+			]
+		);
+		$unbillable_id = $unbillable->get_id();
+
+		$this->assertNull( $resolver->get_line_plan( $deleted_id ), 'A deleted plan does not resolve.' );
+		$this->assertNull( $resolver->get_line_plan( $foreign_id ), 'Another extension\'s plan does not resolve.' );
+		$this->assertNull( $resolver->get_line_plan( $unbillable_id ), 'A plan with no usable cadence does not resolve.' );
+		$this->assertNull( $resolver->get_line_plan( 0 ), 'A non-positive id does not resolve.' );
 	}
 }
