@@ -158,6 +158,7 @@ final class ApplicabilityStore {
 				'extension_slug' => Package::EXTENSION_SLUG,
 				'status'         => PlanStatus::ACTIVE,
 				'ids'            => $plan_ids,
+				'limit'          => count( $plan_ids ),
 			]
 		);
 		$found       = [];

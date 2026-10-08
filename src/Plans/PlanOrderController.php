@@ -87,6 +87,7 @@ final class PlanOrderController {
 			[
 				'extension_slug' => Package::EXTENSION_SLUG,
 				'ids'            => $ids,
+				'limit'          => count( $ids ),
 			]
 		);
 		if ( count( $owned_plans ) !== count( $ids ) ) {
