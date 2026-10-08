@@ -293,8 +293,9 @@ final class CustomerActionsTest extends LiteIntegrationTestCase {
 		$actions = $this->get_response_data( $response )['actions'];
 		$this->assertCount( 1, $actions );
 		$this->assertSame( Package::EXTENSION_SLUG, $actions[0]['extension_slug'] );
-		$this->assertSame( 'boolean', $actions[0]['args']['at_period_end']['type'] );
-		$this->assertTrue( $actions[0]['args']['at_period_end']['default'] );
+		$args = (array) $actions[0]['args'];
+		$this->assertSame( 'boolean', $args['at_period_end']['type'] );
+		$this->assertTrue( $args['at_period_end']['default'] );
 	}
 
 	public function test_a_storage_failure_is_a_server_error(): void {
