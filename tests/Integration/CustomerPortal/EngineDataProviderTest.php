@@ -47,7 +47,7 @@ final class EngineDataProviderTest extends LiteIntegrationTestCase {
 
 		$this->assertCount( 1, $rows );
 		$this->assertSame(
-			[ 'id', 'status', 'billing_total', 'currency', 'billing_period', 'billing_interval', 'next_payment_gmt', 'payment_method' ],
+			[ 'id', 'status', 'extension_slug', 'billing_total', 'currency', 'billing_period', 'billing_interval', 'next_payment_gmt', 'payment_method' ],
 			array_keys( $rows[0] )
 		);
 		$this->assertSame( 'active', $rows[0]['status'] );

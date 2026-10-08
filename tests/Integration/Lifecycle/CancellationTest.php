@@ -347,4 +347,12 @@ final class CancellationTest extends LiteIntegrationTestCase {
 		$this->assertCount( 1, $cycles );
 		$this->assertSame( CycleStatus::PENDING, $cycles[0]->get_status() );
 	}
+
+	public function test_cancel_leaves_a_contract_of_another_extension_untouched(): void {
+		$contract_id = $this->seed_contract( [ 'extension_slug' => 'another-extension' ] );
+
+		$this->assertNull( ( new Cancellation() )->cancel( $contract_id ) );
+		$this->assertNull( ( new Cancellation() )->cancel_at_period_end( $contract_id ) );
+		$this->assertSame( ContractStatus::ACTIVE, $this->get_contract( $contract_id )->get_status() );
+	}
 }

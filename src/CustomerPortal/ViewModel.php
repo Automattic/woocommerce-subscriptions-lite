@@ -21,6 +21,7 @@ namespace Automattic\WooCommerce\SubscriptionsLite\CustomerPortal;
 
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\CustomerActionRules;
+use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Utilities\Formatter;
 
 defined( 'ABSPATH' ) || exit;
@@ -84,6 +85,7 @@ final class ViewModel {
 	public function build_detail( array $contract, array $related_orders = [] ): array {
 		$status           = (string) ( $contract['status'] ?? '' );
 		$has_next_payment = '' !== $this->to_string( $contract['next_payment_gmt'] ?? null );
+		$is_lite          = Package::EXTENSION_SLUG === ( $contract['extension_slug'] ?? '' );
 		$payment_method   = $this->normalize_payment_method( $contract['payment_method'] ?? [] );
 
 		return [
@@ -97,9 +99,9 @@ final class ViewModel {
 			'date_row_value'         => $this->date_row_value( $status, $contract ),
 			'payment_method_title'   => $payment_method['title'],
 			'payment_method_expires' => $payment_method['expires'],
-			'cancel_visible'         => CustomerActionRules::can_cancel( $status ),
-			'hold_visible'           => CustomerActionRules::can_hold( $status ),
-			'reactivate_visible'     => CustomerActionRules::can_reactivate( $status, $has_next_payment ),
+			'cancel_visible'         => $is_lite && CustomerActionRules::can_cancel( $status ),
+			'hold_visible'           => $is_lite && CustomerActionRules::can_hold( $status ),
+			'reactivate_visible'     => $is_lite && CustomerActionRules::can_reactivate( $status, $has_next_payment ),
 			'needs_payment_notice'   => CustomerActionRules::needs_payment( $status, $has_next_payment ),
 			// Cancel mode the action forwards: active cancels at period end
 			// (graceful -> pending-cancellation); on-hold cancels immediately

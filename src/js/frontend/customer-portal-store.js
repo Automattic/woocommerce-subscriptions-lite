@@ -55,10 +55,16 @@ function performAction( currentState, action, actionArgs ) {
 	).then( ( response ) => {
 		if ( ! response.ok ) {
 			return response.json().then(
+				// Only Lite's own errors carry customer copy; engine errors fall back to the base message.
 				( payload ) =>
 					Promise.reject(
 						new Error(
-							payload && payload.message ? payload.message : ''
+							payload &&
+							String( payload.code || '' ).startsWith(
+								'woocommerce_subscriptions_lite_'
+							)
+								? payload.message
+								: ''
 						)
 					),
 				() => Promise.reject( new Error( '' ) )

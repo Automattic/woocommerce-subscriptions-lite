@@ -16,6 +16,7 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Lifecycle;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
+use Automattic\WooCommerce\SubscriptionsLite\Package;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -30,12 +31,12 @@ final class Hold {
 	 * `RuntimeException` before anything is disarmed.
 	 *
 	 * @param int $contract_id Contract id.
-	 * @return ContractView|null The held contract, or null when it does not exist.
+	 * @return ContractView|null The held contract, or null when it does not exist or is not Lite's.
 	 * @throws LifecycleNotAllowed If the contract is neither active nor on hold.
 	 */
 	public function hold( int $contract_id ): ?ContractView {
 		$contract = Contracts::get( $contract_id );
-		if ( null === $contract ) {
+		if ( null === $contract || Package::EXTENSION_SLUG !== $contract->get_extension_slug() ) {
 			return null;
 		}
 

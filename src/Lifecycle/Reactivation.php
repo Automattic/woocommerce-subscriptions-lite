@@ -19,6 +19,7 @@ use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Plans;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
+use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\ValueObject\BillingPolicy;
 
 defined( 'ABSPATH' ) || exit;
@@ -39,12 +40,12 @@ final class Reactivation {
 	 *
 	 * @param int                    $contract_id Contract id.
 	 * @param DateTimeImmutable|null $now         The current moment; the UTC wall clock when omitted.
-	 * @return ContractView|null The reactivated contract, or null when it does not exist.
+	 * @return ContractView|null The reactivated contract, or null when it does not exist or is not Lite's.
 	 * @throws LifecycleNotAllowed If the contract is not on hold.
 	 */
 	public function reactivate( int $contract_id, ?DateTimeImmutable $now = null ): ?ContractView {
 		$contract = Contracts::get( $contract_id );
-		if ( null === $contract ) {
+		if ( null === $contract || Package::EXTENSION_SLUG !== $contract->get_extension_slug() ) {
 			return null;
 		}
 
@@ -82,7 +83,7 @@ final class Reactivation {
 	}
 
 	/**
-	 * The next payment after a hold: "Model 1", a pending product decision kept to this method.
+	 * The next payment after a hold.
 	 *
 	 * A future anchor is kept; a past-due one is rolled forward by whole plan cadences until
 	 * it is in the future, floored at `$now` when there is no cadence or the roll cap runs

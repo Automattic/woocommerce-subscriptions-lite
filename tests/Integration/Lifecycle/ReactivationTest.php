@@ -300,4 +300,17 @@ final class ReactivationTest extends LiteIntegrationTestCase {
 	public function test_reactivate_returns_null_for_a_missing_contract(): void {
 		$this->assertNull( ( new Reactivation() )->reactivate( 4242424 ) );
 	}
+
+	public function test_reactivate_leaves_a_contract_of_another_extension_untouched(): void {
+		$contract_id = $this->seed_contract(
+			[
+				'extension_slug'   => 'another-extension',
+				'status'           => ContractStatus::ON_HOLD,
+				'next_payment_gmt' => null,
+			]
+		);
+
+		$this->assertNull( ( new Reactivation() )->reactivate( $contract_id ) );
+		$this->assertSame( ContractStatus::ON_HOLD, $this->get_contract( $contract_id )->get_status() );
+	}
 }

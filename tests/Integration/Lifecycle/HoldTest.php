@@ -191,4 +191,11 @@ final class HoldTest extends LiteIntegrationTestCase {
 	public function test_hold_returns_null_for_a_missing_contract(): void {
 		$this->assertNull( ( new Hold() )->hold( 4242424 ) );
 	}
+
+	public function test_hold_leaves_a_contract_of_another_extension_untouched(): void {
+		$contract_id = $this->seed_contract( [ 'extension_slug' => 'another-extension' ] );
+
+		$this->assertNull( ( new Hold() )->hold( $contract_id ) );
+		$this->assertSame( ContractStatus::ACTIVE, $this->get_contract( $contract_id )->get_status() );
+	}
 }

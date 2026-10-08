@@ -15,6 +15,7 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Lifecycle;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
+use Automattic\WooCommerce\SubscriptionsLite\Package;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -28,12 +29,12 @@ final class Cancellation {
 	 * cancelled contract writes nothing and still succeeds.
 	 *
 	 * @param int $contract_id Contract id.
-	 * @return ContractView|null The cancelled contract, or null when it does not exist.
+	 * @return ContractView|null The cancelled contract, or null when it does not exist or is not Lite's.
 	 * @throws LifecycleNotAllowed If the contract's status cannot be cancelled.
 	 */
 	public function cancel( int $contract_id ): ?ContractView {
 		$contract = Contracts::get( $contract_id );
-		if ( null === $contract ) {
+		if ( null === $contract || Package::EXTENSION_SLUG !== $contract->get_extension_slug() ) {
 			return null;
 		}
 
@@ -76,12 +77,12 @@ final class Cancellation {
 	 * contract writes nothing and still succeeds.
 	 *
 	 * @param int $contract_id Contract id.
-	 * @return ContractView|null The pending-cancellation contract, or null when it does not exist.
+	 * @return ContractView|null The pending-cancellation contract, or null when it does not exist or is not Lite's.
 	 * @throws LifecycleNotAllowed If the contract is not active, on hold or pending cancellation.
 	 */
 	public function cancel_at_period_end( int $contract_id ): ?ContractView {
 		$contract = Contracts::get( $contract_id );
-		if ( null === $contract ) {
+		if ( null === $contract || Package::EXTENSION_SLUG !== $contract->get_extension_slug() ) {
 			return null;
 		}
 

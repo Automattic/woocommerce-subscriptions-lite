@@ -9,8 +9,7 @@
  * `do_meta_boxes()`, so the screen inherits wp-admin's collapsible two-column
  * layout and exposes an `add_meta_boxes_<screen>` extension point. The boxes are a
  * fixed order (drag-reorder is disabled), collapse only. Read + actions only - not
- * an editable save form. All data comes through the engine's public
- * {@see \Automattic\WooCommerce\SubscriptionsEngine\Api\Subscriptions} facade.
+ * an editable save form. All data comes through the engine's public API.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Admin
  */
