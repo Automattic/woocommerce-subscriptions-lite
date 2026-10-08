@@ -36,6 +36,8 @@ final class BillingTerms {
 
 	private const CADENCE_MESSAGE = 'billing_policy must have a period (day, week, month or year) and a positive interval.';
 
+	private const MAX_CYCLES_MESSAGE = 'billing_policy max_cycles must be a positive integer, or null for no limit.';
+
 	/**
 	 * Billing period.
 	 *
@@ -97,9 +99,10 @@ final class BillingTerms {
 
 	/**
 	 * Problems that keep a `billing_policy` payload from being billed: it needs a
-	 * known period and a positive interval, and it must parse through the engine's
-	 * `BillingPolicy` with a first renewal date, exactly as contract creation reads
-	 * it (an integer interval, a known trial unit, consistent cycle bounds).
+	 * known period and a positive interval, a `max_cycles` that is null (no limit) or
+	 * a positive integer, and it must parse through the engine's `BillingPolicy` with
+	 * a first renewal date, exactly as contract creation reads it (an integer
+	 * interval, a known trial unit, consistent cycle bounds).
 	 *
 	 * @param array<string, mixed>|null $policy Billing payload.
 	 * @return array<int, string> Error messages; empty when billable.
@@ -107,6 +110,11 @@ final class BillingTerms {
 	public static function validate( ?array $policy ): array {
 		if ( null === $policy || null === self::from_policy( $policy ) ) {
 			return [ self::CADENCE_MESSAGE ];
+		}
+
+		// The engine counts cycles against max_cycles, so 0 would read as already reached.
+		if ( null !== ( $policy['max_cycles'] ?? null ) && null === self::positive_int( $policy['max_cycles'] ) ) {
+			return [ self::MAX_CYCLES_MESSAGE ];
 		}
 
 		try {
@@ -200,15 +208,24 @@ final class BillingTerms {
 	}
 
 	/**
-	 * A positive integer from an int or digit string, else null.
+	 * A positive integer from an int or an integer string, else null.
+	 *
+	 * Strings follow the engine's integer rule (`FILTER_VALIDATE_INT`, as in its
+	 * `Coercion`), so a cycle limit reads the same here as in the engine's parse:
+	 * `'5'` and `'+5'` pass, while `'007'`, `'1.5'` and `'1e2'` do not.
 	 *
 	 * @param mixed $value Raw value.
 	 */
 	private static function positive_int( $value ): ?int {
-		if ( is_string( $value ) && 1 === preg_match( '/^[0-9]+$/', $value ) ) {
-			$value = (int) $value;
+		if ( is_int( $value ) ) {
+			return $value > 0 ? $value : null;
+		}
+		if ( ! is_string( $value ) ) {
+			return null;
 		}
 
-		return is_int( $value ) && $value > 0 ? $value : null;
+		$validated = filter_var( $value, FILTER_VALIDATE_INT, [ 'options' => [ 'min_range' => 1 ] ] );
+
+		return false === $validated ? null : $validated;
 	}
 }

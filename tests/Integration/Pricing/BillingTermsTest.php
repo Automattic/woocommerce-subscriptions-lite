@@ -97,23 +97,81 @@ final class BillingTermsTest extends LiteIntegrationTestCase {
 		];
 	}
 
-	public function test_an_unusable_trial_and_length_read_as_no_terms(): void {
-		// Plans are read strictly: a payload contract creation cannot parse is not billable.
-		$this->assertNull(
-			BillingTerms::from_plan(
-				$this->foreign_plan(
-					[
-						'period'         => 'month',
-						'interval'       => 1,
-						'max_cycles'     => 0,
-						'trial_duration' => [
-							'length' => 0,
-							'unit'   => 'day',
-						],
-					]
-				)
+	/**
+	 * Plans are read strictly: a payload contract creation cannot parse is not billable.
+	 *
+	 * @dataProvider provide_unbillable_cycle_and_trial_payloads
+	 *
+	 * @param array<string, mixed> $billing_policy Plan billing payload.
+	 */
+	public function test_an_unbillable_cycle_limit_or_trial_reads_as_no_terms( array $billing_policy ): void {
+		$this->assertNull( BillingTerms::from_plan( $this->foreign_plan( $billing_policy ) ) );
+	}
+
+	/**
+	 * @return array<string, array{0: array<string, mixed>}>
+	 */
+	public function provide_unbillable_cycle_and_trial_payloads(): array {
+		return [
+			'zero max cycles'   => [
+				[
+					'period'     => 'month',
+					'interval'   => 1,
+					'max_cycles' => 0,
+				],
+			],
+			'zero trial length' => [
+				[
+					'period'         => 'month',
+					'interval'       => 1,
+					'trial_duration' => [
+						'length' => 0,
+						'unit'   => 'day',
+					],
+				],
+			],
+		];
+	}
+
+	/**
+	 * A string cycle limit reads by the engine's integer rule, so Lite shows the limit the engine parses.
+	 *
+	 * @dataProvider provide_string_cycle_limits
+	 *
+	 * @param string   $max_cycles Stored cycle limit.
+	 * @param int|null $expected   Expected limit; null when the plan is not billable.
+	 */
+	public function test_a_string_cycle_limit_reads_like_the_engine( string $max_cycles, ?int $expected ): void {
+		$terms = BillingTerms::from_plan(
+			$this->foreign_plan(
+				[
+					'period'     => 'month',
+					'interval'   => 1,
+					'max_cycles' => $max_cycles,
+				]
 			)
 		);
+
+		if ( null === $expected ) {
+			$this->assertNull( $terms );
+			return;
+		}
+
+		$this->assertInstanceOf( BillingTerms::class, $terms );
+		$this->assertSame( $expected, $terms->get_max_cycles() );
+	}
+
+	/**
+	 * @return array<string, array{0: string, 1: int|null}>
+	 */
+	public function provide_string_cycle_limits(): array {
+		return [
+			'digits'       => [ '6', 6 ],
+			'plus sign'    => [ '+6', 6 ],
+			'leading zero' => [ '06', null ],
+			'decimal'      => [ '6.0', null ],
+			'negative'     => [ '-6', null ],
+		];
 	}
 
 	public function test_a_live_plan_is_read_strictly(): void {
@@ -192,6 +250,14 @@ final class BillingTermsTest extends LiteIntegrationTestCase {
 					],
 				],
 				'billing_policy: ',
+			],
+			'zero max cycles'    => [
+				[
+					'period'     => 'month',
+					'interval'   => 1,
+					'max_cycles' => 0,
+				],
+				'billing_policy max_cycles',
 			],
 		];
 	}

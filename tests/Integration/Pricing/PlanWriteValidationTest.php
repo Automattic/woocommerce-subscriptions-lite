@@ -388,6 +388,14 @@ final class PlanWriteValidationTest extends LiteIntegrationTestCase {
 				],
 				'billing_policy: ',
 			],
+			'zero max cycles'     => [
+				[
+					'period'     => 'month',
+					'interval'   => 1,
+					'max_cycles' => 0,
+				],
+				'billing_policy max_cycles',
+			],
 		];
 	}
 
