@@ -15,7 +15,7 @@ use DateTimeZone;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
-use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\Plan;
+use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\PlanStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\SchemaInstaller;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Hold;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\HoldAnchor;
@@ -174,9 +174,18 @@ final class ReactivationTest extends LiteIntegrationTestCase {
 		$this->assertSame( '2026-04-15 09:30:00', $this->get_contract( $contract_id )->get_next_payment_gmt() );
 	}
 
-	public function test_reactivate_floors_past_due_at_now_on_an_archived_plan(): void {
-		$plan        = $this->make_plan( 'month', 1, null, [ 'status' => Plan::STATUS_ARCHIVED ] );
-		$contract_id = $this->seed_held_contract( '2026-02-01 00:00:00', (int) $plan->get_id() );
+	public function test_reactivate_rolls_past_due_by_the_cadence_of_an_archived_plan(): void {
+		$plan        = $this->make_plan( 'month', 1, null, [ 'status' => PlanStatus::ARCHIVED ] );
+		$contract_id = $this->seed_held_contract( '2026-02-01 00:00:00', $plan->get_id() );
+
+		( new Reactivation() )->reactivate( $contract_id, $this->utc( '2026-04-15 09:30:00' ) );
+
+		$this->assertSame( '2026-05-01 00:00:00', $this->get_contract( $contract_id )->get_next_payment_gmt() );
+	}
+
+	public function test_reactivate_floors_past_due_at_now_without_a_usable_cadence(): void {
+		$plan        = $this->make_unvalidated_plan( 'fortnight' );
+		$contract_id = $this->seed_held_contract( '2026-02-01 00:00:00', $plan->get_id() );
 
 		( new Reactivation() )->reactivate( $contract_id, $this->utc( '2026-04-15 09:30:00' ) );
 

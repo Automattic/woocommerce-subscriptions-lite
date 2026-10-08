@@ -14,11 +14,12 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Lifecycle;
 
 use DateTimeImmutable;
 use DateTimeZone;
+use DomainException;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\Plans;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\ValueObject\BillingPolicy;
-use Automattic\WooCommerce\SubscriptionsLite\Plans\ContractPlans;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -128,14 +129,23 @@ final class Reactivation {
 	}
 
 	/**
-	 * The billing policy of the contract's live plan, or null when it has none (no plan,
-	 * or the plan is archived or deleted).
+	 * The billing policy of the contract's plan, or null when it has none (no plan, a
+	 * deleted plan, or a billing payload without a usable cadence).
 	 *
 	 * @param ContractView $contract The contract.
 	 */
 	private function get_billing_policy( ContractView $contract ): ?BillingPolicy {
-		$plan = ContractPlans::for_contract( $contract );
+		$plan_id = $contract->get_selling_plan_id();
+		$plan    = null === $plan_id ? null : Plans::get( $plan_id );
+		$billing = null === $plan ? null : $plan->get_billing_policy();
+		if ( null === $billing ) {
+			return null;
+		}
 
-		return null === $plan ? null : $plan->get_billing_policy();
+		try {
+			return BillingPolicy::from_array( $billing );
+		} catch ( DomainException $e ) {
+			return null;
+		}
 	}
 }
