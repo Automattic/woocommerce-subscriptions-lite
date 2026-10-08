@@ -98,10 +98,11 @@ final class Bootstrap {
 		// subscription detail, with the lifecycle actions (cancel / hold /
 		// reactivate) over the namespaced Interactivity API store. Endpoints
 		// register the My Account surfaces; Assets loads the iAPI store + styles
-		// on those endpoints; the REST controller serves the actions the store posts.
+		// on those endpoints; the customer actions are registered on the engine's
+		// contract action endpoint the store posts to.
 		CustomerPortal\Endpoints::register();
 		CustomerPortal\Assets::register();
-		Rest\ContractActionsController::register();
+		Lifecycle\CustomerActions::register();
 
 		// Admin (back office only): the WooCommerce > Subscriptions list + detail
 		// page and its Renew now / Cancel handlers (the engine's renewal facade and
