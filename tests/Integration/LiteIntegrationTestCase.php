@@ -90,6 +90,10 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 	/**
 	 * Create a plan through the engine plan facade and return its view.
 	 *
+	 * A `billing_policy` in `$overrides` replaces the whole payload, so the positional
+	 * `$period`, `$interval` and `$max_cycles` are then ignored (except `$period` in the
+	 * default name).
+	 *
 	 * @param string               $period     Billing period (day / week / month / year).
 	 * @param int                  $interval   Billing interval.
 	 * @param int|null             $max_cycles Maximum billing cycles, or null for open-ended.
@@ -115,7 +119,8 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 	/**
 	 * Create a plan with the plan validation action unhooked, as a row written
 	 * before a validation rule existed would be stored. Same arguments as
-	 * {@see self::make_plan()}.
+	 * {@see self::make_plan()}, including a `billing_policy` override replacing the
+	 * positional billing arguments.
 	 *
 	 * @param string               $period     Billing period.
 	 * @param int                  $interval   Billing interval.

@@ -73,12 +73,14 @@ final class OrderReceivedTest extends LiteIntegrationTestCase {
 
 	public function test_shows_no_cadence_when_the_plan_billing_is_unusable(): void {
 		$contract = Contracts::get( $this->create_contract( $this->create_customer() ) );
+		// A known period with a digit-string interval: a tolerant read would render "/ week",
+		// only the strict read contract creation uses refuses it.
 		$this->update_plan_unvalidated(
 			(int) $contract->get_selling_plan_id(),
 			[
 				'billing_policy' => [
-					'period'   => 'fortnight',
-					'interval' => 1,
+					'period'   => 'week',
+					'interval' => '1',
 				],
 			]
 		);
@@ -86,7 +88,8 @@ final class OrderReceivedTest extends LiteIntegrationTestCase {
 		$html = $this->render( (int) $contract->get_origin_order_id() );
 
 		$this->assertStringContainsString( 'Related subscriptions', $html, 'The summary still renders.' );
-		$this->assertStringNotContainsString( '/ month', $html, 'No cadence is shown for unusable billing.' );
+		$this->assertStringNotContainsString( '/ week', $html, 'No cadence is shown for unusable billing.' );
+		$this->assertStringNotContainsString( '/ month', $html, 'The old cadence is not shown either.' );
 	}
 
 	public function test_renders_nothing_for_a_contract_owned_by_another_customer(): void {

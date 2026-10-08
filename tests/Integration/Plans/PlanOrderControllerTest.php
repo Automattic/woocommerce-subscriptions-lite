@@ -77,23 +77,14 @@ final class PlanOrderControllerTest extends LiteIntegrationTestCase {
 	/**
 	 * @dataProvider provide_invalid_orders
 	 *
-	 * @param string $case Which invalid order to send.
+	 * @param callable(int, int): array<int, int|string> $build_ids Builds the ids from a Lite and a foreign plan id.
 	 */
-	public function test_an_invalid_order_is_rejected_without_writing( string $case ): void {
+	public function test_an_invalid_order_is_rejected_without_writing( callable $build_ids ): void {
 		$lite    = $this->make_plan()->get_id();
 		$foreign = $this->make_plan( 'month', 1, null, [ 'extension_slug' => 'another-extension' ] )->get_id();
 		( new PlanOrder() )->set( [ $lite ] );
 
-		$ids = [
-			'duplicate'     => [ $lite, $lite ],
-			'int and digit' => [ $lite, (string) $lite ],
-			'zero'          => [ $lite, 0 ],
-			'negative'      => [ -1, $lite ],
-			'foreign owner' => [ $lite, $foreign ],
-			'unknown id'    => [ $lite, 999999 ],
-		][ $case ];
-
-		$response = $this->reorder( $ids );
+		$response = $this->reorder( $build_ids( $lite, $foreign ) );
 
 		$this->assertSame( 400, $response->get_status() );
 		$data = $response->get_data();
@@ -103,17 +94,51 @@ final class PlanOrderControllerTest extends LiteIntegrationTestCase {
 	}
 
 	/**
-	 * @return array<string, array{0: string}>
+	 * @return array<string, array{0: callable(int, int): array<int, int|string>}>
 	 */
 	public function provide_invalid_orders(): array {
 		return [
-			'duplicate'     => [ 'duplicate' ],
-			'int and digit' => [ 'int and digit' ],
-			'zero'          => [ 'zero' ],
-			'negative'      => [ 'negative' ],
-			'foreign owner' => [ 'foreign owner' ],
-			'unknown id'    => [ 'unknown id' ],
+			'duplicate'     => [
+				static function ( int $lite ): array {
+					return [ $lite, $lite ];
+				},
+			],
+			'int and digit' => [
+				static function ( int $lite ): array {
+					return [ $lite, (string) $lite ];
+				},
+			],
+			'zero'          => [
+				static function ( int $lite ): array {
+					return [ $lite, 0 ];
+				},
+			],
+			'negative'      => [
+				static function ( int $lite ): array {
+					return [ -1, $lite ];
+				},
+			],
+			'foreign owner' => [
+				static function ( int $lite, int $foreign ): array {
+					return [ $lite, $foreign ];
+				},
+			],
+			'unknown id'    => [
+				static function ( int $lite ): array {
+					return [ $lite, 999999 ];
+				},
+			],
 		];
+	}
+
+	public function test_an_empty_list_clears_the_saved_order(): void {
+		( new PlanOrder() )->set( [ $this->make_plan()->get_id() ] );
+
+		$response = $this->reorder( [] );
+
+		$this->assertSame( 200, $response->get_status() );
+		$this->assertSame( [ 'ids' => [] ], $response->get_data() );
+		$this->assertSame( [], ( new PlanOrder() )->get() );
 	}
 
 	public function test_ids_are_required(): void {
@@ -125,7 +150,7 @@ final class PlanOrderControllerTest extends LiteIntegrationTestCase {
 	/**
 	 * POST an order.
 	 *
-	 * @param array<int, int> $ids Plan ids.
+	 * @param array<int, int|string> $ids Plan ids.
 	 */
 	private function reorder( array $ids ): WP_REST_Response {
 		$request = new WP_REST_Request( 'POST', self::ROUTE );

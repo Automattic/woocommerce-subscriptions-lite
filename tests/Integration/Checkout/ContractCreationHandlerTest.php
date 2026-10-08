@@ -320,14 +320,10 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 
 	/**
 	 * A plan selected under 'inherit_select' at add-to-cart, then detached from the
-	 * product or archived before the payment lands, still becomes the contract.
-	 *
-	 * @testWith ["detached"]
-	 *           ["archived"]
-	 *
-	 * @param string $change How the selection changes after add-to-cart.
+	 * product before the payment lands, still becomes the contract. Archiving has its
+	 * own tests below.
 	 */
-	public function test_an_inherit_select_plan_changed_after_add_to_cart_still_creates_the_contract( string $change ): void {
+	public function test_an_inherit_select_plan_detached_after_add_to_cart_still_creates_the_contract(): void {
 		$customer_id = $this->create_customer();
 		$plan        = $this->make_plan();
 		$other       = $this->make_plan( 'week' );
@@ -341,18 +337,6 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 		$order->save();
 		$order->update_status( 'on-hold' ); // Awaiting the offline payment.
 
-		if ( 'archived' === $change ) {
-			$this->assertInstanceOf(
-				PlanView::class,
-				Plans::update(
-					$plan->get_id(),
-					[
-						'extension_slug' => Package::EXTENSION_SLUG,
-						'status'         => PlanStatus::ARCHIVED,
-					]
-				)
-			);
-		}
 		foreach ( $order->get_items() as $item ) {
 			$store->set( $item->get_product_id(), new ProductApplicability( ProductApplicability::MODE_INHERIT_SELECT, [ $other->get_id() ] ) );
 		}
@@ -375,6 +359,33 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 		$order->update_status( 'processing' );
 
 		$this->assertSame( [], Contracts::list_for_customer( $customer_id ) );
+		$this->assertSame( ContractCreationHandler::REASON_PLAN_UNAVAILABLE, $this->deferral_reason( $order ) );
+	}
+
+	/**
+	 * The order classification checks plan-unavailable before divergent plans and mixed carts:
+	 * a line whose plan is gone defers the whole order even beside a billable line.
+	 *
+	 * @testWith [false]
+	 *           [true]
+	 *
+	 * @param bool $with_one_time_line Whether the order also has a one-time line.
+	 */
+	public function test_a_deleted_plan_beside_a_billable_line_defers_as_plan_unavailable( bool $with_one_time_line ): void {
+		$customer_id = $this->create_customer();
+		$monthly     = $this->make_plan( 'month' );
+		$doomed      = $this->make_plan( 'week' );
+		$order       = $this->create_subscription_order( $customer_id );
+		$this->apply_and_stamp( $order, $monthly );
+		$this->add_line( $order, 'Weekly Box', $doomed );
+		if ( $with_one_time_line ) {
+			$this->add_line( $order, 'One-time Mug', null );
+		}
+
+		( new PlanRepository() )->delete( $doomed->get_id(), Package::EXTENSION_SLUG );
+		$order->update_status( 'processing' );
+
+		$this->assertSame( [], Contracts::list_for_customer( $customer_id ), 'No contract for the remaining billable line.' );
 		$this->assertSame( ContractCreationHandler::REASON_PLAN_UNAVAILABLE, $this->deferral_reason( $order ) );
 	}
 
