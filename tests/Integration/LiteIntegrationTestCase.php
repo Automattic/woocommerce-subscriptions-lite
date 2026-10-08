@@ -140,7 +140,7 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 	protected function update_plan_unvalidated( int $id, array $args ): void {
 		$plan = $this->without_plan_validation(
 			static function () use ( $id, $args ): ?PlanView {
-				return Plans::update( $id, $args );
+				return Plans::update( $id, [ 'extension_slug' => Package::EXTENSION_SLUG ] + $args );
 			}
 		);
 		$this->assertInstanceOf( PlanView::class, $plan );
@@ -176,7 +176,16 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 	 * @param string $status A registered plan status.
 	 */
 	protected function set_plan_status( int $id, string $status ): void {
-		$this->assertInstanceOf( PlanView::class, Plans::update( $id, [ 'status' => $status ] ) );
+		$this->assertInstanceOf(
+			PlanView::class,
+			Plans::update(
+				$id,
+				[
+					'extension_slug' => Package::EXTENSION_SLUG,
+					'status'         => $status,
+				]
+			)
+		);
 	}
 
 	/**

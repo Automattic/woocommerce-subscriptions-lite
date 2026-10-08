@@ -342,7 +342,16 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 		$order->update_status( 'on-hold' ); // Awaiting the offline payment.
 
 		if ( 'archived' === $change ) {
-			$this->assertInstanceOf( PlanView::class, Plans::update( $plan->get_id(), [ 'status' => PlanStatus::ARCHIVED ] ) );
+			$this->assertInstanceOf(
+				PlanView::class,
+				Plans::update(
+					$plan->get_id(),
+					[
+						'extension_slug' => Package::EXTENSION_SLUG,
+						'status'         => PlanStatus::ARCHIVED,
+					]
+				)
+			);
 		}
 		foreach ( $order->get_items() as $item ) {
 			$store->set( $item->get_product_id(), new ProductApplicability( ProductApplicability::MODE_INHERIT_SELECT, [ $other->get_id() ] ) );
@@ -375,7 +384,16 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 		$order       = $this->create_subscription_order( $customer_id );
 		$this->apply_and_stamp( $order, $plan );
 
-		$this->assertInstanceOf( PlanView::class, Plans::update( $plan->get_id(), [ 'status' => PlanStatus::ARCHIVED ] ) );
+		$this->assertInstanceOf(
+			PlanView::class,
+			Plans::update(
+				$plan->get_id(),
+				[
+					'extension_slug' => Package::EXTENSION_SLUG,
+					'status'         => PlanStatus::ARCHIVED,
+				]
+			)
+		);
 		$order->update_status( 'processing' );
 
 		$contracts = Contracts::list_for_customer( $customer_id );
@@ -391,7 +409,16 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 		$this->apply_and_stamp( $order, $plan );
 		$order->update_status( 'on-hold' ); // Awaiting the offline payment.
 
-		$this->assertInstanceOf( PlanView::class, Plans::update( $plan->get_id(), [ 'status' => PlanStatus::ARCHIVED ] ) );
+		$this->assertInstanceOf(
+			PlanView::class,
+			Plans::update(
+				$plan->get_id(),
+				[
+					'extension_slug' => Package::EXTENSION_SLUG,
+					'status'         => PlanStatus::ARCHIVED,
+				]
+			)
+		);
 		$order->update_status( 'processing' ); // The merchant confirms the payment.
 
 		$contracts = Contracts::list_for_customer( $customer_id );

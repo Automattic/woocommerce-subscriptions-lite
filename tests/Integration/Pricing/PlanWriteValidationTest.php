@@ -306,7 +306,13 @@ final class PlanWriteValidationTest extends LiteIntegrationTestCase {
 		PlanWriteValidation::register();
 
 		try {
-			Plans::update( $id, [ 'status' => 'archived' ] );
+			Plans::update(
+				$id,
+				[
+					'extension_slug' => Package::EXTENSION_SLUG,
+					'status'         => 'archived',
+				]
+			);
 			$this->fail( 'A status-only update of a plan with invalid stored pricing must be refused.' );
 		} catch ( PlanValidationException $e ) {
 			$this->assertStringStartsWith( 'pricing_policy.policies[0]:', $e->get_errors()->get_error_message() );
@@ -389,10 +395,26 @@ final class PlanWriteValidationTest extends LiteIntegrationTestCase {
 		$plan = $this->make_unvalidated_plan( 'month', 1, null, [ 'billing_policy' => null ] );
 		$id   = $plan->get_id();
 
-		$this->assertInstanceOf( PlanView::class, Plans::update( $id, [ 'status' => 'archived' ] ), 'Archiving skips the billing check.' );
+		$this->assertInstanceOf(
+			PlanView::class,
+			Plans::update(
+				$id,
+				[
+					'extension_slug' => Package::EXTENSION_SLUG,
+					'status'         => 'archived',
+				]
+			),
+			'Archiving skips the billing check.'
+		);
 
 		try {
-			Plans::update( $id, [ 'status' => 'active' ] );
+			Plans::update(
+				$id,
+				[
+					'extension_slug' => Package::EXTENSION_SLUG,
+					'status'         => 'active',
+				]
+			);
 			$this->fail( 'Restoring a plan without usable billing must be refused.' );
 		} catch ( PlanValidationException $e ) {
 			$this->assertStringStartsWith( 'billing_policy must have a period', $e->get_errors()->get_error_message() );
@@ -410,6 +432,7 @@ final class PlanWriteValidationTest extends LiteIntegrationTestCase {
 			Plans::update(
 				$id,
 				[
+					'extension_slug' => Package::EXTENSION_SLUG,
 					'billing_policy' => [
 						'period'   => 'month',
 						'interval' => 0,
@@ -424,6 +447,7 @@ final class PlanWriteValidationTest extends LiteIntegrationTestCase {
 		$stored = Plans::update(
 			$id,
 			[
+				'extension_slug' => Package::EXTENSION_SLUG,
 				'name'           => 'Renamed',
 				'billing_policy' => [
 					'period'   => 'week',

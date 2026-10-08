@@ -160,6 +160,7 @@ final class EngineDataProviderTest extends LiteIntegrationTestCase {
 		$plan        = Plans::update(
 			(int) Contracts::get( $contract_id )->get_selling_plan_id(),
 			[
+				'extension_slug' => Package::EXTENSION_SLUG,
 				'billing_policy' => [
 					'period'   => 'week',
 					'interval' => 3,
