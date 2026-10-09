@@ -215,7 +215,7 @@ final class CustomerActionsTest extends LiteIntegrationTestCase {
 		$this->assertSame( 404, $response->get_status() );
 		$this->assertSame( ContractStatus::ACTIVE, $this->get_contract( $contract_id )->get_status() );
 		$discovery = rest_get_server()->dispatch( new WP_REST_Request( 'GET', self::BASE . '/' . $contract_id . '/action' ) );
-		$this->assertSame( 403, $discovery->get_status(), 'Discovery is for store managers.' );
+		$this->assertSame( 404, $discovery->get_status(), 'Discovery does not reveal a foreign contract.' );
 	}
 
 	public function test_a_store_manager_runs_an_action(): void {
@@ -236,6 +236,15 @@ final class CustomerActionsTest extends LiteIntegrationTestCase {
 
 		$this->assertSame( 404, $response->get_status() );
 		$this->assertSame( ContractStatus::DRAFT, $this->get_contract( $contract_id )->get_status() );
+		$read = rest_get_server()->dispatch( new WP_REST_Request( 'GET', self::BASE . '/' . $contract_id ) );
+		$this->assertSame( 404, $read->get_status(), 'The read hides the draft too.' );
+	}
+
+	public function test_the_owner_discovers_the_actions_of_their_contract(): void {
+		wp_set_current_user( $this->owner_id );
+		$contract_id = $this->seed_owned_contract();
+
+		$this->assertSame( [ 'hold', 'cancel' ], $this->discover_actions( $contract_id ) );
 	}
 
 	/**

@@ -5,7 +5,7 @@
  * Registers `hold`, `reactivate` and `cancel` for Lite's contracts, dispatched by
  * `wc/v3/subscriptions-engine/contracts/{id}/action`. The engine's `manage_subscription_contract`
  * capability lets the contract's customer and store managers run them; drafts stay hidden from
- * customers. Availability follows {@see CustomerActionRules}.
+ * customers, for reads (`read_subscription_contract`) too. Availability follows {@see CustomerActionRules}.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Lifecycle
  */
@@ -31,6 +31,11 @@ final class CustomerActions {
 	 * The engine capability for acting on one contract.
 	 */
 	private const CAPABILITY = 'manage_subscription_contract';
+
+	/**
+	 * The engine capability for reading one contract.
+	 */
+	private const READ_CAPABILITY = 'read_subscription_contract';
 
 	/**
 	 * Register the actions on `init` and the draft rule. Called once from the bootstrap.
@@ -103,7 +108,8 @@ final class CustomerActions {
 	}
 
 	/**
-	 * Keep Lite drafts from customers: managing one needs `manage_woocommerce`, even for its customer.
+	 * Keep Lite drafts from customers: reading or managing one needs `manage_woocommerce`, even for
+	 * its customer.
 	 *
 	 * @param mixed $caps    Primitive capabilities so far.
 	 * @param mixed $cap     Capability being checked.
@@ -112,7 +118,7 @@ final class CustomerActions {
 	 * @return mixed
 	 */
 	public static function hide_drafts_from_customers( $caps, $cap, $user_id, $args ) {
-		$contract = self::CAPABILITY === $cap && is_array( $args ) ? ( $args[0] ?? null ) : null;
+		$contract = in_array( $cap, [ self::READ_CAPABILITY, self::CAPABILITY ], true ) && is_array( $args ) ? ( $args[0] ?? null ) : null;
 		if ( ! $contract instanceof ContractView
 			|| Package::EXTENSION_SLUG !== $contract->get_extension_slug()
 			|| CustomerVisibility::is_visible( $contract ) ) {
