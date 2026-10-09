@@ -30,7 +30,7 @@ final class CustomerActions {
 	/**
 	 * The engine capability for acting on one contract.
 	 */
-	private const CAPABILITY = 'manage_subscription_contract';
+	private const MANAGE_CAPABILITY = 'manage_subscription_contract';
 
 	/**
 	 * The engine capability for reading one contract.
@@ -54,7 +54,7 @@ final class CustomerActions {
 			'hold',
 			[
 				'description'  => __( 'Put the subscription on hold.', 'woocommerce-subscriptions-lite' ),
-				'permission'   => self::CAPABILITY,
+				'permission'   => self::MANAGE_CAPABILITY,
 				'is_available' => static function ( ContractView $contract ): bool {
 					return CustomerActionRules::can_hold( $contract->get_status() );
 				},
@@ -69,7 +69,7 @@ final class CustomerActions {
 			'reactivate',
 			[
 				'description'  => __( 'Resume the subscription.', 'woocommerce-subscriptions-lite' ),
-				'permission'   => self::CAPABILITY,
+				'permission'   => self::MANAGE_CAPABILITY,
 				'is_available' => static function ( ContractView $contract ): bool {
 					return CustomerActionRules::can_reactivate( $contract->get_status(), '' !== (string) $contract->get_next_payment_gmt() );
 				},
@@ -84,7 +84,7 @@ final class CustomerActions {
 			'cancel',
 			[
 				'description'  => __( 'Cancel the subscription.', 'woocommerce-subscriptions-lite' ),
-				'permission'   => self::CAPABILITY,
+				'permission'   => self::MANAGE_CAPABILITY,
 				'args'         => [
 					'at_period_end' => [
 						'description' => __( 'Whether to cancel at the end of the current billing period (true) or immediately (false).', 'woocommerce-subscriptions-lite' ),
@@ -118,7 +118,7 @@ final class CustomerActions {
 	 * @return mixed
 	 */
 	public static function hide_drafts_from_customers( $caps, $cap, $user_id, $args ) {
-		$contract = in_array( $cap, [ self::READ_CAPABILITY, self::CAPABILITY ], true ) && is_array( $args ) ? ( $args[0] ?? null ) : null;
+		$contract = in_array( $cap, [ self::READ_CAPABILITY, self::MANAGE_CAPABILITY ], true ) && is_array( $args ) ? ( $args[0] ?? null ) : null;
 		if ( ! $contract instanceof ContractView
 			|| Package::EXTENSION_SLUG !== $contract->get_extension_slug()
 			|| CustomerVisibility::is_visible( $contract ) ) {
