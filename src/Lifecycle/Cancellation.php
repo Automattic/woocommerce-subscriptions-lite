@@ -30,7 +30,7 @@ final class Cancellation {
 	 *
 	 * @param int $contract_id Contract id.
 	 * @return ContractView|null The cancelled contract, or null when it does not exist or is not Lite's.
-	 * @throws LifecycleNotAllowed If the contract's status cannot be cancelled.
+	 * @throws LifecycleNotAllowedException If the contract's status cannot be cancelled.
 	 */
 	public function cancel( int $contract_id ): ?ContractView {
 		$contract = Contracts::get( $contract_id );
@@ -41,7 +41,7 @@ final class Cancellation {
 		$status      = $contract->get_status();
 		$cancellable = [ ContractStatus::DRAFT, ContractStatus::ACTIVE, ContractStatus::ON_HOLD, ContractStatus::PENDING_CANCELLATION, ContractStatus::CANCELLED ];
 		if ( ! in_array( $status, $cancellable, true ) ) {
-			throw new LifecycleNotAllowed( 'Only a draft, active, on-hold or pending-cancellation contract can be cancelled.' );
+			throw new LifecycleNotAllowedException( 'Only a draft, active, on-hold or pending-cancellation contract can be cancelled.' );
 		}
 
 		$cancelled_contract = $contract;
@@ -78,7 +78,7 @@ final class Cancellation {
 	 *
 	 * @param int $contract_id Contract id.
 	 * @return ContractView|null The pending-cancellation contract, or null when it does not exist or is not Lite's.
-	 * @throws LifecycleNotAllowed If the contract is not active, on hold or pending cancellation.
+	 * @throws LifecycleNotAllowedException If the contract is not active, on hold or pending cancellation.
 	 */
 	public function cancel_at_period_end( int $contract_id ): ?ContractView {
 		$contract = Contracts::get( $contract_id );
@@ -88,7 +88,7 @@ final class Cancellation {
 
 		$status = $contract->get_status();
 		if ( ! in_array( $status, [ ContractStatus::ACTIVE, ContractStatus::ON_HOLD, ContractStatus::PENDING_CANCELLATION ], true ) ) {
-			throw new LifecycleNotAllowed( 'Only an active or on-hold contract can be cancelled at period end.' );
+			throw new LifecycleNotAllowedException( 'Only an active or on-hold contract can be cancelled at period end.' );
 		}
 
 		$pending_contract = $contract;

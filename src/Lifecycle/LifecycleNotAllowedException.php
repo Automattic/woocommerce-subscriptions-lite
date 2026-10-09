@@ -1,6 +1,6 @@
 <?php
 /**
- * LifecycleNotAllowed - a lifecycle operation the contract's current status does not allow.
+ * LifecycleNotAllowedException - a lifecycle operation the contract's current status does not allow.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Lifecycle
  */
@@ -17,5 +17,5 @@ defined( 'ABSPATH' ) || exit;
  * Thrown when a lifecycle operation's status precondition is not met, so callers can
  * tell it apart from a missing contract (a null result) and from storage failures.
  */
-final class LifecycleNotAllowed extends DomainException {
+final class LifecycleNotAllowedException extends DomainException {
 }

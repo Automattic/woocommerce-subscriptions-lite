@@ -17,7 +17,7 @@ use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\SchemaInstaller;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Hold;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\HoldAnchor;
-use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\LifecycleNotAllowed;
+use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\LifecycleNotAllowedException;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
 
 /**
@@ -151,8 +151,8 @@ final class HoldTest extends LiteIntegrationTestCase {
 
 		try {
 			( new Hold() )->hold( $contract_id );
-			$this->fail( 'Expected LifecycleNotAllowed.' );
-		} catch ( LifecycleNotAllowed $e ) {
+			$this->fail( 'Expected LifecycleNotAllowedException.' );
+		} catch ( LifecycleNotAllowedException $e ) {
 			$stored = $this->get_contract( $contract_id );
 			$this->assertSame( $status, $stored->get_status() );
 			$this->assertSame( '2099-01-01 00:00:00', $stored->get_next_payment_gmt(), 'Nothing was written.' );
@@ -180,8 +180,8 @@ final class HoldTest extends LiteIntegrationTestCase {
 
 		try {
 			( new Hold() )->hold( $contract_id );
-			$this->fail( 'Expected LifecycleNotAllowed for an unregistered stored status.' );
-		} catch ( LifecycleNotAllowed $e ) {
+			$this->fail( 'Expected LifecycleNotAllowedException for an unregistered stored status.' );
+		} catch ( LifecycleNotAllowedException $e ) {
 			$stored = $this->get_contract( $contract_id );
 			$this->assertSame( 'legacy-paused', $stored->get_status() );
 			$this->assertSame( '2099-01-01 00:00:00', $stored->get_next_payment_gmt() );

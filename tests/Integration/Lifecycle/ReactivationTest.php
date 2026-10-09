@@ -19,7 +19,7 @@ use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\PlanStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\SchemaInstaller;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Hold;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\HoldAnchor;
-use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\LifecycleNotAllowed;
+use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\LifecycleNotAllowedException;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Reactivation;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
 
@@ -250,8 +250,8 @@ final class ReactivationTest extends LiteIntegrationTestCase {
 
 		try {
 			( new Reactivation() )->reactivate( $contract_id, $this->utc( '2026-04-15 00:00:00' ) );
-			$this->fail( 'Expected LifecycleNotAllowed for an active contract.' );
-		} catch ( LifecycleNotAllowed $e ) {
+			$this->fail( 'Expected LifecycleNotAllowedException for an active contract.' );
+		} catch ( LifecycleNotAllowedException $e ) {
 			$stored = $this->get_contract( $contract_id );
 			$this->assertSame( ContractStatus::ACTIVE, $stored->get_status() );
 			$this->assertSame( '2026-02-01 00:00:00', $stored->get_next_payment_gmt(), 'The past-due date is untouched.' );
@@ -268,8 +268,8 @@ final class ReactivationTest extends LiteIntegrationTestCase {
 
 		try {
 			( new Reactivation() )->reactivate( $contract_id, $this->utc( '2026-06-01 00:00:00' ) );
-			$this->fail( 'Expected LifecycleNotAllowed.' );
-		} catch ( LifecycleNotAllowed $e ) {
+			$this->fail( 'Expected LifecycleNotAllowedException.' );
+		} catch ( LifecycleNotAllowedException $e ) {
 			$stored = $this->get_contract( $contract_id );
 			$this->assertSame( $status, $stored->get_status() );
 			$this->assertSame( '2099-01-01 00:00:00', $stored->get_next_payment_gmt(), 'Nothing was written.' );
@@ -293,7 +293,7 @@ final class ReactivationTest extends LiteIntegrationTestCase {
 		$contract_id = $this->seed_held_contract( '2099-01-01 00:00:00', $this->make_monthly_plan_id() );
 		$this->store_raw_status( $contract_id, 'legacy-paused' );
 
-		$this->expectException( LifecycleNotAllowed::class );
+		$this->expectException( LifecycleNotAllowedException::class );
 		( new Reactivation() )->reactivate( $contract_id, $this->utc( '2026-06-01 00:00:00' ) );
 	}
 

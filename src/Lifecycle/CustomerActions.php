@@ -139,7 +139,7 @@ final class CustomerActions {
 	private static function run( callable $flow, int $contract_id ) {
 		try {
 			$result = $flow( $contract_id );
-		} catch ( LifecycleNotAllowed $e ) {
+		} catch ( LifecycleNotAllowedException $e ) {
 			return new WP_Error(
 				'woocommerce_subscriptions_lite_action_not_allowed',
 				__( 'That action is not available for this subscription right now.', 'woocommerce-subscriptions-lite' ),

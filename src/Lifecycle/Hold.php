@@ -32,7 +32,7 @@ final class Hold {
 	 *
 	 * @param int $contract_id Contract id.
 	 * @return ContractView|null The held contract, or null when it does not exist or is not Lite's.
-	 * @throws LifecycleNotAllowed If the contract is neither active nor on hold.
+	 * @throws LifecycleNotAllowedException If the contract is neither active nor on hold.
 	 */
 	public function hold( int $contract_id ): ?ContractView {
 		$contract = Contracts::get( $contract_id );
@@ -42,7 +42,7 @@ final class Hold {
 
 		$status = $contract->get_status();
 		if ( ContractStatus::ACTIVE !== $status && ContractStatus::ON_HOLD !== $status ) {
-			throw new LifecycleNotAllowed( 'Only an active contract can be held.' );
+			throw new LifecycleNotAllowedException( 'Only an active contract can be held.' );
 		}
 
 		$held_contract = $contract;
