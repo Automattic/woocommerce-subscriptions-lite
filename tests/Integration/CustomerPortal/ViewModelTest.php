@@ -235,6 +235,16 @@ final class ViewModelTest extends LiteIntegrationTestCase {
 		$this->assertFalse( $detail['cancel_visible'] );
 		$this->assertFalse( $detail['hold_visible'] );
 		$this->assertFalse( $detail['reactivate_visible'] );
+
+		$held = ( new ViewModel() )->build_detail(
+			$this->contract(
+				[
+					'extension_slug' => 'another-extension',
+					'status'         => ContractStatus::ON_HOLD,
+				]
+			)
+		);
+		$this->assertFalse( $held['needs_payment_notice'], 'Lite\'s payment copy is for Lite contracts only.' );
 	}
 
 	public function test_pending_cancellation_label_date_row_and_flags(): void {

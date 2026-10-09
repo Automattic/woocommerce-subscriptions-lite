@@ -342,4 +342,35 @@ final class CustomerActionsTest extends LiteIntegrationTestCase {
 		$this->assertSame( 500, $response->get_status() );
 		$this->assertSame( ContractStatus::ACTIVE, $this->get_contract( $contract_id )->get_status() );
 	}
+
+	/**
+	 * @testWith ["read_subscription_contract"]
+	 *           ["manage_subscription_contract"]
+	 *
+	 * @param string $capability Engine contract capability.
+	 */
+	public function test_drafts_are_hidden_from_customers_only_on_lite_contracts( string $capability ): void {
+		$lite_draft    = $this->get_contract( $this->seed_owned_contract( ContractStatus::DRAFT, null ) );
+		$foreign_draft = $this->get_contract(
+			$this->seed_contract(
+				[
+					'extension_slug'   => 'another-extension',
+					'customer_id'      => $this->owner_id,
+					'status'           => ContractStatus::DRAFT,
+					'next_payment_gmt' => null,
+				]
+			)
+		);
+
+		$this->assertFalse( user_can( $this->owner_id, $capability, $lite_draft ), 'The owner cannot see a Lite draft.' );
+		$this->assertTrue( user_can( $this->create_store_manager(), $capability, $lite_draft ), 'A store manager can.' );
+		$this->assertTrue( user_can( $this->owner_id, $capability, $foreign_draft ), 'Another extension decides about its own drafts.' );
+		$this->assertTrue( user_can( $this->owner_id, $capability, $this->get_contract( $this->seed_owned_contract() ) ), 'An active Lite contract is the owner\'s.' );
+	}
+
+	public function test_the_draft_rule_leaves_other_capabilities_alone(): void {
+		$lite_draft = $this->get_contract( $this->seed_owned_contract( ContractStatus::DRAFT, null ) );
+
+		$this->assertTrue( user_can( $this->owner_id, 'read', $lite_draft ) );
+	}
 }

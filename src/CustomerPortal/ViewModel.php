@@ -102,7 +102,7 @@ final class ViewModel {
 			'cancel_visible'         => $is_lite && CustomerActionRules::can_cancel( $status ),
 			'hold_visible'           => $is_lite && CustomerActionRules::can_hold( $status ),
 			'reactivate_visible'     => $is_lite && CustomerActionRules::can_reactivate( $status, $has_next_payment ),
-			'needs_payment_notice'   => CustomerActionRules::needs_payment( $status, $has_next_payment ),
+			'needs_payment_notice'   => $is_lite && CustomerActionRules::needs_payment( $status, $has_next_payment ),
 			// Cancel mode the action forwards: active cancels at period end
 			// (graceful -> pending-cancellation); on-hold cancels immediately
 			// (no period to ride out -> cancelled).
