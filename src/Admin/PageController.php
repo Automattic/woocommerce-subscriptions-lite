@@ -8,9 +8,8 @@
  * outcomes through, and the URL/action-name constants those handlers and the
  * list table share so the page chrome and the handlers stay aligned.
  *
- * Read/act surface only: every read and write goes through the engine's public
- * {@see \Automattic\WooCommerce\SubscriptionsEngine\Api\Subscriptions} facade
- * (used by {@see SubscriptionsListTable} and {@see DetailRenderer}); this class
+ * Reads go through the engine's public API and the cancel write through Lite's
+ * {@see \Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Cancellation}; this class
  * touches no engine internals.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Admin

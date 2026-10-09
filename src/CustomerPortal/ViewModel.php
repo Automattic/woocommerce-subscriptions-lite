@@ -20,6 +20,8 @@ declare( strict_types=1 );
 namespace Automattic\WooCommerce\SubscriptionsLite\CustomerPortal;
 
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
+use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\CustomerActionRules;
+use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Utilities\Formatter;
 
 defined( 'ABSPATH' ) || exit;
@@ -28,16 +30,6 @@ defined( 'ABSPATH' ) || exit;
  * Builds list-row and detail presentation arrays from provider data.
  */
 final class ViewModel {
-
-	/**
-	 * Statuses a customer may cancel from. `active` and `on-hold` are
-	 * cancelable; terminal and pending-cancellation states are not (a
-	 * customer-driven re-cancel of a winding-down contract is a merchant-only
-	 * decision, so it is hidden from the portal).
-	 *
-	 * @var array<int, string>
-	 */
-	private const CANCELABLE_STATUSES = [ ContractStatus::ACTIVE, ContractStatus::ON_HOLD ];
 
 	/**
 	 * Build the list-row presentation array for one contract.
@@ -93,13 +85,8 @@ final class ViewModel {
 	public function build_detail( array $contract, array $related_orders = [] ): array {
 		$status           = (string) ( $contract['status'] ?? '' );
 		$has_next_payment = '' !== $this->to_string( $contract['next_payment_gmt'] ?? null );
+		$is_lite          = Package::EXTENSION_SLUG === ( $contract['extension_slug'] ?? '' );
 		$payment_method   = $this->normalize_payment_method( $contract['payment_method'] ?? [] );
-
-		// "Needs payment" heuristic: on-hold + a scheduled next payment is the
-		// failed-payment retry path (the customer must update payment before
-		// reactivate is safe); on-hold + no next payment is the admin-action
-		// path, where reactivate is safe.
-		$needs_payment = ContractStatus::ON_HOLD === $status && $has_next_payment;
 
 		return [
 			'id'                     => (int) ( $contract['id'] ?? 0 ),
@@ -112,10 +99,10 @@ final class ViewModel {
 			'date_row_value'         => $this->date_row_value( $status, $contract ),
 			'payment_method_title'   => $payment_method['title'],
 			'payment_method_expires' => $payment_method['expires'],
-			'cancel_visible'         => in_array( $status, self::CANCELABLE_STATUSES, true ),
-			'hold_visible'           => ContractStatus::ACTIVE === $status,
-			'reactivate_visible'     => ContractStatus::ON_HOLD === $status && ! $needs_payment,
-			'needs_payment_notice'   => $needs_payment,
+			'cancel_visible'         => $is_lite && CustomerActionRules::can_cancel( $status ),
+			'hold_visible'           => $is_lite && CustomerActionRules::can_hold( $status ),
+			'reactivate_visible'     => $is_lite && CustomerActionRules::can_reactivate( $status, $has_next_payment ),
+			'needs_payment_notice'   => $is_lite && CustomerActionRules::needs_payment( $status, $has_next_payment ),
 			// Cancel mode the action forwards: active cancels at period end
 			// (graceful -> pending-cancellation); on-hold cancels immediately
 			// (no period to ride out -> cancelled).

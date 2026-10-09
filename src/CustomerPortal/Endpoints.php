@@ -254,22 +254,23 @@ final class Endpoints {
 		wp_interactivity_state(
 			self::STORE_NAMESPACE,
 			[
-				'contractId'  => $detail['id'],
-				'status'      => $detail['status'],
-				'atPeriodEnd' => (bool) $detail['at_period_end'],
-				'modalOpen'   => false,
-				'submitting'  => false,
+				'contractId'    => $detail['id'],
+				'extensionSlug' => Package::EXTENSION_SLUG,
+				'status'        => $detail['status'],
+				'atPeriodEnd'   => (bool) $detail['at_period_end'],
+				'modalOpen'     => false,
+				'submitting'    => false,
 				// `error` backs the cancel modal's live region; `actionError`
 				// backs the in-page Pause / Reactivate live region. Separate
 				// fields so the two error regions never cross-render.
-				'error'       => '',
-				'actionError' => '',
-				'restBase'    => Assets::rest_base(),
-				'nonce'       => wp_create_nonce( 'wp_rest' ),
-				'cancelCopy'  => $detail['cancel_modal_copy'],
+				'error'         => '',
+				'actionError'   => '',
+				'restBase'      => Assets::rest_base(),
+				'nonce'         => wp_create_nonce( 'wp_rest' ),
+				'cancelCopy'    => $detail['cancel_modal_copy'],
 				// Translatable copy the store composes failure messages from, so
 				// the strings stay in the text domain without a JS i18n runtime.
-				'i18n'        => [
+				'i18n'          => [
 					'cancelError'     => __( 'We could not cancel your subscription.', 'woocommerce-subscriptions-lite' ),
 					'holdError'       => __( 'We could not put your subscription on hold.', 'woocommerce-subscriptions-lite' ),
 					'reactivateError' => __( 'We could not reactivate your subscription.', 'woocommerce-subscriptions-lite' ),

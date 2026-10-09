@@ -17,6 +17,7 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\CustomerPor
 
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
 use Automattic\WooCommerce\SubscriptionsLite\CustomerPortal\ViewModel;
+use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
 
 /**
@@ -35,6 +36,7 @@ final class ViewModelTest extends LiteIntegrationTestCase {
 			[
 				'id'               => 7,
 				'status'           => ContractStatus::ACTIVE,
+				'extension_slug'   => Package::EXTENSION_SLUG,
 				'billing_total'    => '19.99',
 				'currency'         => 'USD',
 				'billing_period'   => 'month',
@@ -225,6 +227,24 @@ final class ViewModelTest extends LiteIntegrationTestCase {
 		$this->assertFalse( $detail['reactivate_visible'] );
 		$this->assertFalse( $detail['needs_payment_notice'] );
 		$this->assertTrue( $detail['at_period_end'], 'Active cancels at period end.' );
+	}
+
+	public function test_a_contract_of_another_extension_offers_no_actions(): void {
+		$detail = ( new ViewModel() )->build_detail( $this->contract( [ 'extension_slug' => 'another-extension' ] ) );
+
+		$this->assertFalse( $detail['cancel_visible'] );
+		$this->assertFalse( $detail['hold_visible'] );
+		$this->assertFalse( $detail['reactivate_visible'] );
+
+		$held = ( new ViewModel() )->build_detail(
+			$this->contract(
+				[
+					'extension_slug' => 'another-extension',
+					'status'         => ContractStatus::ON_HOLD,
+				]
+			)
+		);
+		$this->assertFalse( $held['needs_payment_notice'], 'Lite\'s payment copy is for Lite contracts only.' );
 	}
 
 	public function test_pending_cancellation_label_date_row_and_flags(): void {

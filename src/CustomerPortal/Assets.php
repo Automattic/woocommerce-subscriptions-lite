@@ -86,9 +86,8 @@ final class Assets {
 	}
 
 	/**
-	 * The REST base the iAPI store posts lifecycle actions to: the engine's
-	 * contracts route - the one implementation of the lifecycle transitions,
-	 * which consumers call rather than re-route.
+	 * The REST base the iAPI store posts lifecycle actions to: the engine's contracts
+	 * routes, whose `{id}/action` endpoint dispatches the registered customer actions.
 	 *
 	 * @return string Absolute REST base URL, no trailing contract id.
 	 */

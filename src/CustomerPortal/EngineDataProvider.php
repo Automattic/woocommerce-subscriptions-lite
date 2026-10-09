@@ -126,6 +126,7 @@ final class EngineDataProvider {
 		return [
 			'id'               => (int) $contract->get_id(),
 			'status'           => $contract->get_status(),
+			'extension_slug'   => $contract->get_extension_slug(),
 			'billing_total'    => $contract->get_billing_total(),
 			'currency'         => $contract->get_currency(),
 			'billing_period'   => $cadence['period'],

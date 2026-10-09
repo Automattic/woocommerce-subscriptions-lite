@@ -17,6 +17,7 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\ProductPlansPanel;
 use Automattic\WooCommerce\SubscriptionsLite\Bootstrap;
 use Automattic\WooCommerce\SubscriptionsLite\CustomerPortal\Endpoints;
+use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\CustomerActions;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\PlanOrderController;
 use Automattic\WooCommerce\SubscriptionsLite\Pricing\PlanWriteValidation;
 use Automattic\WooCommerce\SubscriptionsLite\ProductPage\PlanPicker;
@@ -47,6 +48,10 @@ final class BootstrapTest extends LiteIntegrationTestCase {
 		$this->assertNotFalse( has_filter( 'woocommerce_account_menu_items' ) );
 		$this->assertNotFalse( has_action( 'woocommerce_account_' . Endpoints::LIST_ENDPOINT . '_endpoint' ) );
 		$this->assertNotFalse( has_action( 'woocommerce_account_' . Endpoints::DETAIL_ENDPOINT . '_endpoint' ) );
+		$this->assertNotFalse(
+			has_action( 'init', [ CustomerActions::class, 'register_actions' ] ),
+			'The customer actions register on every request, not only in wp-admin.'
+		);
 	}
 
 	public function test_the_admin_module_stays_out_of_a_front_end_request(): void {

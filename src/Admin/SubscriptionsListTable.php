@@ -25,6 +25,8 @@ use WP_User;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
+use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Cancellation;
+use Automattic\WooCommerce\SubscriptionsLite\Package;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -427,7 +429,7 @@ final class SubscriptionsListTable extends WP_List_Table {
 			);
 		}
 
-		if ( StatusLabels::is_cancellable( $status ) ) {
+		if ( Package::EXTENSION_SLUG === $item->get_extension_slug() && Cancellation::can_cancel( $status ) ) {
 			$actions['cancel'] = PageController::action_form(
 				PageController::ACTION_CANCEL,
 				$id,

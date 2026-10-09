@@ -29,7 +29,7 @@ The repository root serves as both the composer package (Packagist reads the roo
 ## Architecture ground rules
 
 - **Consume the engine only through its public API.** No reliance on engine internals; if a feature cannot be built on the public surface, that is engine feedback, not a reason to reach inside.
-- **This package owns no database schema.** Subscription data structures belong to the engine; Lite stores at most its own presentation preferences via standard WordPress options.
+- **This package owns no database schema.** Subscription data structures belong to the engine; Lite stores only its own data, through standard WordPress options or engine contract meta.
 - **Render engine-provided definitions instead of hardcoding them** (fields, policies, statuses), so an older Lite renders newer engine data correctly.
 - **The engine dependency is exact-pinned**, and the engine's version-register shim must be loaded with an explicit `require` from the plugin bootstrap - never via composer `files` autoload (composer deduplicates identical `files` entries across installed copies, which silently skips registration).
 - **Runtime guard**: the plugin verifies at runtime that the resolved engine version satisfies its floor, and stands down with an admin notice instead of fataling when it does not.

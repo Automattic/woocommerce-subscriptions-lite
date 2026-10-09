@@ -7,8 +7,8 @@
  *
  * Seeding philosophy: contracts are created through the REAL production path -
  * a WooCommerce order mapped by Lite's checkout handler onto the engine's
- * contracts facade - and moved to other statuses through the engine's public
- * facade verbs, so the data under test is shaped exactly like production data.
+ * contracts facade - and moved to other statuses through Lite's lifecycle
+ * flows, so the data under test is shaped exactly like production data.
  * Plans are created through the engine's plan write facade and read back as
  * views, as production code reads them. The engine's `Integration\` classes
  * used here (order linkage for renewal orders) are a documented test-only
@@ -23,12 +23,15 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration;
 
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Plans;
-use Automattic\WooCommerce\SubscriptionsEngine\Api\Subscriptions;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\PlanView;
+use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Checkout\OrderLinkage;
+use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\SchemaInstaller;
 use Automattic\WooCommerce\SubscriptionsLite\Cart\CartPlanHooks;
 use Automattic\WooCommerce\SubscriptionsLite\Checkout\ContractCreationHandler;
+use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Cancellation;
+use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Hold;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 use WC_Order;
 use WC_Product_Simple;
@@ -224,7 +227,7 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 
 	/**
 	 * Create a contract through the real checkout path and move it to the
-	 * requested status through the engine facade.
+	 * requested status through Lite's lifecycle flows.
 	 *
 	 * @param int                  $customer_id Owning customer.
 	 * @param array<string, mixed> $args        status (active / on-hold / pending-cancellation / cancelled),
@@ -248,19 +251,72 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 
 		switch ( (string) ( $args['status'] ?? 'active' ) ) {
 			case 'on-hold':
-				Subscriptions::hold( $contract_id );
+				( new Hold() )->hold( $contract_id );
 				break;
 			case 'pending-cancellation':
-				Subscriptions::cancel_at_period_end( $contract_id );
+				( new Cancellation() )->cancel_at_period_end( $contract_id );
 				break;
 			case 'cancelled':
-				Subscriptions::cancel( $contract_id );
+				( new Cancellation() )->cancel( $contract_id );
 				break;
 			default:
 				break;
 		}
 
 		return $contract_id;
+	}
+
+	/**
+	 * Create a bare Lite-owned contract straight through the engine facade, for flow tests
+	 * that need an exact status and schedule rather than a checkout-shaped contract.
+	 *
+	 * @param array<string, mixed> $args Contract fields overriding the defaults (an active
+	 *                                   USD contract for customer 1, due 2099-01-01).
+	 * @return int Contract id.
+	 */
+	protected function seed_contract( array $args = [] ): int {
+		$contract = Contracts::create(
+			array_merge(
+				[
+					'extension_slug'   => Package::EXTENSION_SLUG,
+					'customer_id'      => 1,
+					'status'           => ContractStatus::ACTIVE,
+					'currency'         => 'USD',
+					'start_gmt'        => '2026-01-01 00:00:00',
+					'next_payment_gmt' => '2099-01-01 00:00:00',
+					'billing_total'    => '19.99',
+				],
+				$args
+			)
+		);
+
+		return $contract->get_id();
+	}
+
+	/**
+	 * Write a raw status to a contract row, bypassing status validation (e.g. an
+	 * unregistered legacy status).
+	 *
+	 * @param int    $contract_id Contract id.
+	 * @param string $status      Stored status value.
+	 */
+	protected function store_raw_status( int $contract_id, string $status ): void {
+		global $wpdb;
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+		$wpdb->update( SchemaInstaller::get_table_name( SchemaInstaller::TABLE_CONTRACTS ), [ 'status' => $status ], [ 'id' => $contract_id ] );
+	}
+
+	/**
+	 * A contract that must exist (narrows the nullable read).
+	 *
+	 * @param int $contract_id Contract id.
+	 */
+	protected function get_contract( int $contract_id ): ContractView {
+		$contract = Contracts::get( $contract_id );
+		$this->assertInstanceOf( ContractView::class, $contract );
+
+		return $contract;
 	}
 
 	/**
@@ -277,7 +333,7 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 	}
 
 	/**
-	 * Set a contract's status directly - for states no lifecycle verb produces
+	 * Set a contract's status directly - for states no lifecycle flow produces
 	 * (e.g. `expired`). Prefer {@see self::create_contract()} status transitions.
 	 *
 	 * @param int    $contract_id Contract id.
