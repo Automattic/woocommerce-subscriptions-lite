@@ -3,8 +3,9 @@
  * CustomerActions - the customer's lifecycle actions on the engine's contract action endpoint.
  *
  * Registers `hold`, `reactivate` and `cancel` for Lite's contracts, dispatched by
- * `wc/v3/subscriptions-engine/contracts/{id}/action`. The contract's customer may run them on
- * their visible contracts; availability follows {@see CustomerActionRules}.
+ * `wc/v3/subscriptions-engine/contracts/{id}/action`. The engine's `manage_subscription_contract`
+ * capability lets the contract's customer and store managers run them; drafts stay hidden from
+ * customers. Availability follows {@see CustomerActionRules}.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Lifecycle
  */
@@ -27,10 +28,16 @@ defined( 'ABSPATH' ) || exit;
 final class CustomerActions {
 
 	/**
-	 * Register the actions on `init`. Called once from the bootstrap.
+	 * The engine capability for acting on one contract.
+	 */
+	private const CAPABILITY = 'manage_subscription_contract';
+
+	/**
+	 * Register the actions on `init` and the draft rule. Called once from the bootstrap.
 	 */
 	public static function register(): void {
 		add_action( 'init', [ self::class, 'register_actions' ] );
+		add_filter( 'map_meta_cap', [ self::class, 'hide_drafts_from_customers' ], 20, 4 );
 	}
 
 	/**
@@ -42,7 +49,7 @@ final class CustomerActions {
 			'hold',
 			[
 				'description'  => __( 'Put the subscription on hold.', 'woocommerce-subscriptions-lite' ),
-				'permission'   => [ self::class, 'is_customer_permitted' ],
+				'permission'   => self::CAPABILITY,
 				'is_available' => static function ( ContractView $contract ): bool {
 					return CustomerActionRules::can_hold( $contract->get_status() );
 				},
@@ -57,7 +64,7 @@ final class CustomerActions {
 			'reactivate',
 			[
 				'description'  => __( 'Resume the subscription.', 'woocommerce-subscriptions-lite' ),
-				'permission'   => [ self::class, 'is_customer_permitted' ],
+				'permission'   => self::CAPABILITY,
 				'is_available' => static function ( ContractView $contract ): bool {
 					return CustomerActionRules::can_reactivate( $contract->get_status(), '' !== (string) $contract->get_next_payment_gmt() );
 				},
@@ -72,7 +79,7 @@ final class CustomerActions {
 			'cancel',
 			[
 				'description'  => __( 'Cancel the subscription.', 'woocommerce-subscriptions-lite' ),
-				'permission'   => [ self::class, 'is_customer_permitted' ],
+				'permission'   => self::CAPABILITY,
 				'args'         => [
 					'at_period_end' => [
 						'description' => __( 'Whether to cancel at the end of the current billing period (true) or immediately (false).', 'woocommerce-subscriptions-lite' ),
@@ -96,12 +103,23 @@ final class CustomerActions {
 	}
 
 	/**
-	 * Whether the current user is the contract's customer and may see it (drafts stay hidden).
+	 * Keep Lite drafts from customers: managing one needs `manage_woocommerce`, even for its customer.
 	 *
-	 * @param ContractView $contract The contract.
+	 * @param mixed $caps    Primitive capabilities so far.
+	 * @param mixed $cap     Capability being checked.
+	 * @param mixed $user_id User id.
+	 * @param mixed $args    Extra `current_user_can()` arguments; the first is the contract.
+	 * @return mixed
 	 */
-	public static function is_customer_permitted( ContractView $contract ): bool {
-		return get_current_user_id() === $contract->get_customer_id() && CustomerVisibility::is_visible( $contract );
+	public static function hide_drafts_from_customers( $caps, $cap, $user_id, $args ) {
+		$contract = self::CAPABILITY === $cap && is_array( $args ) ? ( $args[0] ?? null ) : null;
+		if ( ! $contract instanceof ContractView
+			|| Package::EXTENSION_SLUG !== $contract->get_extension_slug()
+			|| CustomerVisibility::is_visible( $contract ) ) {
+			return $caps;
+		}
+
+		return [ 'manage_woocommerce' ];
 	}
 
 	/**

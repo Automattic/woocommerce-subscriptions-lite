@@ -2,7 +2,8 @@
 /**
  * Integration tests for the customer actions, dispatched through the engine's contract action
  * endpoint: the round-trips with their `{ id, status }` summary, the auth and ownership matrix
- * (401, asymmetric 404, drafts hidden), availability by status (409) and discovery.
+ * (401, asymmetric 404, drafts hidden, store managers allowed), availability by status (409) and
+ * discovery (store managers).
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Tests
  */
@@ -59,6 +60,16 @@ final class CustomerActionsTest extends LiteIntegrationTestCase {
 		$wp_rest_server = null;
 		wp_set_current_user( 0 );
 		parent::tear_down();
+	}
+
+	/**
+	 * Create a store manager.
+	 */
+	private function create_store_manager(): int {
+		$user_id = self::factory()->user->create( [ 'role' => 'shop_manager' ] );
+		$this->assertIsInt( $user_id );
+
+		return $user_id;
 	}
 
 	/**
@@ -204,7 +215,17 @@ final class CustomerActionsTest extends LiteIntegrationTestCase {
 		$this->assertSame( 404, $response->get_status() );
 		$this->assertSame( ContractStatus::ACTIVE, $this->get_contract( $contract_id )->get_status() );
 		$discovery = rest_get_server()->dispatch( new WP_REST_Request( 'GET', self::BASE . '/' . $contract_id . '/action' ) );
-		$this->assertSame( 404, $discovery->get_status(), 'Discovery does not reveal a foreign contract.' );
+		$this->assertSame( 403, $discovery->get_status(), 'Discovery is for store managers.' );
+	}
+
+	public function test_a_store_manager_runs_an_action(): void {
+		wp_set_current_user( $this->create_store_manager() );
+		$contract_id = $this->seed_owned_contract();
+
+		$response = $this->post_action( $contract_id, 'hold', [] );
+
+		$this->assertSame( 200, $response->get_status() );
+		$this->assertSame( ContractStatus::ON_HOLD, $this->get_contract( $contract_id )->get_status() );
 	}
 
 	public function test_a_draft_is_not_found_for_its_owner(): void {
@@ -260,7 +281,7 @@ final class CustomerActionsTest extends LiteIntegrationTestCase {
 	 * @param array<int, string> $expected         Listed action slugs.
 	 */
 	public function test_discovery_lists_the_actions_the_status_allows( string $status, ?string $next_payment_gmt, array $expected ): void {
-		wp_set_current_user( $this->owner_id );
+		wp_set_current_user( $this->create_store_manager() );
 		$contract_id = $this->seed_owned_contract( $status, $next_payment_gmt );
 
 		$this->assertSame( $expected, $this->discover_actions( $contract_id ) );
@@ -281,19 +302,15 @@ final class CustomerActionsTest extends LiteIntegrationTestCase {
 	}
 
 	public function test_discovery_describes_the_cancel_args(): void {
-		wp_set_current_user( $this->owner_id );
+		wp_set_current_user( $this->create_store_manager() );
 		$contract_id = $this->seed_owned_contract();
 
-		$request = new WP_REST_Request( 'GET', self::BASE . '/' . $contract_id . '/action' );
-		$request->set_query_params( [ 'action' => 'cancel' ] );
-
-		$response = rest_get_server()->dispatch( $request );
+		$response = rest_get_server()->dispatch( new WP_REST_Request( 'GET', self::BASE . '/' . $contract_id . '/action' ) );
 
 		$this->assertSame( 200, $response->get_status() );
-		$actions = $this->get_response_data( $response )['actions'];
-		$this->assertCount( 1, $actions );
-		$this->assertSame( Package::EXTENSION_SLUG, $actions[0]['extension_slug'] );
-		$args = (array) $actions[0]['args'];
+		$actions = array_column( $this->get_response_data( $response )['actions'], null, 'action' );
+		$this->assertSame( Package::EXTENSION_SLUG, $actions['cancel']['extension_slug'] );
+		$args = (array) $actions['cancel']['args'];
 		$this->assertSame( 'boolean', $args['at_period_end']['type'] );
 		$this->assertTrue( $args['at_period_end']['default'] );
 	}
