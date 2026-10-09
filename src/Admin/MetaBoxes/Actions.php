@@ -16,6 +16,7 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Admin\MetaBoxes;
 
 use Automattic\WooCommerce\SubscriptionsLite\Admin\PageController;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\StatusLabels;
+use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Cancellation;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 
@@ -51,7 +52,7 @@ final class Actions {
 			);
 		}
 
-		if ( Package::EXTENSION_SLUG === $contract->get_extension_slug() && StatusLabels::is_cancellable( $status ) ) {
+		if ( Package::EXTENSION_SLUG === $contract->get_extension_slug() && Cancellation::can_cancel( $status ) ) {
 			$items[] = PageController::action_form(
 				PageController::ACTION_CANCEL,
 				$id,

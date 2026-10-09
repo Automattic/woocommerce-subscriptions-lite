@@ -355,4 +355,13 @@ final class CancellationTest extends LiteIntegrationTestCase {
 		$this->assertNull( ( new Cancellation() )->cancel_at_period_end( $contract_id ) );
 		$this->assertSame( ContractStatus::ACTIVE, $this->get_contract( $contract_id )->get_status() );
 	}
+
+	public function test_can_cancel_allows_non_terminal_statuses_only(): void {
+		$this->assertTrue( Cancellation::can_cancel( ContractStatus::ACTIVE ) );
+		$this->assertTrue( Cancellation::can_cancel( ContractStatus::ON_HOLD ) );
+		$this->assertTrue( Cancellation::can_cancel( ContractStatus::PENDING_CANCELLATION ) );
+		$this->assertTrue( Cancellation::can_cancel( ContractStatus::DRAFT ), 'A stuck draft can be cancelled.' );
+		$this->assertFalse( Cancellation::can_cancel( ContractStatus::CANCELLED ) );
+		$this->assertFalse( Cancellation::can_cancel( ContractStatus::EXPIRED ) );
+	}
 }

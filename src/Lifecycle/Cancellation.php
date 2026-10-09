@@ -25,6 +25,20 @@ defined( 'ABSPATH' ) || exit;
 final class Cancellation {
 
 	/**
+	 * Statuses {@see self::cancel()} moves to cancelled.
+	 */
+	private const CANCELLABLE_STATUSES = [ ContractStatus::DRAFT, ContractStatus::ACTIVE, ContractStatus::ON_HOLD, ContractStatus::PENDING_CANCELLATION ];
+
+	/**
+	 * Whether a contract in `$status` can be cancelled now.
+	 *
+	 * @param string $status Contract status slug.
+	 */
+	public static function can_cancel( string $status ): bool {
+		return in_array( $status, self::CANCELLABLE_STATUSES, true );
+	}
+
+	/**
 	 * Cancel a draft, active, on-hold or pending-cancellation contract now. Cancelling a
 	 * cancelled contract writes nothing and still succeeds.
 	 *
@@ -38,9 +52,8 @@ final class Cancellation {
 			return null;
 		}
 
-		$status      = $contract->get_status();
-		$cancellable = [ ContractStatus::DRAFT, ContractStatus::ACTIVE, ContractStatus::ON_HOLD, ContractStatus::PENDING_CANCELLATION, ContractStatus::CANCELLED ];
-		if ( ! in_array( $status, $cancellable, true ) ) {
+		$status = $contract->get_status();
+		if ( ContractStatus::CANCELLED !== $status && ! self::can_cancel( $status ) ) {
 			throw new LifecycleNotAllowedException( 'Only a draft, active, on-hold or pending-cancellation contract can be cancelled.' );
 		}
 
