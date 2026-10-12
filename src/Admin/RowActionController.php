@@ -30,6 +30,8 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Admin;
 use Throwable;
 use WC_Order;
 use Automattic\WooCommerce\Enums\OrderStatus;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
+use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\CycleStatus;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Cancellation;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Renewal\RenewalProcessor;
@@ -172,6 +174,16 @@ final class RowActionController {
 			);
 		}
 
+		if ( null === $order && self::renewal_order_build_failed( $contract_id ) ) {
+			return RowActionResult::failed(
+				sprintf(
+					/* translators: %d: subscription number. */
+					__( 'The renewal order for subscription #%d could not be built. The subscription is on hold; check the WooCommerce logs, fix the cause and renew it again.', 'woocommerce-subscriptions-lite' ),
+					$contract_id
+				)
+			);
+		}
+
 		if ( null === $order ) {
 			return RowActionResult::info(
 				sprintf(
@@ -183,6 +195,17 @@ final class RowActionController {
 		}
 
 		return $this->renewal_outcome( $order, $contract_id );
+	}
+
+	/**
+	 * Whether the contract's newest renewal failed because its order could not be built.
+	 *
+	 * @param int $contract_id Contract id.
+	 */
+	private static function renewal_order_build_failed( int $contract_id ): bool {
+		$head = Contracts::get_cycles( $contract_id, 1 )[0] ?? null;
+
+		return null !== $head && CycleStatus::FAILED === $head->get_status() && RenewalProcessor::REASON_ORDER_BUILD_FAILED === $head->get_reason();
 	}
 
 	/**

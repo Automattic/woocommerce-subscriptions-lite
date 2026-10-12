@@ -46,6 +46,11 @@ final class RenewalProcessor {
 	public const LEASE_SECONDS = 900;
 
 	/**
+	 * Failure reason recorded on a cycle whose renewal order could not be built.
+	 */
+	public const REASON_ORDER_BUILD_FAILED = 'order-build-failed';
+
+	/**
 	 * Renew `$contract` for the period due at `$anchor`.
 	 *
 	 * @param ContractView      $contract The contract (read with its items and addresses).
@@ -227,11 +232,13 @@ final class RenewalProcessor {
 
 		$order = ( new RenewalOrderBuilder() )->build( $contract, $cycle );
 		if ( null === $order ) {
-			// A build that failed once (a deleted product) fails again: take the contract off the
-			// due scan and release the cycle, so Renew now can retry once the cause is fixed.
-			$this->log( 'error', sprintf( 'contract %d: the renewal order could not be built; its due moment is cleared until it is renewed by hand.', $contract->get_id() ), $contract->get_id() );
-			Contracts::transition_cycle( $cycle->get_id(), CycleStatus::PENDING, CycleStatus::PENDING );
-			Contracts::update( $contract->get_id(), [ 'next_payment_gmt' => null ] );
+			// The renewal is owed but cannot be billed: fail the cycle and hold the contract, as
+			// for a dead order. Renew now retries it once the cause (a deleted product, a
+			// database error) is fixed.
+			$this->log( 'error', sprintf( 'contract %d: the renewal order could not be built; the renewal failed and the contract is on hold until it is renewed by hand.', $contract->get_id() ), $contract->get_id() );
+			if ( Contracts::transition_cycle( $cycle->get_id(), CycleStatus::PENDING, CycleStatus::FAILED, [ 'reason' => self::REASON_ORDER_BUILD_FAILED ] ) ) {
+				SystemHold::place( $contract->get_id() );
+			}
 			return null;
 		}
 

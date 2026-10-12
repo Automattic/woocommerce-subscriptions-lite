@@ -14,6 +14,8 @@ use Automattic\WooCommerce\SubscriptionsEngine\Api\View\CycleView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\CycleStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\SchemaInstaller;
+use Automattic\WooCommerce\SubscriptionsLite\Admin\RowActionController;
+use Automattic\WooCommerce\SubscriptionsLite\Admin\RowActionResult;
 use Automattic\WooCommerce\SubscriptionsLite\Renewal\RenewalOrderBuilder;
 use Automattic\WooCommerce\SubscriptionsLite\Renewal\RenewalProcessor;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
@@ -399,7 +401,7 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 		$this->assertSame( CycleStatus::FAILED, $this->head( $contract_id )->get_status() );
 	}
 
-	public function test_a_renewal_order_that_cannot_be_built_takes_the_contract_off_the_due_scan(): void {
+	public function test_a_renewal_order_that_cannot_be_built_fails_the_renewal_and_holds_the_contract(): void {
 		$this->support_engine_charges( 'cod' );
 		$contract_id = $this->make_contract();
 		$this->capture_log();
@@ -420,12 +422,21 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 		$this->assertGreaterThan( 0, $draft_id );
 		$this->assertFalse( wc_get_order( $draft_id ), 'The draft is deleted.' );
 		$this->assertSame( 0, $this->charge_count() );
-		$this->assertNull( $this->get_contract( $contract_id )->get_next_payment_gmt() );
+		$contract = $this->get_contract( $contract_id );
+		$this->assertSame( ContractStatus::ON_HOLD, $contract->get_status() );
+		$this->assertNull( $contract->get_next_payment_gmt() );
 		$this->assertTrue( $this->has_logged( 'could not be built' ) );
 		$head = $this->head( $contract_id );
-		$this->assertSame( CycleStatus::PENDING, $head->get_status() );
+		$this->assertSame( CycleStatus::FAILED, $head->get_status() );
+		$this->assertSame( RenewalProcessor::REASON_ORDER_BUILD_FAILED, $head->get_reason() );
 		$this->assertNull( $head->get_order_id() );
-		$this->assertTrue( Contracts::claim_cycle( $head->get_id(), CycleStatus::PENDING, 900 ), 'The cycle is released for a retry by hand.' );
+		$this->assertTrue( RenewalProcessor::can_renew_now( $contract ), 'Renew now is offered to recover it.' );
+
+		$result = ( new RowActionController( null, static fn (): bool => true ) )->handle_renew_now( [ 'contract_id' => $contract_id ] );
+
+		$this->assertSame( RowActionResult::ERROR, $result->type(), 'Renew now reports the build failure, not "not renewable".' );
+		$this->assertSame( CycleStatus::FAILED, $this->head( $contract_id )->get_status() );
+		$this->assertSame( ContractStatus::ON_HOLD, $this->get_contract( $contract_id )->get_status() );
 	}
 
 	public function test_a_contract_without_a_plan_is_parked(): void {
