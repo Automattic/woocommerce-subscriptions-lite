@@ -4,8 +4,9 @@
  *
  * Answers the engine's reusable-payment-method query for carts and orders that start a
  * Lite subscription (a plan line) and for Lite renewal orders (paying one on order-pay
- * should leave a method that can be charged next time). A free first order with a plan
- * line still needs payment, so the gateway runs and saves the method for the renewals.
+ * should leave a method that can be charged next time). A free first order whose
+ * subscription will charge later (a recurring total above 0) still needs payment, so the
+ * gateway runs and saves the method for the renewals; a free subscription needs none.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Checkout
  */
@@ -61,7 +62,8 @@ final class ReusablePaymentMethod {
 	}
 
 	/**
-	 * A free cart that starts a subscription still needs payment, so the method is saved.
+	 * A free cart that starts a subscription charging later still needs payment, so the
+	 * method is saved.
 	 *
 	 * @param mixed $needs_payment Whether the cart needs payment.
 	 * @param mixed $cart          The cart.
@@ -72,13 +74,13 @@ final class ReusablePaymentMethod {
 			return $needs_payment;
 		}
 
-		return self::cart_has_plan_item( $cart ) ? true : $needs_payment;
+		return self::cart_recurring_total( $cart ) > 0 ? true : $needs_payment;
 	}
 
 	/**
-	 * A free order that starts a subscription still needs payment while it is in a payable
-	 * status, so the method is saved. Never for Lite renewal orders: a free renewal is
-	 * completed by Lite.
+	 * A free order that starts a subscription charging later still needs payment while it is
+	 * in a payable status, so the method is saved. Never for Lite renewal orders: a free
+	 * renewal is completed by Lite.
 	 *
 	 * @param mixed $needs_payment        Whether the order needs payment.
 	 * @param mixed $order                The order.
@@ -93,7 +95,45 @@ final class ReusablePaymentMethod {
 			return $needs_payment;
 		}
 
-		return self::has_plan_line( $order ) ? true : $needs_payment;
+		return self::order_recurring_total( $order ) > 0 ? true : $needs_payment;
+	}
+
+	/**
+	 * The amount the order's subscription renews for: its plan lines with their tax, plus
+	 * shipping (the contract's billing total, as checkout records it).
+	 *
+	 * @param WC_Order $order The order.
+	 */
+	private static function order_recurring_total( WC_Order $order ): float {
+		$total    = 0.0;
+		$has_plan = false;
+		foreach ( $order->get_items() as $item ) {
+			if ( $item instanceof WC_Order_Item_Product && (int) $item->get_meta( CartPlanHooks::SELLING_PLAN_ID_KEY ) > 0 ) {
+				$has_plan = true;
+				$total   += (float) $item->get_total() + (float) $item->get_total_tax();
+			}
+		}
+
+		return $has_plan ? $total + (float) $order->get_shipping_total() + (float) $order->get_shipping_tax() : 0.0;
+	}
+
+	/**
+	 * The amount the cart's subscription renews for: its plan items with their tax, plus
+	 * shipping.
+	 *
+	 * @param WC_Cart $cart The cart.
+	 */
+	private static function cart_recurring_total( WC_Cart $cart ): float {
+		$total    = 0.0;
+		$has_plan = false;
+		foreach ( $cart->get_cart() as $cart_item ) {
+			if ( is_array( $cart_item ) && (int) ( $cart_item[ CartPlanHooks::SELLING_PLAN_ID_KEY ] ?? 0 ) > 0 ) {
+				$has_plan = true;
+				$total   += (float) ( $cart_item['line_total'] ?? 0 ) + (float) ( $cart_item['line_tax'] ?? 0 );
+			}
+		}
+
+		return $has_plan ? $total + (float) $cart->get_shipping_total() + (float) $cart->get_shipping_tax() : 0.0;
 	}
 
 	/**

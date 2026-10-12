@@ -16,6 +16,7 @@ use Automattic\WooCommerce\SubscriptionsLite\Plans\ProductApplicability;
 use Automattic\WooCommerce\SubscriptionsLite\Renewal\RenewalOrderBuilder;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
 use WC_Order;
+use WC_Order_Item_Fee;
 use WC_Product_Simple;
 
 /**
@@ -109,12 +110,34 @@ final class ReusablePaymentMethodTest extends LiteIntegrationTestCase {
 		$this->assertTrue( Payments::requires_reusable_payment_method( $order ) );
 	}
 
-	public function test_a_free_plan_order_awaiting_payment_needs_payment(): void {
-		$this->assertTrue( $this->make_order( true, '0' )->needs_payment() );
+	/**
+	 * A plan order brought to a $0 total by a credit (a negative fee), so its subscription
+	 * still renews for the plan line.
+	 *
+	 * @param string $status Order status.
+	 */
+	private function make_credited_plan_order( string $status = 'pending' ): WC_Order {
+		$order = $this->make_order( true, '19.99', $status );
+		$fee   = new WC_Order_Item_Fee();
+		$fee->set_name( 'Store credit' );
+		$fee->set_total( '-19.99' );
+		$order->add_item( $fee );
+		$order->set_total( '0' );
+		$order->save();
+
+		return $order;
+	}
+
+	public function test_a_free_plan_order_that_renews_for_a_charge_needs_payment(): void {
+		$this->assertTrue( $this->make_credited_plan_order()->needs_payment() );
+	}
+
+	public function test_a_free_plan_order_that_renews_for_free_does_not_need_payment(): void {
+		$this->assertFalse( $this->make_order( true, '0' )->needs_payment() );
 	}
 
 	public function test_a_free_plan_order_already_completed_does_not_need_payment(): void {
-		$this->assertFalse( $this->make_order( true, '0', 'completed' )->needs_payment() );
+		$this->assertFalse( $this->make_credited_plan_order( 'completed' )->needs_payment() );
 	}
 
 	public function test_a_free_order_without_a_plan_is_untouched(): void {
@@ -134,9 +157,22 @@ final class ReusablePaymentMethodTest extends LiteIntegrationTestCase {
 		$this->assertFalse( $order->needs_payment() );
 	}
 
-	public function test_a_free_plan_cart_needs_payment_and_a_free_plain_cart_does_not(): void {
-		$this->add_to_cart( $this->make_product( '0' ), true );
+	public function test_a_free_plan_cart_that_renews_for_a_charge_needs_payment(): void {
+		add_action(
+			'woocommerce_cart_calculate_fees',
+			static function ( $cart ): void {
+				$cart->add_fee( 'Store credit', -20 );
+			}
+		);
+		$this->add_to_cart( $this->make_product(), true );
+
+		$this->assertSame( 0.0, (float) WC()->cart->get_total( 'edit' ) );
 		$this->assertTrue( WC()->cart->needs_payment() );
+	}
+
+	public function test_free_plan_and_plain_carts_do_not_need_payment(): void {
+		$this->add_to_cart( $this->make_product( '0' ), true );
+		$this->assertFalse( WC()->cart->needs_payment(), 'A subscription that renews for free collects no method.' );
 
 		WC()->cart->empty_cart();
 		$this->add_to_cart( $this->make_product( '0' ), false );
