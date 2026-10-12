@@ -101,6 +101,19 @@ final class Settlement {
 		add_action( 'woocommerce_before_delete_order', [ $instance, 'handle_removed_order' ] );
 		add_action( 'wp_trash_post', [ $instance, 'handle_removed_post' ] );
 		add_action( 'before_delete_post', [ $instance, 'handle_removed_post' ] );
+		add_filter( 'woocommerce_valid_order_statuses_for_cancel', [ $instance, 'statuses_for_customer_cancel' ], 10, 2 );
+	}
+
+	/**
+	 * Customers cannot cancel a Lite renewal order from My Account: a dead renewal order holds
+	 * the subscription until the merchant recovers it, while the order can still be paid.
+	 *
+	 * @param mixed $statuses Order statuses in which the customer may cancel the order.
+	 * @param mixed $order    The order.
+	 * @return mixed
+	 */
+	public function statuses_for_customer_cancel( $statuses, $order = null ) {
+		return $order instanceof WC_Order && RenewalOrderBuilder::CREATED_VIA === $order->get_created_via() ? [] : $statuses;
 	}
 
 	/**

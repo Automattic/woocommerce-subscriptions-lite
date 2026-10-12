@@ -159,6 +159,17 @@ final class DeadRenewalOrderTest extends LiteIntegrationTestCase {
 		);
 	}
 
+	public function test_customers_cannot_cancel_a_renewal_order_from_my_account(): void {
+		[ , $customer_id, $order ] = $this->seed( ContractStatus::ON_HOLD, 'failed', CycleStatus::FAILED );
+		$plain                     = wc_create_order( [ 'customer_id' => $customer_id ] );
+		$plain->set_total( '10' );
+		$plain->save();
+
+		$this->assertArrayNotHasKey( 'cancel', wc_get_account_orders_actions( $order ) );
+		$this->assertArrayHasKey( 'pay', wc_get_account_orders_actions( $order ), 'The customer can still pay it.' );
+		$this->assertArrayHasKey( 'cancel', wc_get_account_orders_actions( $plain ), 'Other orders keep the cancel action.' );
+	}
+
 	public function test_a_trashed_manual_renewal_order_fails_its_cycle(): void {
 		[ $contract_id, , $order ] = $this->seed( ContractStatus::ON_HOLD, 'pending', CycleStatus::PENDING );
 
