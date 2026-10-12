@@ -101,21 +101,30 @@ final class EngineDataProvider {
 	 * Live `WC_Order` objects are reduced to plain arrays here; none escape the provider.
 	 *
 	 * @param int $contract_id The contract id.
-	 * @param int $limit       Billing cycles to read orders from; -1 for all.
+	 * @param int $limit       Billing cycles to read orders from.
 	 * @param int $offset      Billing cycles to skip (for paging).
-	 * @return array<int, array<string, mixed>>
+	 * @return array{orders: array<int, array<string, mixed>>, has_more: bool} The window's
+	 *         orders and whether another window follows.
 	 */
-	public function get_related_orders( int $contract_id, int $limit = -1, int $offset = 0 ): array {
+	public function get_related_orders( int $contract_id, int $limit, int $offset = 0 ): array {
 		$contract = Contracts::get( $contract_id );
 		if ( null === $contract ) {
-			return [];
+			return [
+				'orders'   => [],
+				'has_more' => false,
+			];
 		}
 
-		$rows = [];
-		foreach ( RelatedOrders::for_contract( $contract, $limit, $offset ) as $order ) {
+		$window = RelatedOrders::for_contract( $contract, $limit, $offset );
+		$rows   = [];
+		foreach ( $window['orders'] as $order ) {
 			$rows[] = $this->order_to_row( $order );
 		}
-		return $rows;
+
+		return [
+			'orders'   => $rows,
+			'has_more' => $window['has_more'],
+		];
 	}
 
 	/**

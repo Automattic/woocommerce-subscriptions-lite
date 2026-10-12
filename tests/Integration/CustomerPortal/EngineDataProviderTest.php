@@ -114,15 +114,17 @@ final class EngineDataProviderTest extends LiteIntegrationTestCase {
 
 		// The origin order is linked by the checkout factory, so it counts as a
 		// related order alongside the three renewals - exactly as in production.
-		$all = $this->provider->get_related_orders( $contract_id );
-		$this->assertCount( 4, $all );
+		$all = $this->provider->get_related_orders( $contract_id, 10 );
+		$this->assertCount( 4, $all['orders'] );
+		$this->assertFalse( $all['has_more'] );
 		$this->assertSame(
 			[ 'number', 'date_gmt', 'status', 'status_label', 'total', 'view_url' ],
-			array_keys( $all[0] )
+			array_keys( $all['orders'][0] )
 		);
 
 		$window = $this->provider->get_related_orders( $contract_id, 2, 1 );
-		$this->assertCount( 2, $window, 'limit/offset window through to the read.' );
+		$this->assertCount( 2, $window['orders'], 'limit/offset window through to the read.' );
+		$this->assertTrue( $window['has_more'] );
 	}
 
 	public function test_list_cadence_is_read_from_each_contracts_live_plan(): void {

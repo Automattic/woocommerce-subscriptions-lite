@@ -21,17 +21,17 @@ use WC_Order;
 final class RelatedOrdersTest extends LiteIntegrationTestCase {
 
 	/**
-	 * The ids of a list of orders.
+	 * The order ids of a window.
 	 *
-	 * @param array<int, WC_Order> $orders Orders.
+	 * @param array{orders: array<int, WC_Order>, has_more: bool} $window A window.
 	 * @return array<int, int>
 	 */
-	private function ids( array $orders ): array {
+	private function ids( array $window ): array {
 		return array_map(
 			static function ( WC_Order $order ): int {
 				return $order->get_id();
 			},
-			$orders
+			$window['orders']
 		);
 	}
 
@@ -55,7 +55,7 @@ final class RelatedOrdersTest extends LiteIntegrationTestCase {
 	public function test_lists_renewals_newest_first_then_the_origin(): void {
 		[ $contract_id, $origin_id, $renewal_ids ] = $this->contract_with_renewals( 2 );
 
-		$orders = RelatedOrders::for_contract( $this->get_contract( $contract_id ) );
+		$orders = RelatedOrders::for_contract( $this->get_contract( $contract_id ), 10 );
 
 		$this->assertSame( [ $renewal_ids[1], $renewal_ids[0], $origin_id ], $this->ids( $orders ) );
 	}
@@ -75,7 +75,7 @@ final class RelatedOrdersTest extends LiteIntegrationTestCase {
 			]
 		);
 
-		$orders = RelatedOrders::for_contract( $this->get_contract( $contract_id ) );
+		$orders = RelatedOrders::for_contract( $this->get_contract( $contract_id ), 10 );
 
 		$this->assertSame( [ $renewal_ids[0], $origin_id ], $this->ids( $orders ) );
 	}
@@ -84,17 +84,48 @@ final class RelatedOrdersTest extends LiteIntegrationTestCase {
 		[ $contract_id, $origin_id, $renewal_ids ] = $this->contract_with_renewals( 3 );
 		$contract                                  = $this->get_contract( $contract_id );
 
-		$this->assertSame( [ $renewal_ids[2], $renewal_ids[1] ], $this->ids( RelatedOrders::for_contract( $contract, 2, 0 ) ) );
-		$this->assertSame( [ $renewal_ids[0], $origin_id ], $this->ids( RelatedOrders::for_contract( $contract, 2, 2 ) ) );
-		$this->assertSame( [], RelatedOrders::for_contract( $contract, 2, 4 ) );
+		$first = RelatedOrders::for_contract( $contract, 2, 0 );
+		$this->assertSame( [ $renewal_ids[2], $renewal_ids[1] ], $this->ids( $first ) );
+		$this->assertTrue( $first['has_more'] );
+		$last = RelatedOrders::for_contract( $contract, 2, 2 );
+		$this->assertSame( [ $renewal_ids[0], $origin_id ], $this->ids( $last ) );
+		$this->assertFalse( $last['has_more'] );
+		$this->assertSame( [], $this->ids( RelatedOrders::for_contract( $contract, 2, 4 ) ) );
 	}
 
-	public function test_minus_one_lists_all_and_zero_lists_none(): void {
+	public function test_a_window_short_of_orders_still_reports_the_next_window(): void {
+		[ $contract_id, $origin_id, $renewal_ids ] = $this->contract_with_renewals( 1 );
+		Contracts::add_cycle(
+			$contract_id,
+			[
+				'status'         => CycleStatus::PENDING,
+				'count'          => 3,
+				'starts_at_gmt'  => '2026-03-15 00:00:00',
+				'ends_at_gmt'    => '2026-04-15 00:00:00',
+				'expected_total' => '19.99',
+				'currency'       => 'USD',
+			]
+		);
+		$contract = $this->get_contract( $contract_id );
+
+		$first = RelatedOrders::for_contract( $contract, 1, 0 );
+		$this->assertSame( [], $this->ids( $first ), 'The newest cycle has no order yet.' );
+		$this->assertTrue( $first['has_more'], 'Older orders stay reachable.' );
+		$this->assertSame( [ $renewal_ids[0], $origin_id ], $this->ids( RelatedOrders::for_contract( $contract, 2, 1 ) ) );
+	}
+
+	public function test_a_non_positive_limit_reads_none(): void {
 		[ $contract_id ] = $this->contract_with_renewals( 3 );
 		$contract        = $this->get_contract( $contract_id );
 
-		$this->assertCount( 4, RelatedOrders::for_contract( $contract, -1 ) );
-		$this->assertSame( [], RelatedOrders::for_contract( $contract, 0 ) );
+		$this->assertSame(
+			[
+				'orders'   => [],
+				'has_more' => false,
+			],
+			RelatedOrders::for_contract( $contract, 0 )
+		);
+		$this->assertSame( [], $this->ids( RelatedOrders::for_contract( $contract, -1 ) ) );
 	}
 
 	public function test_the_origin_closes_the_list_when_cycle_one_carries_no_order(): void {
@@ -105,9 +136,9 @@ final class RelatedOrdersTest extends LiteIntegrationTestCase {
 
 		$contract = $this->get_contract( $contract_id );
 
-		$this->assertSame( [ $renewal->get_id(), $origin->get_id() ], $this->ids( RelatedOrders::for_contract( $contract ) ) );
+		$this->assertSame( [ $renewal->get_id(), $origin->get_id() ], $this->ids( RelatedOrders::for_contract( $contract, 10 ) ) );
 		$this->assertSame( [ $renewal->get_id(), $origin->get_id() ], $this->ids( RelatedOrders::for_contract( $contract, 1, 0 ) ), 'A window ending at the chain end takes the origin.' );
-		$this->assertSame( [], RelatedOrders::for_contract( $contract, 1, 1 ), 'An empty window past the end does not repeat it.' );
+		$this->assertSame( [], $this->ids( RelatedOrders::for_contract( $contract, 1, 1 ) ), 'An empty window past the end does not repeat it.' );
 	}
 
 	public function test_a_contract_without_cycles_lists_its_origin(): void {
@@ -115,6 +146,6 @@ final class RelatedOrdersTest extends LiteIntegrationTestCase {
 		$origin      = $this->create_subscription_order( $this->create_customer() );
 		Contracts::update( $contract_id, [ 'origin_order_id' => $origin->get_id() ] );
 
-		$this->assertSame( [ $origin->get_id() ], $this->ids( RelatedOrders::for_contract( $this->get_contract( $contract_id ) ) ) );
+		$this->assertSame( [ $origin->get_id() ], $this->ids( RelatedOrders::for_contract( $this->get_contract( $contract_id ), 10 ) ) );
 	}
 }

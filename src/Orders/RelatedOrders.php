@@ -5,8 +5,8 @@
  *
  * Read off the engine's cycle chain, newest cycle first, so paging follows the chain: a
  * window of cycles yields its distinct orders (an order serving several cycles, or a
- * retried cycle's order, is listed once per window). The origin order closes the list
- * when the chain does not already carry it.
+ * retried cycle's order, is listed once per window) and whether another window follows.
+ * The origin order closes the list when the chain does not already carry it.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Orders
  */
@@ -28,37 +28,32 @@ defined( 'ABSPATH' ) || exit;
 final class RelatedOrders {
 
 	/**
-	 * Cycles read per page when every order is requested.
-	 */
-	private const ALL_PAGE_SIZE = 100;
-
-	/**
-	 * The contract's orders, newest cycle first, then the origin order.
+	 * A window of the contract's orders, newest cycle first, then the origin order.
+	 *
+	 * Pages count cycles, not orders: a window can hold fewer orders than `$limit` (a cycle
+	 * without an order, a deleted order, an order serving several cycles), so whether
+	 * another window follows is returned as a fact rather than inferred from a count.
 	 *
 	 * @param ContractView $contract The contract.
-	 * @param int          $limit    Cycles to read; -1 for all, 0 for none.
+	 * @param int          $limit    Cycles to read (positive; anything else reads none).
 	 * @param int          $offset   Cycles to skip (for paging).
-	 * @return array<int, WC_Order>
+	 * @return array{orders: array<int, WC_Order>, has_more: bool}
 	 */
-	public static function for_contract( ContractView $contract, int $limit = -1, int $offset = 0 ): array {
-		if ( 0 === $limit ) {
-			return [];
+	public static function for_contract( ContractView $contract, int $limit, int $offset = 0 ): array {
+		if ( $limit <= 0 ) {
+			return [
+				'orders'   => [],
+				'has_more' => false,
+			];
 		}
 
-		$contract_id = $contract->get_id();
 		$first_cycle = max( 0, $offset );
 
-		if ( $limit > 0 ) {
-			// One cycle past the window tells whether the window reaches the chain's end.
-			$cycles      = Contracts::get_cycles( $contract_id, $limit + 1, $first_cycle );
-			$reached_end = count( $cycles ) <= $limit;
-			$cycles      = array_slice( $cycles, 0, $limit );
-		} else {
-			$cycles      = self::get_all_cycles( $contract_id, $first_cycle );
-			$reached_end = true;
-		}
-
-		$order_ids = self::get_order_ids( $cycles );
+		// One cycle past the window tells whether the window reaches the chain's end.
+		$cycles      = Contracts::get_cycles( $contract->get_id(), $limit + 1, $first_cycle );
+		$reached_end = count( $cycles ) <= $limit;
+		$cycles      = array_slice( $cycles, 0, $limit );
+		$order_ids   = self::get_order_ids( $cycles );
 
 		// The origin closes the chain: it joins the window that reaches the chain's end,
 		// never an empty window past it (unless the chain itself is empty).
@@ -75,27 +70,10 @@ final class RelatedOrders {
 			}
 		}
 
-		return $orders;
-	}
-
-	/**
-	 * Every cycle of the contract from `$first_cycle` on, newest first, read in pages.
-	 *
-	 * @param int $contract_id Contract id.
-	 * @param int $first_cycle Cycles to skip.
-	 * @return array<int, CycleView>
-	 */
-	private static function get_all_cycles( int $contract_id, int $first_cycle ): array {
-		$cycles      = [];
-		$page_offset = $first_cycle;
-		do {
-			$page         = Contracts::get_cycles( $contract_id, self::ALL_PAGE_SIZE, $page_offset );
-			$page_count   = count( $page );
-			$cycles       = array_merge( $cycles, $page );
-			$page_offset += self::ALL_PAGE_SIZE;
-		} while ( self::ALL_PAGE_SIZE === $page_count );
-
-		return $cycles;
+		return [
+			'orders'   => $orders,
+			'has_more' => ! $reached_end,
+		];
 	}
 
 	/**
