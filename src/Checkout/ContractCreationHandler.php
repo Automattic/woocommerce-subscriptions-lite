@@ -7,9 +7,9 @@
  * payments alike - and groups the order's plan-carrying line items by selling
  * plan. A single clean group becomes one active contract, due at its first
  * renewal; Lite's own renewal orders never become contracts. Anything that cannot
- * be one contract - two different plans (Premium's multiple-contracts case) or a mix of plan and one-time lines (WOOSUBS-1775) - is
- * left uncreated with an order note, a log line, and a flag the order-received page
- * reads. The handler never throws out of the hook and never blocks checkout.
+ * be one contract - two different plans (Premium's multiple-contracts case) or a
+ * mix of plan and one-time lines (WOOSUBS-1775) - is left uncreated with an order
+ * note, a log line, and a flag the order-received page reads. The handler never throws out of the hook and never blocks checkout.
  *
  * Lite maps the order to explicit contract fields (customer, payment, addresses,
  * plan lines, recurring totals) and writes them through the engine's
