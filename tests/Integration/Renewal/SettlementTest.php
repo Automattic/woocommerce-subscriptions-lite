@@ -195,13 +195,15 @@ final class SettlementTest extends LiteIntegrationTestCase {
 		$this->assertSame( [ 'woocommerce_subscriptions_lite_renewal_failed' => 1 ], $this->fired );
 	}
 
-	public function test_an_on_hold_order_moves_the_cycle_to_processing(): void {
+	public function test_an_on_hold_order_moves_the_cycle_to_processing_and_off_the_due_scan(): void {
 		[ $contract_id, $order ] = $this->seed_renewal( 'on-hold' );
+		$this->assertNotNull( $this->get_contract( $contract_id )->get_next_payment_gmt() );
 
 		( new Settlement() )->settle( $order );
 
 		$this->assertSame( CycleStatus::PROCESSING, $this->head( $contract_id )->get_status() );
 		$this->assertSame( ContractStatus::ACTIVE, $this->get_contract( $contract_id )->get_status() );
+		$this->assertNull( $this->get_contract( $contract_id )->get_next_payment_gmt() );
 		$this->assertSame( [], $this->fired );
 	}
 

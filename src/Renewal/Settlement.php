@@ -9,8 +9,8 @@
  *   moment armed past now; a winding-down or cancelled contract only records the payment;
  * - failed: cycle failed; an active contract goes on hold with no due moment, and the
  *   customer pays the failed order to resume;
- * - on-hold (an asynchronous charge awaits confirmation): cycle processing, so it is not
- *   charged again.
+ * - on-hold (an asynchronous charge awaits confirmation): cycle processing and no due
+ *   moment, so it is not charged again.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Renewal
  */
@@ -103,7 +103,7 @@ final class Settlement {
 		} elseif ( $fresh_order->has_status( OrderStatus::FAILED ) ) {
 			$this->settle_failed( $fresh_order, $match['contract'], $match['cycle'], $utc_now );
 		} elseif ( $fresh_order->has_status( OrderStatus::ON_HOLD ) ) {
-			$this->settle_in_progress( $match['cycle'] );
+			$this->settle_in_progress( $match['contract'], $match['cycle'] );
 		}
 	}
 
@@ -208,14 +208,17 @@ final class Settlement {
 	}
 
 	/**
-	 * An order awaiting an asynchronous charge moves its cycle to processing (no lease), so
-	 * the next notification does not charge it again.
+	 * An order awaiting an asynchronous charge moves its cycle to processing (no lease) and
+	 * clears the contract's due moment, so the due scan leaves it alone until the charge
+	 * reports: paid re-arms the next period, failed holds the contract.
 	 *
-	 * @param CycleView $cycle The cycle the order bills.
+	 * @param ContractView $contract The contract.
+	 * @param CycleView    $cycle    The cycle the order bills.
 	 */
-	private function settle_in_progress( CycleView $cycle ): void {
-		if ( CycleStatus::PENDING === $cycle->get_status() ) {
-			Contracts::transition_cycle( $cycle->get_id(), CycleStatus::PENDING, CycleStatus::PROCESSING );
+	private function settle_in_progress( ContractView $contract, CycleView $cycle ): void {
+		if ( CycleStatus::PENDING === $cycle->get_status()
+			&& Contracts::transition_cycle( $cycle->get_id(), CycleStatus::PENDING, CycleStatus::PROCESSING ) ) {
+			Contracts::update( $contract->get_id(), [ 'next_payment_gmt' => null ] );
 		}
 	}
 

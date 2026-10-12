@@ -300,6 +300,25 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 		$this->assertSame( CycleStatus::FAILED, $this->head( $contract_id )->get_status() );
 	}
 
+	public function test_a_renewal_order_that_cannot_be_built_takes_the_contract_off_the_due_scan(): void {
+		$this->support_engine_charges( 'cod' );
+		$contract_id = $this->make_contract();
+		$this->capture_log();
+		// WooCommerce does not know the contract's currency, so setting it on the order throws.
+		Contracts::update( $contract_id, [ 'currency' => 'ZZZ' ] );
+
+		$this->assertNull( $this->renew( $contract_id ) );
+
+		$this->assertSame( [], $this->renewal_order_ids(), 'The draft is deleted.' );
+		$this->assertSame( 0, $this->charge_count() );
+		$this->assertNull( $this->get_contract( $contract_id )->get_next_payment_gmt() );
+		$this->assertTrue( $this->has_logged( 'could not be built' ) );
+		$head = $this->head( $contract_id );
+		$this->assertSame( CycleStatus::PENDING, $head->get_status() );
+		$this->assertNull( $head->get_order_id() );
+		$this->assertTrue( Contracts::claim_cycle( $head->get_id(), CycleStatus::PENDING, 900 ), 'The cycle is released for a retry by hand.' );
+	}
+
 	public function test_a_contract_without_a_plan_is_parked(): void {
 		$this->support_engine_charges( 'cod' );
 		$contract_id = $this->make_contract();

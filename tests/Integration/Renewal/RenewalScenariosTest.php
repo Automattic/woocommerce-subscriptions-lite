@@ -135,7 +135,7 @@ final class RenewalScenariosTest extends LiteIntegrationTestCase {
 		$this->assertSame( 0, $this->run_due_dispatch( $now->modify( '+1 second' ) ) );
 	}
 
-	public function test_overlapping_ticks_notify_once_and_an_untouched_due_moment_waits_for_the_claim_to_expire(): void {
+	public function test_overlapping_ticks_notify_once_and_an_async_charge_leaves_the_due_scan(): void {
 		$this->support_engine_charges( 'cod', 'on-hold' );
 		$contract_id = $this->make_contract_paid( '-1 month -2 days' );
 		$now         = $this->now();
@@ -144,13 +144,15 @@ final class RenewalScenariosTest extends LiteIntegrationTestCase {
 		$this->assertSame( 0, $this->run_due_dispatch( $now ), 'An overlapping tick loses the claim.' );
 		$this->assertCount( 1, $this->renewal_orders() );
 		$this->assertSame( CycleStatus::PROCESSING, $this->head( $contract_id )->get_status() );
-		$this->assertLessThan( $now, $this->next_payment( $contract_id ), 'The async charge leaves the due moment in place.' );
+		$this->assertNull( $this->get_contract( $contract_id )->get_next_payment_gmt(), 'The async charge takes the contract off the due scan.' );
 
-		$this->assertSame( 0, $this->run_due_dispatch( $now->modify( '+899 seconds' ) ), 'Not re-notified within the claim.' );
-		$this->assertSame( 1, $this->run_due_dispatch( $now->modify( '+901 seconds' ) ), 'Re-notified once the claim expires.' );
+		$this->assertSame( 0, $this->run_due_dispatch( $now->modify( '+901 seconds' ) ), 'Not notified again once the claim expires.' );
+		$this->assertSame( 1, $this->charge_count() );
 
-		$this->assertSame( 1, $this->charge_count(), 'The processing cycle is not charged again.' );
-		$this->assertCount( 1, $this->renewal_orders() );
+		$this->renewal_orders()[0]->payment_complete();
+
+		$this->assertSame( CycleStatus::BILLED, $this->head( $contract_id )->get_status() );
+		$this->assertSame( $this->head( $contract_id )->get_ends_at_gmt(), $this->get_contract( $contract_id )->get_next_payment_gmt(), 'The confirmed payment arms the next period.' );
 	}
 
 	public function test_a_failed_charge_holds_the_contract_until_the_customer_pays_the_order(): void {

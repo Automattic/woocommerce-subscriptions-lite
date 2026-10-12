@@ -178,7 +178,12 @@ final class RenewalProcessor {
 
 		$order = ( new RenewalOrderBuilder() )->build( $contract, $cycle );
 		if ( null === $order ) {
-			return null; // The cycle stays leased; a later run resumes it once the lease expires.
+			// A build that failed once (a deleted product) fails again: take the contract off the
+			// due scan and release the cycle, so Renew now can retry once the cause is fixed.
+			$this->log( 'error', sprintf( 'contract %d: the renewal order could not be built; its due moment is cleared until it is renewed by hand.', $contract->get_id() ), $contract->get_id() );
+			Contracts::transition_cycle( $cycle->get_id(), CycleStatus::PENDING, CycleStatus::PENDING );
+			Contracts::update( $contract->get_id(), [ 'next_payment_gmt' => null ] );
+			return null;
 		}
 
 		$linked = Contracts::transition_cycle(
