@@ -157,7 +157,7 @@ final class RenewalScenariosTest extends LiteIntegrationTestCase {
 		$this->assertSame( CycleStatus::PROCESSING, $this->head( $contract_id )->get_status() );
 		$this->assertNull( $this->get_contract( $contract_id )->get_next_payment_gmt(), 'The async charge takes the contract off the due scan.' );
 
-		$this->assertSame( 0, $this->run_due_dispatch( $now->modify( '+901 seconds' ) ), 'Not notified again once the claim expires.' );
+		$this->assertSame( 0, $this->run_due_dispatch_after_claims_expire( $now ), 'Not notified again once the claim expires.' );
 		$this->assertSame( 1, $this->charge_count() );
 
 		$this->renewal_orders()[0]->payment_complete();
@@ -218,7 +218,7 @@ final class RenewalScenariosTest extends LiteIntegrationTestCase {
 		$this->assertSame( CycleStatus::BILLED, $this->head( $contract_id )->get_status() );
 		$this->assertEquals( $due_before, $this->next_payment( $contract_id ), 'The contract write was lost.' );
 
-		$this->assertSame( 1, $this->run_due_dispatch( $now->modify( '+901 seconds' ) ) );
+		$this->assertSame( 1, $this->run_due_dispatch_after_claims_expire( $now ) );
 
 		$this->assertSame( 1, $this->charge_count() );
 		$this->assertCount( 1, $this->renewal_orders() );
@@ -238,7 +238,7 @@ final class RenewalScenariosTest extends LiteIntegrationTestCase {
 		$this->assertSame( CycleStatus::FAILED, $this->head( $contract_id )->get_status() );
 		$this->assertSame( ContractStatus::ACTIVE, $this->get_contract( $contract_id )->get_status(), 'The contract write was lost.' );
 
-		$this->assertSame( 1, $this->run_due_dispatch( $now->modify( '+901 seconds' ) ) );
+		$this->assertSame( 1, $this->run_due_dispatch_after_claims_expire( $now ) );
 
 		$this->assertSame( 1, $this->charge_count() );
 		$contract = $this->get_contract( $contract_id );

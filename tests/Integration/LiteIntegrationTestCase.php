@@ -541,4 +541,25 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 	protected function run_due_dispatch( DateTimeImmutable $now ): int {
 		return ( new DueDispatcher() )->run_batch( $now );
 	}
+
+	/**
+	 * Run one engine due-dispatch batch once the dispatch claims taken at `$now` have expired.
+	 * Claims are measured on the database clock, so the session clock is moved past the claim
+	 * along with the scan moment, then restored.
+	 *
+	 * @param DateTimeImmutable $now The moment the earlier batch ran.
+	 * @return int The number of contracts whose owner was notified.
+	 */
+	protected function run_due_dispatch_after_claims_expire( DateTimeImmutable $now ): int {
+		global $wpdb;
+
+		$later = $now->modify( sprintf( '+%d seconds', DueDispatcher::CLAIM_TTL_SECONDS + 1 ) );
+		$wpdb->query( $wpdb->prepare( 'SET timestamp = %d', $later->getTimestamp() ) ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+
+		try {
+			return $this->run_due_dispatch( $later );
+		} finally {
+			$wpdb->query( 'SET timestamp = DEFAULT' ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+		}
+	}
 }
