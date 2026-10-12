@@ -73,6 +73,43 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 	];
 
 	/**
+	 * Messages the WooCommerce logger received since {@see self::capture_log()}.
+	 *
+	 * @var array<int, string>
+	 */
+	protected $logged_messages = [];
+
+	/**
+	 * Record every message the WooCommerce logger receives from now on into
+	 * {@see self::$logged_messages}.
+	 */
+	protected function capture_log(): void {
+		$this->logged_messages = [];
+		add_filter(
+			'woocommerce_logger_log_message',
+			function ( $message ) {
+				$this->logged_messages[] = (string) $message;
+				return $message;
+			}
+		);
+	}
+
+	/**
+	 * Whether a captured log message contains `$needle`.
+	 *
+	 * @param string $needle Text to look for.
+	 */
+	protected function has_logged( string $needle ): bool {
+		foreach ( $this->logged_messages as $message ) {
+			if ( false !== strpos( $message, $needle ) ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	/**
 	 * Create a customer user.
 	 *
 	 * @param array<string, mixed> $overrides WP user field overrides.
