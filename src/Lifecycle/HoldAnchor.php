@@ -5,7 +5,7 @@
  * {@see Hold} stores it before disarming the contract; {@see Reactivation} resumes from
  * it and {@see Cancellation} ends a held contract at it. Its presence marks a customer hold:
  * a renewal paid during the hold moves it to the next due moment and keeps the contract on
- * hold. Lite-owned data.
+ * hold. Lite's own holds for an unpaid renewal ({@see SystemHold}) drop it. Lite-owned data.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Lifecycle
  */
@@ -84,8 +84,9 @@ final class HoldAnchor {
 	}
 
 	/**
-	 * Remove the anchor after a status write. Best effort: a failure is logged, not thrown,
-	 * since a leftover anchor is harmless (only an on-hold contract reads it).
+	 * Remove the anchor. Best effort: a failure is logged, not thrown. A leftover anchor is
+	 * not harmless: on a held contract it reads as a customer hold, so a renewal paid later
+	 * keeps the contract on hold instead of resuming it; the log is how that is traced.
 	 *
 	 * @param int $contract_id Contract id.
 	 */

@@ -9,8 +9,8 @@
  *   becomes active with its next due moment armed past now; a customer hold (a hold anchor
  *   is present) stays on hold and its anchor moves to the next due moment; a winding-down
  *   or cancelled contract only records the payment;
- * - failed: cycle failed; an active contract goes on hold with no due moment, and the
- *   customer pays the failed order to resume;
+ * - failed: cycle failed; the contract goes on the system hold ({@see SystemHold}: no due
+ *   moment, no customer hold anchor), and the customer pays the failed order to resume;
  * - on-hold (an asynchronous charge awaits confirmation): cycle processing and no due
  *   moment, so it is not charged again;
  * - cancelled or trashed while unpaid: cycle failed (`order-cancelled`); an active contract
@@ -31,6 +31,7 @@ use Automattic\WooCommerce\SubscriptionsEngine\Api\View\CycleView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\CycleStatus;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\HoldAnchor;
+use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\SystemHold;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ContractPlans;
 use DateTimeImmutable;
@@ -217,16 +218,9 @@ final class Settlement {
 		}
 
 		$contract_id = $contract->get_id();
-		if ( ContractStatus::ACTIVE === $contract->get_status() ) {
-			Contracts::update(
-				$contract_id,
-				[
-					'status'           => ContractStatus::ON_HOLD,
-					'next_payment_gmt' => null,
-					'last_attempt_gmt' => $now,
-				]
-			);
-			HoldAnchor::clear( $contract_id ); // A leftover anchor would read as a customer hold.
+		if ( in_array( $contract->get_status(), [ ContractStatus::ACTIVE, ContractStatus::ON_HOLD ], true ) ) {
+			// Also over a customer hold: its anchor would sit on the end of an unpaid period.
+			SystemHold::place( $contract_id, [ 'last_attempt_gmt' => $now ] );
 		}
 
 		$settled = $this->read_settled( $contract_id, $cycle->get_id(), $order->get_id() );
@@ -272,15 +266,8 @@ final class Settlement {
 			return;
 		}
 
-		if ( ContractStatus::ACTIVE === $contract->get_status() ) {
-			Contracts::update(
-				$contract->get_id(),
-				[
-					'status'           => ContractStatus::ON_HOLD,
-					'next_payment_gmt' => null,
-				]
-			);
-			HoldAnchor::clear( $contract->get_id() );
+		if ( in_array( $contract->get_status(), [ ContractStatus::ACTIVE, ContractStatus::ON_HOLD ], true ) ) {
+			SystemHold::place( $contract->get_id() );
 		}
 	}
 

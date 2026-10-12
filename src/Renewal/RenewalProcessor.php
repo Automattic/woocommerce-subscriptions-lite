@@ -25,7 +25,7 @@ use Automattic\WooCommerce\SubscriptionsEngine\Api\View\CycleView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\CycleStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\ValueObject\BillingPolicy;
-use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\HoldAnchor;
+use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\SystemHold;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ContractPlans;
 use DateTimeImmutable;
@@ -205,14 +205,7 @@ final class RenewalProcessor {
 	 */
 	private function reapply_hold( ContractView $contract ): void {
 		$this->log( 'warning', sprintf( 'contract %d is due while its newest renewal failed; it is put on hold until the renewal is paid.', $contract->get_id() ), $contract->get_id() );
-		Contracts::update(
-			$contract->get_id(),
-			[
-				'status'           => ContractStatus::ON_HOLD,
-				'next_payment_gmt' => null,
-			]
-		);
-		HoldAnchor::clear( $contract->get_id() ); // A leftover anchor would read as a customer hold.
+		SystemHold::place( $contract->get_id() );
 	}
 
 	/**
@@ -307,14 +300,7 @@ final class RenewalProcessor {
 
 		$order->add_order_note( __( 'Renewal order created for manual payment: the payment method cannot be charged automatically. The subscription is on hold until the customer pays this order.', 'woocommerce-subscriptions-lite' ) );
 		Contracts::transition_cycle( $cycle->get_id(), CycleStatus::PENDING, CycleStatus::PENDING, [ 'order_id' => $order->get_id() ] );
-		Contracts::update(
-			$contract->get_id(),
-			[
-				'status'           => ContractStatus::ON_HOLD,
-				'next_payment_gmt' => null,
-			]
-		);
-		HoldAnchor::clear( $contract->get_id() ); // A leftover anchor would read as a customer hold.
+		SystemHold::place( $contract->get_id() );
 	}
 
 	/**

@@ -199,6 +199,25 @@ final class SettlementTest extends LiteIntegrationTestCase {
 		$this->assertSame( [ 'woocommerce_subscriptions_lite_renewal_paid' => 1 ], $this->fired );
 	}
 
+	public function test_an_async_charge_that_fails_during_a_customer_hold_drops_the_anchor(): void {
+		[ $contract_id, $order ] = $this->seed_renewal( 'on-hold', CycleStatus::PROCESSING );
+		Contracts::update(
+			$contract_id,
+			[
+				'status'           => ContractStatus::ON_HOLD,
+				'next_payment_gmt' => null,
+			]
+		);
+		HoldAnchor::store( $contract_id, '2026-03-15 00:00:00' );
+		$order->update_status( 'failed' );
+
+		( new Settlement() )->settle( $order, $this->utc( '2026-02-16 12:00:00' ) );
+
+		$this->assertSame( CycleStatus::FAILED, $this->head( $contract_id )->get_status() );
+		$this->assertSame( ContractStatus::ON_HOLD, $this->get_contract( $contract_id )->get_status() );
+		$this->assertNull( HoldAnchor::read( $contract_id ), 'The anchor would sit on the end of an unpaid period.' );
+	}
+
 	public function test_a_failed_order_on_an_active_contract_drops_a_leftover_hold_anchor(): void {
 		[ $contract_id, $order ] = $this->seed_renewal();
 		HoldAnchor::store( $contract_id, '2026-01-15 00:00:00' );
