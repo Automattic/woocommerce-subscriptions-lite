@@ -2,10 +2,10 @@
 /**
  * StatusLabels - merchant-facing labels and badge markup for engine statuses.
  *
- * A small, WordPress-free helper shared by the admin list table and the detail
- * renderer so contract and cycle statuses read the same wherever they appear.
- * Pure functions of their inputs (no globals, no time, no WordPress calls beyond
- * the i18n pass-throughs), which keeps the label/badge vocabulary unit-testable.
+ * A small helper shared by the admin list table and the detail renderer so contract
+ * and cycle statuses read the same wherever they appear. The labels and badges are
+ * pure functions of their inputs (no globals, no time, no WordPress calls beyond the
+ * i18n pass-throughs); {@see self::is_renewable()} also reads the contract's newest cycle.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Admin
  */
@@ -14,8 +14,11 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Admin;
 
+use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\CycleStatus;
+use Automattic\WooCommerce\SubscriptionsLite\Package;
+use Automattic\WooCommerce\SubscriptionsLite\Renewal\UnpaidRenewal;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -72,15 +75,20 @@ final class StatusLabels {
 	}
 
 	/**
-	 * Whether a contract in `$status` may have a renewal run now.
+	 * Whether Renew now is offered for a contract: a Lite contract that is active (bills
+	 * its next period now), or on hold with an unpaid renewal (retries that renewal).
 	 *
-	 * Renewing a draft or terminal contract is a no-op the facade would skip, so the
-	 * action is offered only for the other statuses.
-	 *
-	 * @param string $status Contract status slug.
+	 * @param ContractView $contract The contract.
 	 */
-	public static function is_renewable( string $status ): bool {
-		return ! in_array( $status, [ ContractStatus::DRAFT, ContractStatus::CANCELLED, ContractStatus::EXPIRED ], true );
+	public static function is_renewable( ContractView $contract ): bool {
+		if ( Package::EXTENSION_SLUG !== $contract->get_extension_slug() ) {
+			return false;
+		}
+
+		$status = $contract->get_status();
+
+		return ContractStatus::ACTIVE === $status
+			|| ( ContractStatus::ON_HOLD === $status && null !== UnpaidRenewal::find( $contract ) );
 	}
 
 	/**

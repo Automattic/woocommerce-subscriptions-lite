@@ -421,7 +421,7 @@ final class SubscriptionsListTable extends WP_List_Table {
 		$status  = $item->get_status();
 		$actions = [];
 
-		if ( StatusLabels::is_renewable( $status ) ) {
+		if ( StatusLabels::is_renewable( $item ) ) {
 			$actions['renew'] = PageController::action_form(
 				PageController::ACTION_RENEW_NOW,
 				$id,

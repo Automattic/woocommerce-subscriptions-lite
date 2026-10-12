@@ -5,16 +5,15 @@
  *
  * Each action POSTs to `admin-post.php`; the request entry point authenticates
  * the request (capability and a POST nonce verified with `check_admin_referer()`),
- * runs the renewal through the engine's
- * {@see \Automattic\WooCommerce\SubscriptionsEngine\Api\Subscriptions} facade or the
- * cancel through Lite's {@see Cancellation}, queues a flash notice, and redirects back to the page the action was triggered
- * from (the detail page or the list), not a fixed destination.
+ * runs Lite's renewal ({@see RenewalProcessor::renew_now()}) or cancel
+ * ({@see Cancellation}), queues a flash notice, and redirects back to the page the
+ * action was triggered from (the detail page or the list), not a fixed destination.
  *
  * The decision logic ({@see self::handle_renew_now()}, {@see self::handle_cancel()})
  * is separated from the request plumbing ({@see self::renew_now_request()},
  * {@see self::cancel_request()}) so its branches are unit-testable without a
- * booted WordPress: the `handle_*` methods take a plain params array plus injected
- * seams and return a {@see RowActionResult}; the `*_request` methods read `$_POST`,
+ * booted WordPress: the `handle_*` methods take a plain params array and return a
+ * {@see RowActionResult}; the `*_request` methods read `$_POST`,
  * verify the nonce, run the decision, flash, and redirect. The nonce is enforced
  * at the request boundary (a hard `check_admin_referer()` gate) rather than in the
  * decision method, so it never rides in a URL.
@@ -27,27 +26,19 @@ declare( strict_types=1 );
 namespace Automattic\WooCommerce\SubscriptionsLite\Admin;
 
 use Throwable;
-use WC_Order;
-use Automattic\WooCommerce\SubscriptionsEngine\Api\Subscriptions;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Cancellation;
+use Automattic\WooCommerce\SubscriptionsLite\Renewal\RenewalProcessor;
 
 defined( 'ABSPATH' ) || exit;
 
 /**
  * Admin-post handlers for the state-mutating subscription actions.
  *
- * Construct via the no-arg constructor in production (the renewal facade, Lite's
- * cancel, the capability helper, and the WooCommerce logger); tests inject fake renew /
- * cancel / capability / logger seams to drive every decision branch.
+ * Construct via the no-arg constructor in production (Lite's cancel, the capability
+ * helper, and the WooCommerce logger); tests inject fake cancel / capability / logger
+ * seams to drive the decision branches. Renew now always runs Lite's renewal.
  */
 final class RowActionController {
-
-	/**
-	 * Renewal runner. Production: `Subscriptions::renew_now()`.
-	 *
-	 * @var callable(int): ?WC_Order
-	 */
-	private $renew;
 
 	/**
 	 * Canceller; false when the contract does not exist. Production: `Cancellation::cancel()`.
@@ -74,20 +65,15 @@ final class RowActionController {
 	/**
 	 * Construct the controller.
 	 *
-	 * @param (callable(int): ?WC_Order)|null                     $renew     Renewal runner; defaults to `Subscriptions::renew_now()`.
 	 * @param (callable(int): bool)|null                          $cancel    Canceller; defaults to `Cancellation::cancel()`.
 	 * @param (callable(): bool)|null                             $can       Capability check; defaults to `current_user_can()`.
 	 * @param (callable(string, array<string, mixed>): void)|null $log_error Error logger; defaults to `wc_get_logger()->error()`.
 	 */
 	public function __construct(
-		?callable $renew = null,
 		?callable $cancel = null,
 		?callable $can = null,
 		?callable $log_error = null
 	) {
-		$this->renew     = $renew ?? static function ( int $id ): ?WC_Order {
-			return Subscriptions::renew_now( $id );
-		};
 		$this->cancel    = $cancel ?? static function ( int $id ): bool {
 			return null !== ( new Cancellation() )->cancel( $id );
 		};
@@ -155,11 +141,11 @@ final class RowActionController {
 	/**
 	 * Decide and perform a "Renew now".
 	 *
-	 * Guard order: capability, then a valid contract id, then the facade renewal.
-	 * A null facade return means the renewal was not processable - the contract is
-	 * awaiting a payment confirmation, inactive, or has no billing chain - surfaced
-	 * as an info outcome, not an error. An engine throwable is logged in full and
-	 * surfaced as a generic error outcome rather than a fatal or a leaked internal message.
+	 * Guard order: capability, then a valid contract id, then Lite's renewal. A null
+	 * return means the renewal was not processable - the contract is awaiting a payment
+	 * confirmation, inactive, or has no billing chain - surfaced as an info outcome, not
+	 * an error. A throwable is logged in full and surfaced as a generic error outcome
+	 * rather than a fatal or a leaked internal message.
 	 *
 	 * @param array<string, mixed> $params Request params: `contract_id`.
 	 * @return RowActionResult The outcome.
@@ -173,7 +159,7 @@ final class RowActionController {
 		}
 
 		try {
-			$order = ( $this->renew )( $contract_id );
+			$order = ( new RenewalProcessor() )->renew_now( $contract_id );
 		} catch ( Throwable $e ) {
 			$this->log_failure( 'renew', $contract_id, $e );
 			return RowActionResult::failed(

@@ -37,11 +37,30 @@ final class StatusLabelsTest extends LiteIntegrationTestCase {
 		$this->assertSame( 'Failed', StatusLabels::cycle_label( CycleStatus::FAILED ) );
 	}
 
-	public function test_is_renewable_excludes_terminal_statuses_and_drafts(): void {
-		$this->assertTrue( StatusLabels::is_renewable( ContractStatus::ACTIVE ) );
-		$this->assertFalse( StatusLabels::is_renewable( ContractStatus::DRAFT ), 'The engine never renews a draft.' );
-		$this->assertFalse( StatusLabels::is_renewable( ContractStatus::CANCELLED ) );
-		$this->assertFalse( StatusLabels::is_renewable( ContractStatus::EXPIRED ) );
+	public function test_is_renewable_offers_active_lite_contracts(): void {
+		$this->assertTrue( StatusLabels::is_renewable( $this->get_contract( $this->seed_contract() ) ) );
+		$this->assertFalse( StatusLabels::is_renewable( $this->get_contract( $this->seed_contract( [ 'extension_slug' => 'another-extension' ] ) ) ), 'Lite renews only its own contracts.' );
+	}
+
+	public function test_is_renewable_excludes_drafts_terminal_statuses_and_a_plain_hold(): void {
+		foreach ( [ ContractStatus::DRAFT, ContractStatus::CANCELLED, ContractStatus::EXPIRED, ContractStatus::PENDING_CANCELLATION, ContractStatus::ON_HOLD ] as $status ) {
+			$this->assertFalse( StatusLabels::is_renewable( $this->get_contract( $this->seed_contract( [ 'status' => $status ] ) ) ), $status );
+		}
+	}
+
+	public function test_is_renewable_offers_a_hold_with_an_unpaid_renewal(): void {
+		$customer_id = $this->create_customer();
+		$contract_id = $this->create_contract( $customer_id, [ 'status' => 'on-hold' ] );
+		$this->create_renewal_order(
+			$contract_id,
+			$customer_id,
+			[
+				'status'       => 'failed',
+				'cycle_status' => CycleStatus::FAILED,
+			]
+		);
+
+		$this->assertTrue( StatusLabels::is_renewable( $this->get_contract( $contract_id ) ) );
 	}
 
 	public function test_contract_badge_html_carries_the_status_modifier_and_label(): void {

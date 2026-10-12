@@ -44,7 +44,7 @@ final class Actions {
 			),
 		];
 
-		if ( StatusLabels::is_renewable( $status ) ) {
+		if ( StatusLabels::is_renewable( $contract ) ) {
 			$items[] = PageController::action_form(
 				PageController::ACTION_RENEW_NOW,
 				$id,
