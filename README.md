@@ -9,6 +9,16 @@ Free subscriptions for WooCommerce: a base package plus a thin wrapper plugin, b
 - **The lite package** (`automattic/woocommerce-subscriptions-lite`) - the free subscriptions feature set, consumable as a composer dependency. Lives at the repository root (`composer.json` + `src/`).
 - **The WordPress.org plugin** - the same repository root is also the plugin: `woocommerce-subscriptions-lite.php` carries the plugin header and bootstraps the package (the standard "package is also a plugin" layout).
 
+## How renewals work
+
+Lite renews its own subscriptions; the engine only tells it when one is due.
+
+- **Due handler** (`src/Renewal/DueHandler.php`): registered with the engine's consumer registry. The engine's recurring due scan claims each due contract and calls it; only active subscriptions renew.
+- **Processor** (`src/Renewal/RenewalProcessor.php`): appends the next billing cycle with the engine's cycle tools (claimed, so concurrent runs renew once), builds the renewal order (`RenewalOrderBuilder`: contract lines, addresses, the origin order's gateway data and tokens, BOGO bonus units) and asks the engine to charge it. A subscription several periods behind bills the one period containing now.
+- **Settlement** (`src/Renewal/Settlement.php`): reads the renewal order's status. Paid: the cycle is billed and the next period armed. Failed: the subscription goes on hold and the customer pays the failed order from My Account to resume it.
+- **Manual renewals**: a gateway that does not declare the engine's `subscriptions_engine` feature is never charged automatically; Lite leaves a pending renewal order for the customer to pay and holds the subscription until then.
+- **Checkout** (`src/Checkout/ReusablePaymentMethod.php`): tells gateways, through the engine's reusable-payment-method query, when a checkout must leave a payment method that can be charged later, and keeps a free first order payable so the method is saved.
+
 ## Development
 
 The engine dependency resolves through a composer path repository expecting the
