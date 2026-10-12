@@ -16,6 +16,7 @@ use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\CycleStatus;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\RowActionController;
 use Automattic\WooCommerce\SubscriptionsLite\CustomerPortal\EngineDataProvider;
+use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\HoldAnchor;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\LifecycleNotAllowedException;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Reactivation;
 use Automattic\WooCommerce\SubscriptionsLite\Renewal\Settlement;
@@ -66,7 +67,8 @@ final class DeadRenewalOrderTest extends LiteIntegrationTestCase {
 			]
 		);
 		if ( ContractStatus::ON_HOLD === $status ) {
-			Contracts::update( $contract_id, [ 'next_payment_gmt' => null ] );
+			// Held for the renewal payment, not by the customer: no hold anchor.
+			HoldAnchor::clear( $contract_id );
 		}
 
 		return [ $contract_id, $customer_id, $order ];

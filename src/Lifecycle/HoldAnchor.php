@@ -3,7 +3,9 @@
  * HoldAnchor - the next-due moment a hold clears, kept in contract meta.
  *
  * {@see Hold} stores it before disarming the contract; {@see Reactivation} resumes from
- * it and {@see Cancellation} ends a held contract at it. Lite-owned data.
+ * it and {@see Cancellation} ends a held contract at it. Its presence marks a customer hold:
+ * a renewal paid during the hold moves it to the next due moment and keeps the contract on
+ * hold. Lite-owned data.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Lifecycle
  */

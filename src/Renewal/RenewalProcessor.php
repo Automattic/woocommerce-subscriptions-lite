@@ -25,6 +25,7 @@ use Automattic\WooCommerce\SubscriptionsEngine\Api\View\CycleView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\CycleStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\ValueObject\BillingPolicy;
+use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\HoldAnchor;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ContractPlans;
 use DateTimeImmutable;
@@ -201,6 +202,7 @@ final class RenewalProcessor {
 				'next_payment_gmt' => null,
 			]
 		);
+		HoldAnchor::clear( $contract->get_id() ); // A leftover anchor would read as a customer hold.
 	}
 
 	/**
@@ -302,6 +304,7 @@ final class RenewalProcessor {
 				'next_payment_gmt' => null,
 			]
 		);
+		HoldAnchor::clear( $contract->get_id() ); // A leftover anchor would read as a customer hold.
 	}
 
 	/**

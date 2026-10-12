@@ -19,6 +19,7 @@ use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\SchemaInstall
 use Automattic\WooCommerce\SubscriptionsLite\Checkout\ContractCreationHandler;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\CustomerActionRules;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Hold;
+use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\HoldAnchor;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\LifecycleNotAllowedException;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Reactivation;
 use Automattic\WooCommerce\SubscriptionsLite\Renewal\RenewalOrderBuilder;
@@ -234,6 +235,27 @@ final class RenewalScenariosTest extends LiteIntegrationTestCase {
 		$contract = $this->get_contract( $contract_id );
 		$this->assertSame( ContractStatus::ON_HOLD, $contract->get_status() );
 		$this->assertNull( $contract->get_next_payment_gmt() );
+	}
+
+	public function test_a_customer_hold_survives_a_late_async_payment(): void {
+		$this->support_engine_charges( 'cod', 'on-hold' );
+		$contract_id = $this->make_contract_paid( '-1 month -2 days' );
+		$this->assertSame( 1, $this->run_due_dispatch( $this->now() ) );
+		$cycle_end = $this->head( $contract_id )->get_ends_at_gmt();
+
+		( new Hold() )->hold( $contract_id );
+		$this->renewal_orders()[0]->payment_complete();
+
+		$contract = $this->get_contract( $contract_id );
+		$this->assertSame( CycleStatus::BILLED, $this->head( $contract_id )->get_status() );
+		$this->assertSame( ContractStatus::ON_HOLD, $contract->get_status(), 'The late payment does not undo the customer hold.' );
+		$this->assertNull( $contract->get_next_payment_gmt() );
+		$this->assertSame( $cycle_end, HoldAnchor::read( $contract_id ) );
+
+		( new Reactivation() )->reactivate( $contract_id );
+
+		$this->assertSame( ContractStatus::ACTIVE, $this->get_contract( $contract_id )->get_status() );
+		$this->assertSame( $cycle_end, $this->get_contract( $contract_id )->get_next_payment_gmt(), 'Billing resumes after the paid period.' );
 	}
 
 	public function test_a_gateway_without_engine_charges_gets_a_manual_renewal_order(): void {

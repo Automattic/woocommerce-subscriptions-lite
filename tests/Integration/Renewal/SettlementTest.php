@@ -165,7 +165,6 @@ final class SettlementTest extends LiteIntegrationTestCase {
 				'next_payment_gmt' => null,
 			]
 		);
-		HoldAnchor::store( $contract_id, '2026-03-15 00:00:00' );
 		$this->pay( $order );
 
 		( new Settlement() )->settle( $order, $this->utc( '2026-05-01 00:00:00' ) );
@@ -175,7 +174,40 @@ final class SettlementTest extends LiteIntegrationTestCase {
 		$this->assertNull( $this->head( $contract_id )->get_reason() );
 		$this->assertSame( ContractStatus::ACTIVE, $contract->get_status() );
 		$this->assertSame( '2026-05-15 00:00:00', $contract->get_next_payment_gmt() );
-		$this->assertNull( HoldAnchor::read( $contract_id ) );
+	}
+
+	public function test_a_payment_during_a_customer_hold_bills_the_cycle_and_keeps_the_hold(): void {
+		[ $contract_id, $order ] = $this->seed_renewal( 'on-hold', CycleStatus::PROCESSING );
+		Contracts::update(
+			$contract_id,
+			[
+				'status'           => ContractStatus::ON_HOLD,
+				'next_payment_gmt' => null,
+			]
+		);
+		HoldAnchor::store( $contract_id, '2026-03-15 00:00:00' );
+		$this->pay( $order );
+
+		( new Settlement() )->settle( $order, $this->utc( '2026-04-01 00:00:00' ) );
+
+		$contract = $this->get_contract( $contract_id );
+		$this->assertSame( CycleStatus::BILLED, $this->head( $contract_id )->get_status() );
+		$this->assertSame( ContractStatus::ON_HOLD, $contract->get_status() );
+		$this->assertNull( $contract->get_next_payment_gmt() );
+		$this->assertSame( '2026-02-16 10:00:00', $contract->get_last_payment_gmt() );
+		$this->assertSame( '2026-04-15 00:00:00', HoldAnchor::read( $contract_id ), 'The anchor moves to the next due moment, rolled past now.' );
+		$this->assertSame( [ 'woocommerce_subscriptions_lite_renewal_paid' => 1 ], $this->fired );
+	}
+
+	public function test_a_failed_order_on_an_active_contract_drops_a_leftover_hold_anchor(): void {
+		[ $contract_id, $order ] = $this->seed_renewal();
+		HoldAnchor::store( $contract_id, '2026-01-15 00:00:00' );
+		$order->update_status( 'failed' );
+
+		( new Settlement() )->settle( $order, $this->utc( '2026-02-16 12:00:00' ) );
+
+		$this->assertSame( ContractStatus::ON_HOLD, $this->get_contract( $contract_id )->get_status() );
+		$this->assertNull( HoldAnchor::read( $contract_id ), 'The hold is for the failed payment, not a customer hold.' );
 	}
 
 	public function test_a_failed_order_fails_the_cycle_and_holds_the_contract_once(): void {

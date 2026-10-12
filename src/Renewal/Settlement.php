@@ -5,8 +5,10 @@
  * Listens to the order status of Lite's own renewal orders (`created_via`
  * {@see RenewalOrderBuilder::CREATED_VIA}) and moves the billed cycle with the engine's
  * compare-and-set tool, so a repeated or concurrent signal settles once:
- * - paid: cycle billed; an active or held contract becomes active with its next due
- *   moment armed past now; a winding-down or cancelled contract only records the payment;
+ * - paid: cycle billed; an active contract, or one held for a failed or manual renewal,
+ *   becomes active with its next due moment armed past now; a customer hold (a hold anchor
+ *   is present) stays on hold and its anchor moves to the next due moment; a winding-down
+ *   or cancelled contract only records the payment;
  * - failed: cycle failed; an active contract goes on hold with no due moment, and the
  *   customer pays the failed order to resume;
  * - on-hold (an asynchronous charge awaits confirmation): cycle processing and no due
@@ -160,22 +162,32 @@ final class Settlement {
 		$last_payment = null === $date_paid ? $now : new DateTimeImmutable( '@' . $date_paid->getTimestamp() );
 		$contract_id  = $contract->get_id();
 
-		if ( in_array( $contract->get_status(), [ ContractStatus::ACTIVE, ContractStatus::ON_HOLD ], true ) ) {
+		$status = $contract->get_status();
+		if ( ! in_array( $status, [ ContractStatus::ACTIVE, ContractStatus::ON_HOLD ], true ) ) {
+			Contracts::update( $contract_id, [ 'last_payment_gmt' => $last_payment ] );
+		} else {
 			$policy = ContractPlans::billing_policy_for( $contract );
 			$next   = null === $policy
 				? null
 				: BillingPeriod::next_due_after( new DateTimeImmutable( $cycle->get_ends_at_gmt(), new DateTimeZone( 'UTC' ) ), $now, $policy );
-			Contracts::update(
-				$contract_id,
-				[
-					'status'           => ContractStatus::ACTIVE,
-					'next_payment_gmt' => $next,
-					'last_payment_gmt' => $last_payment,
-				]
-			);
-			HoldAnchor::clear( $contract_id );
-		} else {
-			Contracts::update( $contract_id, [ 'last_payment_gmt' => $last_payment ] );
+
+			if ( ContractStatus::ON_HOLD === $status && null !== HoldAnchor::read( $contract_id ) ) {
+				// A customer hold absorbs a late payment: it resumes from the period after this one.
+				if ( null !== $next ) {
+					HoldAnchor::store( $contract_id, $next->format( 'Y-m-d H:i:s' ) );
+				}
+				Contracts::update( $contract_id, [ 'last_payment_gmt' => $last_payment ] );
+			} else {
+				Contracts::update(
+					$contract_id,
+					[
+						'status'           => ContractStatus::ACTIVE,
+						'next_payment_gmt' => $next,
+						'last_payment_gmt' => $last_payment,
+					]
+				);
+				HoldAnchor::clear( $contract_id );
+			}
 		}
 
 		$settled = $this->read_settled( $contract_id, $cycle->get_id(), $order->get_id() );
@@ -217,6 +229,7 @@ final class Settlement {
 					'last_attempt_gmt' => $now,
 				]
 			);
+			HoldAnchor::clear( $contract_id ); // A leftover anchor would read as a customer hold.
 		}
 
 		$settled = $this->read_settled( $contract_id, $cycle->get_id(), $order->get_id() );
@@ -270,6 +283,7 @@ final class Settlement {
 					'next_payment_gmt' => null,
 				]
 			);
+			HoldAnchor::clear( $contract->get_id() );
 		}
 	}
 
