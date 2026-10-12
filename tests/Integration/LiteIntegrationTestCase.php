@@ -11,8 +11,9 @@
  * flows, so the data under test is shaped exactly like production data.
  * Plans are created through the engine's plan write facade and read back as
  * views, as production code reads them. The engine's `Integration\` classes
- * used here (order linkage for renewal orders) are a documented test-only
- * exemption from the "consume the engine via the `Api\` facade only" rule.
+ * used here (the schema installer for raw rows, and the due dispatcher that tests
+ * drive with a fixed clock) are a documented test-only exemption from the
+ * "consume the engine via the `Api\` facade only" rule.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Tests
  */
@@ -22,17 +23,22 @@ declare( strict_types=1 );
 namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration;
 
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\Payments;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Plans;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\PlanView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
-use Automattic\WooCommerce\SubscriptionsEngine\Integration\Checkout\OrderLinkage;
+use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\CycleStatus;
+use Automattic\WooCommerce\SubscriptionsEngine\Integration\Dispatch\DueDispatcher;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\SchemaInstaller;
 use Automattic\WooCommerce\SubscriptionsLite\Cart\CartPlanHooks;
 use Automattic\WooCommerce\SubscriptionsLite\Checkout\ContractCreationHandler;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Cancellation;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Hold;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
+use Automattic\WooCommerce\SubscriptionsLite\Renewal\RenewalOrderBuilder;
+use DateTimeImmutable;
+use DateTimeZone;
 use WC_Order;
 use WC_Product_Simple;
 use WP_UnitTestCase;
@@ -381,24 +387,135 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 	}
 
 	/**
-	 * Create a renewal order linked to a contract, the shape the related-orders
-	 * read queries for.
+	 * Create a renewal order for a contract and append the cycle it bills, the shape the
+	 * related-orders and unpaid-renewal reads query for.
 	 *
 	 * @param int                  $contract_id Contract id.
 	 * @param int                  $customer_id Owning customer.
-	 * @param array<string, mixed> $args        total, status, date_created.
+	 * @param array<string, mixed> $args        total, status (order), date_created, cycle_status (default billed).
 	 */
 	protected function create_renewal_order( int $contract_id, int $customer_id, array $args = [] ): WC_Order {
-		$order = wc_create_order( [ 'customer_id' => $customer_id ] );
+		$order = wc_create_order(
+			[
+				'customer_id' => $customer_id,
+				'created_via' => RenewalOrderBuilder::CREATED_VIA,
+			]
+		);
 		$order->set_total( (string) ( $args['total'] ?? '19.99' ) );
 		$order->set_status( (string) ( $args['status'] ?? 'completed' ) );
 		if ( isset( $args['date_created'] ) ) {
 			$order->set_date_created( (string) $args['date_created'] );
 		}
-		$order->update_meta_data( OrderLinkage::META_CONTRACT_ID, (string) $contract_id );
-		$order->update_meta_data( OrderLinkage::META_RELATION_TYPE, 'renewal' );
+		$order->update_meta_data( RenewalOrderBuilder::CONTRACT_META, (string) $contract_id );
 		$order->save();
 
+		$utc        = new DateTimeZone( 'UTC' );
+		$head       = Contracts::get_cycles( $contract_id, 1 )[0] ?? null;
+		$starts_at  = null === $head ? new DateTimeImmutable( '2026-01-15 00:00:00', $utc ) : new DateTimeImmutable( $head->get_ends_at_gmt(), $utc );
+		$order_id   = $order->get_id();
+		$cycle_args = [
+			'status'         => (string) ( $args['cycle_status'] ?? CycleStatus::BILLED ),
+			'count'          => null === $head ? 1 : (int) $head->get_count() + 1,
+			'starts_at_gmt'  => $starts_at,
+			'ends_at_gmt'    => $starts_at->modify( '+1 month' ),
+			'expected_total' => $order->get_total(),
+			'currency'       => 'USD',
+			'order_id'       => $order_id,
+		];
+		Contracts::add_cycle( $contract_id, $cycle_args );
+
 		return $order;
+	}
+
+	/**
+	 * Outcome of the stub charge handler installed by {@see self::support_engine_charges()}:
+	 * `paid`, `failed`, `on-hold`, or `async` (the order is left pending).
+	 *
+	 * @var string
+	 */
+	protected $charge_outcome = 'paid';
+
+	/**
+	 * Orders the stub charge handler received, in call order.
+	 *
+	 * @var array<int, int>
+	 */
+	protected $charged_order_ids = [];
+
+	/**
+	 * Gateways the stub charge handler is installed for.
+	 *
+	 * @var array<string, bool>
+	 */
+	private $engine_charge_gateways = [];
+
+	/**
+	 * Make `$gateway` support engine charges and answer each charge with `$outcome` (see
+	 * {@see self::$charge_outcome}). Calling it again only changes the outcome. The hooks
+	 * are restored with the rest after the test.
+	 *
+	 * @param string $gateway Gateway id (a core gateway such as `cod`).
+	 * @param string $outcome Charge outcome.
+	 */
+	protected function support_engine_charges( string $gateway, string $outcome = 'paid' ): void {
+		$this->charge_outcome = $outcome;
+		if ( isset( $this->engine_charge_gateways[ $gateway ] ) ) {
+			return;
+		}
+		$this->engine_charge_gateways[ $gateway ] = true;
+
+		add_filter(
+			'woocommerce_payment_gateway_supports',
+			static function ( $supported, $feature, $payment_gateway ) use ( $gateway ) {
+				if ( Payments::GATEWAY_FEATURE === $feature && is_object( $payment_gateway ) && $gateway === $payment_gateway->id ) {
+					return true;
+				}
+				return $supported;
+			},
+			10,
+			3
+		);
+		add_action(
+			'woocommerce_subscriptions_engine_scheduled_payment_' . $gateway,
+			function ( $amount, $order ): void {
+				unset( $amount );
+				if ( ! $order instanceof WC_Order ) {
+					return;
+				}
+				$this->charged_order_ids[] = $order->get_id();
+				switch ( $this->charge_outcome ) {
+					case 'paid':
+						$order->payment_complete();
+						break;
+					case 'failed':
+						$order->update_status( 'failed' );
+						break;
+					case 'on-hold':
+						$order->update_status( 'on-hold' );
+						break;
+					default:
+						break;
+				}
+			},
+			10,
+			2
+		);
+	}
+
+	/**
+	 * How many charges the stub charge handler received.
+	 */
+	protected function charge_count(): int {
+		return count( $this->charged_order_ids );
+	}
+
+	/**
+	 * Run one engine due-dispatch batch at `$now`.
+	 *
+	 * @param DateTimeImmutable $now The scan moment.
+	 * @return int The number of contracts whose owner was notified.
+	 */
+	protected function run_due_dispatch( DateTimeImmutable $now ): int {
+		return ( new DueDispatcher() )->run_batch( $now );
 	}
 }
