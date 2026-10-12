@@ -1,7 +1,7 @@
 <?php
 /**
- * Integration tests for the BOGO bonus on renewal orders, through a real
- * engine renewal (`Subscriptions::renew_now()`) and the Bootstrap-wired listener.
+ * Integration tests for the BOGO bonus units the renewal order builder adds for the
+ * billed cycle.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Tests
  */
@@ -13,59 +13,19 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Renewal;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Plans;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\PlanView;
-use Automattic\WooCommerce\SubscriptionsEngine\Api\Subscriptions;
+use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\CycleStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\PlanStatus;
-use Automattic\WooCommerce\SubscriptionsEngine\Core\Gateway\GatewayCapabilities;
-use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\SchemaInstaller;
 use Automattic\WooCommerce\SubscriptionsLite\Checkout\ContractCreationHandler;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
-use Automattic\WooCommerce\SubscriptionsLite\Renewal\BogoRenewalBonus;
+use Automattic\WooCommerce\SubscriptionsLite\Renewal\RenewalOrderBuilder;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
 use WC_Order;
 use WC_Order_Item_Product;
 
 /**
- * @covers \Automattic\WooCommerce\SubscriptionsLite\Renewal\BogoRenewalBonus
+ * @covers \Automattic\WooCommerce\SubscriptionsLite\Renewal\RenewalOrderBuilder
  */
-final class BogoRenewalBonusTest extends LiteIntegrationTestCase {
-
-	private const GATEWAY = 'lite-test-approving';
-
-	public function set_up(): void {
-		parent::set_up();
-		GatewayCapabilities::declare( self::GATEWAY, [ GatewayCapabilities::RECURRING ] );
-		add_action(
-			'woocommerce_subscriptions_engine_scheduled_payment_' . self::GATEWAY,
-			static function ( $amount, $renewal_order ): void {
-				unset( $amount );
-				if ( $renewal_order instanceof WC_Order && $renewal_order->needs_payment() ) {
-					$renewal_order->payment_complete();
-				}
-			},
-			10,
-			2
-		);
-	}
-
-	public function tear_down(): void {
-		remove_all_actions( 'woocommerce_subscriptions_engine_scheduled_payment_' . self::GATEWAY );
-		parent::tear_down();
-	}
-
-	public function test_the_listener_is_wired_once_by_bootstrap(): void {
-		global $wp_filter;
-
-		$count = 0;
-		foreach ( $wp_filter['woocommerce_subscriptions_engine_renewal_order_created']->callbacks as $callbacks ) {
-			foreach ( $callbacks as $callback ) {
-				if ( is_array( $callback['function'] ) && $callback['function'][0] instanceof BogoRenewalBonus ) {
-					++$count;
-				}
-			}
-		}
-
-		$this->assertSame( 1, $count );
-	}
+final class RenewalOrderBogoTest extends LiteIntegrationTestCase {
 
 	public function test_an_all_cycles_bogo_doubles_the_renewal_line_money_neutrally(): void {
 		$contract_id = $this->sign_up( [ 'policies' => [ [ 'type' => 'bogo' ] ] ] );
@@ -73,7 +33,6 @@ final class BogoRenewalBonusTest extends LiteIntegrationTestCase {
 		$order = $this->renew( $contract_id );
 		$item  = $this->only_line( $order );
 
-		$this->assertTrue( $order->is_paid() );
 		$this->assertSame( 4, $item->get_quantity(), '2 paid units earn 2 bonus units.' );
 		$this->assertSame( 39.98, (float) $item->get_subtotal() );
 		$this->assertSame( 39.98, (float) $item->get_total() );
@@ -154,7 +113,7 @@ final class BogoRenewalBonusTest extends LiteIntegrationTestCase {
 		$this->assertSame( 4, $this->only_line( $this->renew( $contract_id ) )->get_quantity(), 'Archiving stops new sign-ups, not the bonus of existing subscribers.' );
 	}
 
-	public function test_a_contract_owned_by_another_extension_is_left_alone(): void {
+	public function test_a_plan_owned_by_another_extension_grants_nothing(): void {
 		$contract_id = $this->sign_up( [ 'policies' => [ [ 'type' => 'bogo' ] ] ], 'other-extension' );
 
 		$this->assertSame( 2, $this->only_line( $this->renew( $contract_id ) )->get_quantity() );
@@ -204,7 +163,7 @@ final class BogoRenewalBonusTest extends LiteIntegrationTestCase {
 	 * through Lite's checkout mapping.
 	 *
 	 * @param array<string, mixed>|null $pricing_policy Plan pricing payload.
-	 * @param string                    $extension_slug Plan and contract owner.
+	 * @param string                    $extension_slug Plan owner.
 	 * @param int|float                 $quantity       Origin line quantity.
 	 * @return int Contract id.
 	 */
@@ -223,7 +182,7 @@ final class BogoRenewalBonusTest extends LiteIntegrationTestCase {
 			[
 				'quantity'       => $quantity,
 				'price'          => '19.99',
-				'payment_method' => self::GATEWAY,
+				'payment_method' => 'cod',
 			]
 		);
 
@@ -231,30 +190,28 @@ final class BogoRenewalBonusTest extends LiteIntegrationTestCase {
 
 		$contract = ( new ContractCreationHandler() )->create_contract( $order, $plan );
 		$this->assertNotNull( $contract );
-		$contract_id = $contract->get_id();
 
-		if ( Package::EXTENSION_SLUG !== $extension_slug ) {
-			// Lite's mapping always records Lite's slug, and update() does not take
-			// `extension_slug`; reassign the row directly to model another extension's contract.
-			global $wpdb;
-			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Test seeding for a state the facade does not produce.
-			$wpdb->update(
-				SchemaInstaller::get_table_name( SchemaInstaller::TABLE_CONTRACTS ),
-				[ 'extension_slug' => $extension_slug ],
-				[ 'id' => $contract_id ]
-			);
-		}
-
-		return $contract_id;
+		return $contract->get_id();
 	}
 
 	/**
-	 * Run the cycle-2 renewal through the engine facade.
+	 * Build the cycle-2 renewal order.
 	 *
 	 * @param int $contract_id Contract id.
 	 */
 	private function renew( int $contract_id ): WC_Order {
-		$order = Subscriptions::renew_now( $contract_id );
+		$cycle = Contracts::add_cycle(
+			$contract_id,
+			[
+				'status'         => CycleStatus::PENDING,
+				'count'          => 2,
+				'starts_at_gmt'  => '2026-02-15 00:00:00',
+				'ends_at_gmt'    => '2026-03-15 00:00:00',
+				'expected_total' => '39.98',
+				'currency'       => 'USD',
+			]
+		);
+		$order = ( new RenewalOrderBuilder() )->build( $this->get_contract( $contract_id ), $cycle );
 		$this->assertInstanceOf( WC_Order::class, $order );
 
 		return $order;
