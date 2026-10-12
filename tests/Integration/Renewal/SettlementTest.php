@@ -13,6 +13,7 @@ use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\CycleView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\CycleStatus;
+use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\SchemaInstaller;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\HoldAnchor;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Renewal\RenewalOrderBuilder;
@@ -20,6 +21,7 @@ use Automattic\WooCommerce\SubscriptionsLite\Renewal\Settlement;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
 use DateTimeImmutable;
 use DateTimeZone;
+use Error;
 use WC_Order;
 
 /**
@@ -330,6 +332,27 @@ final class SettlementTest extends LiteIntegrationTestCase {
 
 		$this->assertSame( CycleStatus::BILLED, $this->head( $contract_id )->get_status() );
 		$this->assertSame( ContractStatus::PENDING_CANCELLATION, $this->get_contract( $contract_id )->get_status() );
+	}
+
+	public function test_the_hook_entry_point_logs_a_failed_settlement_instead_of_rethrowing(): void {
+		[ $contract_id, $order ] = $this->seed_renewal();
+		$order->payment_complete();
+		$contracts_table = SchemaInstaller::get_table_name( SchemaInstaller::TABLE_CONTRACTS );
+		add_filter(
+			'query',
+			static function ( $query ) use ( $contracts_table ) {
+				if ( is_string( $query ) && 0 === strpos( $query, "UPDATE `{$contracts_table}`" ) ) {
+					throw new Error( 'The database went away.' );
+				}
+				return $query;
+			}
+		);
+		$this->capture_log();
+
+		( new Settlement() )->handle_order( $order->get_id() );
+
+		$this->assertTrue( $this->has_logged( 'settling renewal order' ) );
+		$this->assertSame( CycleStatus::BILLED, $this->head( $contract_id )->get_status() );
 	}
 
 	public function test_the_bound_listeners_settle_a_renewal_order_from_its_status(): void {

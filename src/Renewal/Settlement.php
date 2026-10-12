@@ -92,9 +92,9 @@ final class Settlement {
 	public static function register(): void {
 		$instance = new self();
 		// Every status change: settle() reads the outcome off the order (`is_paid()` decides
-		// paid, so paid statuses registered after load are covered too).
+		// paid, so paid statuses registered after load are covered too). A completed payment
+		// always changes the status, so it needs no listener of its own.
 		add_action( 'woocommerce_order_status_changed', [ $instance, 'handle_order' ] );
-		add_action( 'woocommerce_payment_complete', [ $instance, 'handle_order' ] );
 		add_action( 'woocommerce_trash_order', [ $instance, 'handle_order' ] );
 		// Removal before it happens, while the order can still be read: permanent deletion,
 		// and trash or deletion through the posts screens of the legacy order storage.

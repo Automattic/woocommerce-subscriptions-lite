@@ -93,10 +93,6 @@ final class BootstrapTest extends LiteIntegrationTestCase {
 		$this->assertInstanceOf( DueHandler::class, $handler[0] );
 		$this->assertSame( 'handle', $handler[1] );
 		$this->assertTrue(
-			$this->hook_has_callback_on( 'woocommerce_payment_complete', Settlement::class ),
-			'Renewal orders settle on payment.'
-		);
-		$this->assertTrue(
 			$this->hook_has_callback_on( 'woocommerce_order_status_changed', Settlement::class ),
 			'Renewal orders settle on every status change.'
 		);

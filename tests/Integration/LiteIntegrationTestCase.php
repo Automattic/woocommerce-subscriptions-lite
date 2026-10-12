@@ -507,11 +507,24 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 
 	/**
 	 * Record every engine charge request for `$gateway` in {@see self::$charged_order_ids}
-	 * without making the gateway support engine charges, so a test can prove none was made.
+	 * while the gateway does not support engine charges, so a test can prove none was made.
+	 * The gateway answers the feature check only inside `Payments::charge()` (so the
+	 * charge reaches the spy should anyone call it); Lite's own check still reads no.
 	 *
 	 * @param string $gateway Gateway id.
 	 */
 	protected function spy_charge_attempts( string $gateway ): void {
+		add_filter(
+			'woocommerce_payment_gateway_supports',
+			static function ( $supported, $feature, $payment_gateway ) use ( $gateway ) {
+				if ( Payments::GATEWAY_FEATURE === $feature && is_object( $payment_gateway ) && $gateway === $payment_gateway->id && self::inside_charge() ) {
+					return true;
+				}
+				return $supported;
+			},
+			10,
+			3
+		);
 		add_action(
 			'woocommerce_subscriptions_engine_scheduled_payment_' . $gateway,
 			function ( $amount, $order ): void {
@@ -523,6 +536,20 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 			10,
 			2
 		);
+	}
+
+	/**
+	 * Whether `Payments::charge()` is on the call stack.
+	 */
+	private static function inside_charge(): bool {
+		// phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_debug_backtrace -- a test spy reads its caller.
+		foreach ( debug_backtrace( DEBUG_BACKTRACE_IGNORE_ARGS ) as $frame ) {
+			if ( Payments::class === ( $frame['class'] ?? '' ) && 'charge' === $frame['function'] ) {
+				return true;
+			}
+		}
+
+		return false;
 	}
 
 	/**
@@ -553,7 +580,7 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 	protected function run_due_dispatch_after_claims_expire( DateTimeImmutable $now ): int {
 		global $wpdb;
 
-		$later = $now->modify( sprintf( '+%d seconds', DueDispatcher::CLAIM_TTL_SECONDS + 1 ) );
+		$later = $now->modify( sprintf( '+%d seconds', DueDispatcher::CLAIM_TTL_SECONDS + 60 ) );
 		$wpdb->query( $wpdb->prepare( 'SET timestamp = %d', $later->getTimestamp() ) ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 
 		try {

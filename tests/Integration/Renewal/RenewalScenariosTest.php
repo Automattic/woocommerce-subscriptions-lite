@@ -150,9 +150,22 @@ final class RenewalScenariosTest extends LiteIntegrationTestCase {
 		$this->support_engine_charges( 'cod', 'on-hold' );
 		$contract_id = $this->make_contract_paid( self::PAID_A_PERIOD_AGO );
 		$now         = $this->now();
+		// A second tick runs while the first is still charging: the contract is still due,
+		// so only the first tick's claim keeps it from being notified twice.
+		$overlapping = null;
+		add_action(
+			'woocommerce_subscriptions_engine_scheduled_payment_cod',
+			function () use ( $now, &$overlapping ): void {
+				if ( null === $overlapping ) {
+					$overlapping = -1;
+					$overlapping = $this->run_due_dispatch( $now );
+				}
+			},
+			5
+		);
 
 		$this->assertSame( 1, $this->run_due_dispatch( $now ) );
-		$this->assertSame( 0, $this->run_due_dispatch( $now ), 'An overlapping tick loses the claim.' );
+		$this->assertSame( 0, $overlapping, 'An overlapping tick loses the claim.' );
 		$this->assertCount( 1, $this->renewal_orders() );
 		$this->assertSame( CycleStatus::PROCESSING, $this->head( $contract_id )->get_status() );
 		$this->assertNull( $this->get_contract( $contract_id )->get_next_payment_gmt(), 'The async charge takes the contract off the due scan.' );

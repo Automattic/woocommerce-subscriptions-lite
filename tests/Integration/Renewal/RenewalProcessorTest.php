@@ -10,6 +10,7 @@ declare( strict_types=1 );
 namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Renewal;
 
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\Payments;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\CycleView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\CycleStatus;
@@ -248,6 +249,7 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 	public function test_a_lost_order_link_deletes_the_draft_and_charges_nothing(): void {
 		$this->support_engine_charges( 'cod' );
 		$contract_id = $this->make_contract();
+		$this->capture_log();
 		// Another actor moves the cycle while this run builds its order.
 		$draft_id = 0;
 		add_action(
@@ -267,6 +269,8 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 		$this->assertFalse( wc_get_order( $draft_id ), 'The draft that lost the link is deleted.' );
 		$this->assertSame( 0, $this->charge_count() );
 		$this->assertSame( CycleStatus::CANCELLED, $this->head( $contract_id )->get_status() );
+		$this->assertSame( ContractStatus::ACTIVE, $this->get_contract( $contract_id )->get_status(), 'A lost link is not a failed build: no hold.' );
+		$this->assertFalse( $this->has_logged( 'could not be built' ) );
 	}
 
 	public function test_a_concurrent_append_of_the_same_cycle_leaves_the_renewal_to_the_other_run(): void {
@@ -493,6 +497,9 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 		$contract = $this->get_contract( $contract_id );
 		$this->assertSame( ContractStatus::ON_HOLD, $contract->get_status() );
 		$this->assertNull( $contract->get_next_payment_gmt() );
+
+		Payments::charge( $reloaded );
+		$this->assertSame( [ $order->get_id() ], $this->charged_order_ids, 'The spy would have seen a charge.' );
 	}
 
 	public function test_renew_now_applies_to_active_lite_contracts(): void {
