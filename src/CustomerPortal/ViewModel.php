@@ -76,7 +76,7 @@ final class ViewModel {
 	 * Carries the per-status logic: the dynamic date-row label/value, the
 	 * recurring summary, the payment-method line, and the action-visibility
 	 * flags (`cancel_visible`, `hold_visible`, `reactivate_visible`,
-	 * `needs_payment_notice` with its `pay_url`, `at_period_end`).
+	 * `needs_payment_notice` with its `pay_url` and `payment_in_flight`, `at_period_end`).
 	 *
 	 * @param array<string, mixed>             $contract       Domain-ish contract array.
 	 * @param array<int, array<string, mixed>> $related_orders Domain-ish related-order arrays.
@@ -104,7 +104,9 @@ final class ViewModel {
 			'hold_visible'           => $is_lite && CustomerActionRules::can_hold( $status ),
 			'reactivate_visible'     => $is_lite && CustomerActionRules::can_reactivate( $status, $has_unpaid_renewal ),
 			'needs_payment_notice'   => $needs_payment,
-			'pay_url'                => $needs_payment ? $this->to_string( $contract['unpaid_order_pay_url'] ?? null ) : '',
+			// An asynchronous charge still awaiting confirmation: nothing to pay or arrange yet.
+			'payment_in_flight'      => $needs_payment && ! empty( $contract['unpaid_renewal_in_flight'] ),
+			'pay_url'                => $needs_payment && empty( $contract['unpaid_renewal_in_flight'] ) ? $this->to_string( $contract['unpaid_order_pay_url'] ?? null ) : '',
 			// Cancel mode the action forwards: active cancels at period end
 			// (graceful -> pending-cancellation); on-hold cancels immediately
 			// (no period to ride out -> cancelled).

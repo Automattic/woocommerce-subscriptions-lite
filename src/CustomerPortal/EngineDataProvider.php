@@ -33,6 +33,7 @@ use WC_Order;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\PlanView;
+use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\CycleStatus;
 use Automattic\WooCommerce\SubscriptionsLite\Contracts\AddressFields;
 use Automattic\WooCommerce\SubscriptionsLite\Contracts\CustomerVisibility;
 use Automattic\WooCommerce\SubscriptionsLite\Orders\RelatedOrders;
@@ -154,7 +155,8 @@ final class EngineDataProvider {
 	 * Reduce a contract to the domain-ish detail array {@see ViewModel::build_detail()} reads.
 	 *
 	 * The detail array is the list row plus the contract's date stamps, recurring totals,
-	 * line items, addresses, and whether a renewal waits on payment (with its pay link).
+	 * line items, addresses, and whether a renewal waits on payment (with its pay link, and
+	 * whether its charge is still awaiting the gateway's confirmation).
 	 *
 	 * @param ContractView $contract The contract.
 	 * @return array<string, mixed>
@@ -165,17 +167,18 @@ final class EngineDataProvider {
 		return array_merge(
 			$this->contract_to_row( $contract, ContractPlans::for_contract( $contract ) ),
 			[
-				'start_gmt'            => $contract->get_start_gmt(),
-				'end_gmt'              => $contract->get_end_gmt(),
-				'last_payment_gmt'     => $contract->get_last_payment_gmt(),
-				'last_updated_gmt'     => $this->resolve_last_updated_gmt( $contract ),
-				'discount_total'       => $contract->get_discount_total(),
-				'shipping_total'       => $contract->get_shipping_total(),
-				'tax_total'            => $contract->get_tax_total(),
-				'items'                => $this->items( $contract ),
-				'addresses'            => $this->addresses( $contract ),
-				'has_unpaid_renewal'   => null !== $unpaid_renewal,
-				'unpaid_order_pay_url' => null === $unpaid_renewal ? '' : $this->get_pay_url( $unpaid_renewal->get_order_id() ),
+				'start_gmt'                => $contract->get_start_gmt(),
+				'end_gmt'                  => $contract->get_end_gmt(),
+				'last_payment_gmt'         => $contract->get_last_payment_gmt(),
+				'last_updated_gmt'         => $this->resolve_last_updated_gmt( $contract ),
+				'discount_total'           => $contract->get_discount_total(),
+				'shipping_total'           => $contract->get_shipping_total(),
+				'tax_total'                => $contract->get_tax_total(),
+				'items'                    => $this->items( $contract ),
+				'addresses'                => $this->addresses( $contract ),
+				'has_unpaid_renewal'       => null !== $unpaid_renewal,
+				'unpaid_renewal_in_flight' => null !== $unpaid_renewal && CycleStatus::PROCESSING === $unpaid_renewal->get_status(),
+				'unpaid_order_pay_url'     => null === $unpaid_renewal ? '' : $this->get_pay_url( $unpaid_renewal->get_order_id() ),
 			]
 		);
 	}

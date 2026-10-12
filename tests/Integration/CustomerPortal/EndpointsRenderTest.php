@@ -269,11 +269,12 @@ final class EndpointsRenderTest extends LiteIntegrationTestCase {
 
 		$this->assertStringContainsString( 'subscription-needs-payment-notice', $html );
 		$this->assertStringContainsString( 'href="' . esc_url( $order->get_checkout_payment_url() ) . '"', $html );
-		$this->assertLessThan(
-			strpos( $html, 'href="' . esc_url( $order->get_checkout_payment_url() ) . '"' ),
-			strpos( $html, 'renewal payment for this subscription is outstanding' ),
-			'The explanation comes before the Pay now link.'
-		);
+		$message_at = strpos( $html, 'subscription-needs-payment-notice__message' );
+		$pay_at     = strpos( $html, 'subscription-needs-payment-notice__pay' );
+		$this->assertNotFalse( $message_at );
+		$this->assertNotFalse( $pay_at );
+		$this->assertLessThan( $pay_at, $message_at, 'The explanation comes before the Pay now link.' );
+		$this->assertStringNotContainsString( 'subscription-needs-payment-notice__contact', $html );
 		$this->assertStringNotContainsString( 'actions.submitReactivate', $html );
 	}
 
@@ -298,7 +299,32 @@ final class EndpointsRenderTest extends LiteIntegrationTestCase {
 
 		$this->assertStringContainsString( 'subscription-needs-payment-notice', $html );
 		$this->assertStringNotContainsString( esc_url( $order->get_checkout_payment_url() ), $html );
-		$this->assertStringContainsString( 'contact us', $html );
+		$this->assertStringNotContainsString( 'subscription-needs-payment-notice__pay', $html );
+		$this->assertStringContainsString( 'subscription-needs-payment-notice__contact', $html );
+	}
+
+	public function test_a_customer_hold_over_an_async_charge_says_the_payment_awaits_confirmation(): void {
+		$contract_id = $this->create_contract( $this->customer_id, [ 'status' => 'on-hold' ] );
+		$this->create_renewal_order(
+			$contract_id,
+			$this->customer_id,
+			[
+				'status'       => 'on-hold',
+				'cycle_status' => CycleStatus::PROCESSING,
+			]
+		);
+
+		$endpoints = new Endpoints();
+		$html      = $this->capture(
+			static function () use ( $endpoints, $contract_id ): void {
+				$endpoints->render_detail( $contract_id );
+			}
+		);
+
+		$this->assertStringContainsString( 'subscription-needs-payment-notice--awaiting-confirmation', $html );
+		$this->assertStringNotContainsString( 'subscription-needs-payment-notice__pay', $html );
+		$this->assertStringNotContainsString( 'subscription-needs-payment-notice__contact', $html );
+		$this->assertStringNotContainsString( 'actions.submitReactivate', $html, 'Reactivate waits until the charge settles.' );
 	}
 
 	public function test_a_customer_hold_with_a_next_payment_shows_reactivate_and_no_notice(): void {

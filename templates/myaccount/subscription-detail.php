@@ -106,14 +106,20 @@ $has_actions = $detail['cancel_visible'] || $detail['hold_visible'] || $detail['
 			<?php endif; ?>
 
 			<?php if ( $detail['needs_payment_notice'] ) : ?>
-				<div class="woocommerce-message woocommerce-info subscription-needs-payment-notice">
-					<?php esc_html_e( 'A renewal payment for this subscription is outstanding. The subscription resumes once it is paid.', 'woocommerce-subscriptions-lite' ); ?>
-					<?php if ( '' !== $detail['pay_url'] ) : ?>
-						<a href="<?php echo esc_url( $detail['pay_url'] ); ?>" class="button wc-forward<?php echo esc_attr( $wp_button_class ); ?>"><?php esc_html_e( 'Pay now', 'woocommerce-subscriptions-lite' ); ?></a>
-					<?php else : ?>
-						<?php esc_html_e( 'Please contact us to arrange the payment.', 'woocommerce-subscriptions-lite' ); ?>
-					<?php endif; ?>
-				</div>
+				<?php if ( $detail['payment_in_flight'] ) : ?>
+					<div class="woocommerce-message woocommerce-info subscription-needs-payment-notice subscription-needs-payment-notice--awaiting-confirmation">
+						<span class="subscription-needs-payment-notice__message"><?php esc_html_e( 'A renewal payment for this subscription is awaiting confirmation from the payment provider.', 'woocommerce-subscriptions-lite' ); ?></span>
+					</div>
+				<?php else : ?>
+					<div class="woocommerce-message woocommerce-info subscription-needs-payment-notice">
+						<span class="subscription-needs-payment-notice__message"><?php esc_html_e( 'A renewal payment for this subscription is outstanding. The subscription resumes once it is paid.', 'woocommerce-subscriptions-lite' ); ?></span>
+						<?php if ( '' !== $detail['pay_url'] ) : ?>
+							<a href="<?php echo esc_url( $detail['pay_url'] ); ?>" class="button wc-forward subscription-needs-payment-notice__pay<?php echo esc_attr( $wp_button_class ); ?>"><?php esc_html_e( 'Pay now', 'woocommerce-subscriptions-lite' ); ?></a>
+						<?php else : ?>
+							<span class="subscription-needs-payment-notice__contact"><?php esc_html_e( 'Please contact us to arrange the payment.', 'woocommerce-subscriptions-lite' ); ?></span>
+						<?php endif; ?>
+					</div>
+				<?php endif; ?>
 			<?php endif; ?>
 
 			<?php
