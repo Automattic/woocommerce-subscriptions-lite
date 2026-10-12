@@ -45,8 +45,6 @@ final class RenewalProcessor {
 	 */
 	public const LEASE_SECONDS = 900;
 
-	private const LOG_SOURCE = 'woocommerce-subscriptions-lite';
-
 	/**
 	 * Renew `$contract` for the period due at `$anchor`.
 	 *
@@ -72,7 +70,7 @@ final class RenewalProcessor {
 			return null;
 		}
 
-		$order = $this->get_cycle_order( $contract, $cycle );
+		$order = $this->ensure_cycle_order( $contract, $cycle );
 		if ( null === $order ) {
 			return null;
 		}
@@ -96,12 +94,7 @@ final class RenewalProcessor {
 	 */
 	public function renew_now( int $contract_id ): ?WC_Order {
 		$contract = Contracts::get( $contract_id );
-		if ( null === $contract || Package::EXTENSION_SLUG !== $contract->get_extension_slug() ) {
-			return null;
-		}
-
-		$status = $contract->get_status();
-		if ( ContractStatus::ACTIVE !== $status && ! ( ContractStatus::ON_HOLD === $status && null !== UnpaidRenewal::find( $contract ) ) ) {
+		if ( null === $contract || ! self::can_renew_now( $contract ) ) {
 			return null;
 		}
 
@@ -111,6 +104,23 @@ final class RenewalProcessor {
 		$anchor = $contract->get_next_payment_gmt() ?? ( null === $head ? null : $head->get_ends_at_gmt() );
 
 		return $this->renew( $contract, null === $anchor ? $now : new DateTimeImmutable( $anchor, $utc ), $now, true );
+	}
+
+	/**
+	 * Whether Renew now applies to a contract: a Lite contract that is active (bills its next
+	 * period now), or on hold with an unpaid renewal (retries that renewal).
+	 *
+	 * @param ContractView $contract The contract.
+	 */
+	public static function can_renew_now( ContractView $contract ): bool {
+		if ( Package::EXTENSION_SLUG !== $contract->get_extension_slug() ) {
+			return false;
+		}
+
+		$status = $contract->get_status();
+
+		return ContractStatus::ACTIVE === $status
+			|| ( ContractStatus::ON_HOLD === $status && null !== UnpaidRenewal::find( $contract ) );
 	}
 
 	/**
@@ -213,7 +223,7 @@ final class RenewalProcessor {
 	 * @param ContractView $contract The contract.
 	 * @param CycleView    $cycle    The taken cycle.
 	 */
-	private function get_cycle_order( ContractView $contract, CycleView $cycle ): ?WC_Order {
+	private function ensure_cycle_order( ContractView $contract, CycleView $cycle ): ?WC_Order {
 		$order_id = $cycle->get_order_id();
 		if ( null !== $order_id ) {
 			$order = wc_get_order( $order_id );
@@ -319,7 +329,7 @@ final class RenewalProcessor {
 			$level,
 			'RenewalProcessor: ' . $message,
 			[
-				'source'      => self::LOG_SOURCE,
+				'source'      => Package::EXTENSION_SLUG,
 				'contract_id' => $contract_id,
 			]
 		);

@@ -475,6 +475,32 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 		$this->assertNull( $contract->get_next_payment_gmt() );
 	}
 
+	public function test_renew_now_applies_to_active_lite_contracts(): void {
+		$this->assertTrue( RenewalProcessor::can_renew_now( $this->get_contract( $this->seed_contract() ) ) );
+		$this->assertFalse( RenewalProcessor::can_renew_now( $this->get_contract( $this->seed_contract( [ 'extension_slug' => 'another-extension' ] ) ) ), 'Lite renews only its own contracts.' );
+	}
+
+	public function test_renew_now_excludes_drafts_terminal_statuses_and_a_plain_hold(): void {
+		foreach ( [ ContractStatus::DRAFT, ContractStatus::CANCELLED, ContractStatus::EXPIRED, ContractStatus::PENDING_CANCELLATION, ContractStatus::ON_HOLD ] as $status ) {
+			$this->assertFalse( RenewalProcessor::can_renew_now( $this->get_contract( $this->seed_contract( [ 'status' => $status ] ) ) ), $status );
+		}
+	}
+
+	public function test_renew_now_applies_to_a_hold_with_an_unpaid_renewal(): void {
+		$customer_id = $this->create_customer();
+		$contract_id = $this->create_contract( $customer_id, [ 'status' => 'on-hold' ] );
+		$this->create_renewal_order(
+			$contract_id,
+			$customer_id,
+			[
+				'status'       => 'failed',
+				'cycle_status' => CycleStatus::FAILED,
+			]
+		);
+
+		$this->assertTrue( RenewalProcessor::can_renew_now( $this->get_contract( $contract_id ) ) );
+	}
+
 	public function test_renew_now_renews_an_active_contract(): void {
 		$this->support_engine_charges( 'cod' );
 		$contract_id = $this->make_contract();

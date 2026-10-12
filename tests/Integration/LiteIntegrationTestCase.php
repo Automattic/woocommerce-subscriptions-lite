@@ -407,7 +407,6 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 		if ( isset( $args['date_created'] ) ) {
 			$order->set_date_created( (string) $args['date_created'] );
 		}
-		$order->update_meta_data( RenewalOrderBuilder::CONTRACT_META, (string) $contract_id );
 		$order->save();
 
 		$utc        = new DateTimeZone( 'UTC' );

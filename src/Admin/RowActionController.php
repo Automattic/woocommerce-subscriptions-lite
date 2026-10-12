@@ -11,12 +11,14 @@
  *
  * The decision logic ({@see self::handle_renew_now()}, {@see self::handle_cancel()})
  * is separated from the request plumbing ({@see self::renew_now_request()},
- * {@see self::cancel_request()}) so its branches are unit-testable without a
- * booted WordPress: the `handle_*` methods take a plain params array and return a
+ * {@see self::cancel_request()}) so its branches are testable without a request:
+ * the `handle_*` methods take a plain params array and return a
  * {@see RowActionResult}; the `*_request` methods read `$_POST`,
- * verify the nonce, run the decision, flash, and redirect. The nonce is enforced
- * at the request boundary (a hard `check_admin_referer()` gate) rather than in the
- * decision method, so it never rides in a URL.
+ * verify the nonce, run the decision, flash, and redirect. Cancel's collaborators
+ * can be injected; Renew now always runs Lite's renewal, so its branches need real
+ * contracts and orders. The nonce is enforced at the request boundary (a hard
+ * `check_admin_referer()` gate) rather than in the decision method, so it never
+ * rides in a URL.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Admin
  */
@@ -29,6 +31,7 @@ use Throwable;
 use WC_Order;
 use Automattic\WooCommerce\Enums\OrderStatus;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Cancellation;
+use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Renewal\RenewalProcessor;
 
 defined( 'ABSPATH' ) || exit;
@@ -292,7 +295,7 @@ final class RowActionController {
 		( $this->log_error )(
 			sprintf( 'Admin subscription %1$s failed for #%2$d: %3$s', $action, $contract_id, $e->getMessage() ),
 			[
-				'source'      => 'woocommerce-subscriptions-lite',
+				'source'      => Package::EXTENSION_SLUG,
 				'contract_id' => $contract_id,
 				'exception'   => $e,
 			]

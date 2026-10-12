@@ -19,6 +19,7 @@ use Automattic\WooCommerce\Enums\OrderStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\CycleView;
 use Automattic\WooCommerce\SubscriptionsLite\Contracts\AddressFields;
+use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ContractPlans;
 use Automattic\WooCommerce\SubscriptionsLite\Pricing\PriceCalculator;
 use Automattic\WooCommerce\SubscriptionsLite\Pricing\PricingTerms;
@@ -40,11 +41,6 @@ final class RenewalOrderBuilder {
 	 * `created_via` of Lite renewal orders: how settlement recognises its own orders.
 	 */
 	public const CREATED_VIA = 'woocommerce_subscriptions_lite_renewal';
-
-	/**
-	 * Order meta holding the renewed contract id, for display.
-	 */
-	public const CONTRACT_META = '_wcsl_renewal_contract_id';
 
 	/**
 	 * Origin-order meta keys that belong to that one order and are never copied.
@@ -76,8 +72,6 @@ final class RenewalOrderBuilder {
 	 */
 	private const EXCLUDED_META_PREFIXES = [ '_wcsl_', '_subscription_', '_wc_order_attribution_' ];
 
-	private const LOG_SOURCE = 'woocommerce-subscriptions-lite';
-
 	/**
 	 * Build the draft renewal order for `$cycle` of `$contract`.
 	 *
@@ -108,7 +102,6 @@ final class RenewalOrderBuilder {
 			$this->add_lines( $order, $contract, $cycle );
 			$order->set_total( $cycle->get_expected_total() );
 			$this->copy_gateway_data( $order, $contract );
-			$order->update_meta_data( self::CONTRACT_META, (string) $contract_id );
 			$order->save();
 		} catch ( Throwable $e ) {
 			$this->log_error( sprintf( 'cannot build the renewal order for contract %d (a product may have been deleted): %s', $contract_id, $e->getMessage() ), $contract_id );
@@ -251,7 +244,7 @@ final class RenewalOrderBuilder {
 		wc_get_logger()->error(
 			'RenewalOrderBuilder: ' . $message,
 			[
-				'source'      => self::LOG_SOURCE,
+				'source'      => Package::EXTENSION_SLUG,
 				'contract_id' => $contract_id,
 			]
 		);

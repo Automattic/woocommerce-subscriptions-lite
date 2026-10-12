@@ -15,9 +15,9 @@ declare( strict_types=1 );
 namespace Automattic\WooCommerce\SubscriptionsLite\Admin\MetaBoxes;
 
 use Automattic\WooCommerce\SubscriptionsLite\Admin\PageController;
-use Automattic\WooCommerce\SubscriptionsLite\Admin\StatusLabels;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Cancellation;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
+use Automattic\WooCommerce\SubscriptionsLite\Renewal\RenewalProcessor;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 
 defined( 'ABSPATH' ) || exit;
@@ -44,7 +44,7 @@ final class Actions {
 			),
 		];
 
-		if ( StatusLabels::is_renewable( $contract ) ) {
+		if ( RenewalProcessor::can_renew_now( $contract ) ) {
 			$items[] = PageController::action_form(
 				PageController::ACTION_RENEW_NOW,
 				$id,

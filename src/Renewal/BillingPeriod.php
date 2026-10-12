@@ -15,6 +15,7 @@ declare( strict_types=1 );
 namespace Automattic\WooCommerce\SubscriptionsLite\Renewal;
 
 use Automattic\WooCommerce\SubscriptionsEngine\Core\ValueObject\BillingPolicy;
+use Automattic\WooCommerce\SubscriptionsLite\Package;
 use DateTimeImmutable;
 use DateTimeZone;
 
@@ -29,8 +30,6 @@ final class BillingPeriod {
 	 * Bound on the forward roll, so a fine-grained cadence far behind cannot loop unboundedly.
 	 */
 	private const MAX_ROLLS = 1000;
-
-	private const LOG_SOURCE = 'woocommerce-subscriptions-lite';
 
 	/**
 	 * The period to bill: it starts at `$anchor` rolled forward by whole cadences while the
@@ -99,7 +98,7 @@ final class BillingPeriod {
 	private static function log_cap( string $method, DateTimeImmutable $from ): void {
 		wc_get_logger()->warning(
 			sprintf( 'BillingPeriod::%s(): rolling forward from %s exhausted the roll cap; floored at now.', $method, $from->format( 'Y-m-d H:i:s' ) ),
-			[ 'source' => self::LOG_SOURCE ]
+			[ 'source' => Package::EXTENSION_SLUG ]
 		);
 	}
 }

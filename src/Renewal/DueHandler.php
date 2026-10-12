@@ -18,6 +18,7 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Renewal;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
+use Automattic\WooCommerce\SubscriptionsLite\Package;
 use DateTimeImmutable;
 use DateTimeZone;
 use Throwable;
@@ -29,8 +30,6 @@ defined( 'ABSPATH' ) || exit;
  */
 final class DueHandler {
 
-	private const LOG_SOURCE = 'woocommerce-subscriptions-lite';
-
 	/**
 	 * Handle a due contract.
 	 *
@@ -40,7 +39,7 @@ final class DueHandler {
 	public function handle( $contract, $context ): void {
 		$due_at = is_array( $context ) ? ( $context['due_at'] ?? null ) : null;
 		if ( ! $contract instanceof ContractView || ! $due_at instanceof DateTimeImmutable ) {
-			wc_get_logger()->warning( 'DueHandler: ignored a due notification without a contract view and a due_at moment.', [ 'source' => self::LOG_SOURCE ] );
+			wc_get_logger()->warning( 'DueHandler: ignored a due notification without a contract view and a due_at moment.', [ 'source' => Package::EXTENSION_SLUG ] );
 			return;
 		}
 
@@ -55,7 +54,7 @@ final class DueHandler {
 			wc_get_logger()->warning(
 				sprintf( 'DueHandler: contract %d is due while %s; only active contracts renew, so its due moment is cleared.', $contract_id, $contract->get_status() ),
 				[
-					'source'      => self::LOG_SOURCE,
+					'source'      => Package::EXTENSION_SLUG,
 					'contract_id' => $contract_id,
 				]
 			);
@@ -64,7 +63,7 @@ final class DueHandler {
 			wc_get_logger()->error(
 				sprintf( 'DueHandler: renewing contract %d failed: %s', $contract_id, $e->getMessage() ),
 				[
-					'source'      => self::LOG_SOURCE,
+					'source'      => Package::EXTENSION_SLUG,
 					'contract_id' => $contract_id,
 				]
 			);

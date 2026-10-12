@@ -87,7 +87,6 @@ final class RenewalOrderBuilderTest extends LiteIntegrationTestCase {
 		$this->assertSame( 'cod', $reloaded->get_payment_method() );
 		$this->assertSame( 'Cash on delivery', $reloaded->get_payment_method_title() );
 		$this->assertSame( '42.50', $reloaded->get_total() );
-		$this->assertSame( (string) $contract_id, $reloaded->get_meta( RenewalOrderBuilder::CONTRACT_META ) );
 		$this->assertSame( self::BILLING_ADDRESS['address_1'], $reloaded->get_billing_address_1() );
 		$this->assertSame( self::BILLING_ADDRESS['email'], $reloaded->get_billing_email() );
 		$this->assertSame( self::SHIPPING_ADDRESS['address_1'], $reloaded->get_shipping_address_1() );

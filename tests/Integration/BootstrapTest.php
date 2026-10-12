@@ -96,8 +96,12 @@ final class BootstrapTest extends LiteIntegrationTestCase {
 			'Renewal orders settle on payment.'
 		);
 		$this->assertTrue(
-			$this->hook_has_callback_on( 'woocommerce_order_status_failed', Settlement::class ),
-			'Renewal orders settle on failure.'
+			$this->hook_has_callback_on( 'woocommerce_order_status_changed', Settlement::class ),
+			'Renewal orders settle on every status change.'
+		);
+		$this->assertTrue(
+			$this->hook_has_callback_on( 'woocommerce_trash_order', Settlement::class ),
+			'Renewal orders settle when trashed.'
 		);
 		$this->assertTrue(
 			$this->hook_has_callback_on( 'woocommerce_subscriptions_engine_requires_reusable_payment_method', ReusablePaymentMethod::class ),

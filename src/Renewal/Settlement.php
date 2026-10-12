@@ -70,14 +70,11 @@ final class Settlement {
 	 */
 	public static function register(): void {
 		$instance = new self();
+		// Every status change: settle() reads the outcome off the order (`is_paid()` decides
+		// paid, so paid statuses registered after load are covered too).
+		add_action( 'woocommerce_order_status_changed', [ $instance, 'handle_order' ] );
 		add_action( 'woocommerce_payment_complete', [ $instance, 'handle_order' ] );
-		add_action( 'woocommerce_order_status_failed', [ $instance, 'handle_order' ] );
-		add_action( 'woocommerce_order_status_on-hold', [ $instance, 'handle_order' ] );
-		add_action( 'woocommerce_order_status_cancelled', [ $instance, 'handle_order' ] );
 		add_action( 'woocommerce_trash_order', [ $instance, 'handle_order' ] );
-		foreach ( wc_get_is_paid_statuses() as $paid_status ) {
-			add_action( 'woocommerce_order_status_' . $paid_status, [ $instance, 'handle_order' ] );
-		}
 	}
 
 	/**
