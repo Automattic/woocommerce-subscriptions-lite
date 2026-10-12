@@ -223,11 +223,9 @@ final class RenewalProcessor {
 	 */
 	private function ensure_cycle_order( ContractView $contract, CycleView $cycle ): ?WC_Order {
 		$order_id = $cycle->get_order_id();
-		if ( null !== $order_id ) {
-			$order = wc_get_order( $order_id );
-			if ( $order instanceof WC_Order && ! Settlement::is_dead( $order ) ) {
-				return $order;
-			}
+		$replaced = null === $order_id ? false : wc_get_order( $order_id );
+		if ( $replaced instanceof WC_Order && ! Settlement::is_dead( $replaced ) ) {
+			return $replaced;
 		}
 
 		$order = ( new RenewalOrderBuilder() )->build( $contract, $cycle );
@@ -254,6 +252,12 @@ final class RenewalProcessor {
 		if ( ! $linked ) {
 			$order->delete( true );
 			return null;
+		}
+
+		if ( $replaced instanceof WC_Order ) {
+			// Should the dead order still be paid (a late gateway confirmation), settlement
+			// finds the renewal it was replaced on and never bills it twice.
+			Settlement::mark_replaced( $replaced, $contract->get_id(), $cycle->get_id() );
 		}
 
 		return $order;

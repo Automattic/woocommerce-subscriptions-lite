@@ -57,6 +57,26 @@ final class Settlement {
 	public const REASON_ORDER_CANCELLED = 'order-cancelled';
 
 	/**
+	 * Order meta on a dead renewal order that Renew now replaced: the cycle it billed.
+	 */
+	public const REPLACED_CYCLE_META = '_wcsl_replaced_cycle_id';
+
+	/**
+	 * Order meta on a dead renewal order that Renew now replaced: the contract of that cycle.
+	 */
+	public const REPLACED_CONTRACT_META = '_wcsl_replaced_contract_id';
+
+	/**
+	 * Order meta set once a replaced order's late payment was flagged for a refund.
+	 */
+	private const REFUND_FLAGGED_META = '_wcsl_late_payment_flagged';
+
+	/**
+	 * Cycles read per page when looking up the cycle a replaced order billed.
+	 */
+	private const CYCLE_PAGE_SIZE = 50;
+
+	/**
 	 * Cycle statuses a paid order settles from.
 	 */
 	private const PAYABLE_CYCLE_STATUSES = [ CycleStatus::PENDING, CycleStatus::PROCESSING, CycleStatus::FAILED ];
@@ -118,6 +138,9 @@ final class Settlement {
 
 		$match = $this->find_lite_cycle( $fresh_order->get_id() );
 		if ( null === $match ) {
+			if ( $fresh_order->is_paid() ) {
+				$this->settle_replaced_paid( $fresh_order, $now );
+			}
 			return;
 		}
 
@@ -333,6 +356,94 @@ final class Settlement {
 		if ( in_array( $contract->get_status(), [ ContractStatus::ACTIVE, ContractStatus::ON_HOLD ], true ) ) {
 			SystemHold::place( $contract->get_id() );
 		}
+	}
+
+	/**
+	 * Record on a dead renewal order the cycle a replacement order now bills.
+	 *
+	 * @param WC_Order $order       The replaced order.
+	 * @param int      $contract_id Contract id.
+	 * @param int      $cycle_id    The cycle it billed.
+	 */
+	public static function mark_replaced( WC_Order $order, int $contract_id, int $cycle_id ): void {
+		$order->update_meta_data( self::REPLACED_CONTRACT_META, (string) $contract_id );
+		$order->update_meta_data( self::REPLACED_CYCLE_META, (string) $cycle_id );
+		$order->save();
+	}
+
+	/**
+	 * A replaced renewal order was paid after all. While its renewal is still unpaid, it takes
+	 * the renewal back: the cycle is relinked to it, the unpaid replacement is cancelled, and
+	 * the payment settles. Once the replacement paid the renewal, the customer paid twice:
+	 * the order gets a note and a warning is logged, so the merchant refunds one payment.
+	 *
+	 * @param WC_Order               $order The paid replaced order.
+	 * @param DateTimeImmutable|null $now   The current moment.
+	 */
+	private function settle_replaced_paid( WC_Order $order, ?DateTimeImmutable $now ): void {
+		$contract_id = (int) $order->get_meta( self::REPLACED_CONTRACT_META );
+		$cycle_id    = (int) $order->get_meta( self::REPLACED_CYCLE_META );
+		$contract    = $contract_id > 0 ? Contracts::get( $contract_id ) : null;
+		$cycle       = null === $contract || $cycle_id <= 0 ? null : self::find_cycle( $contract_id, $cycle_id );
+		if ( null === $cycle || Package::EXTENSION_SLUG !== $contract->get_extension_slug() ) {
+			return;
+		}
+
+		$replacement_id = $cycle->get_order_id();
+
+		if ( in_array( $cycle->get_status(), self::PAYABLE_CYCLE_STATUSES, true ) ) {
+			if ( ! Contracts::transition_cycle( $cycle_id, $cycle->get_status(), $cycle->get_status(), [ 'order_id' => $order->get_id() ] ) ) {
+				return;
+			}
+
+			$replacement = null === $replacement_id ? false : wc_get_order( $replacement_id );
+			if ( $replacement instanceof WC_Order && ! $replacement->is_paid() && ! self::is_dead( $replacement ) ) {
+				/* translators: %d: order number. */
+				$replacement->update_status( OrderStatus::CANCELLED, sprintf( __( 'Order #%d paid this renewal after this order replaced it.', 'woocommerce-subscriptions-lite' ), $order->get_id() ) );
+			}
+
+			$this->settle( $order, $now );
+			return;
+		}
+
+		if ( CycleStatus::BILLED !== $cycle->get_status() || $replacement_id === $order->get_id() || '' !== (string) $order->get_meta( self::REFUND_FLAGGED_META ) ) {
+			return;
+		}
+
+		/* translators: %d: order number. */
+		$order->add_order_note( sprintf( __( 'This renewal order was paid after order #%d replaced it and paid the same renewal. Refund one of the two payments.', 'woocommerce-subscriptions-lite' ), (int) $replacement_id ) );
+		$order->update_meta_data( self::REFUND_FLAGGED_META, '1' );
+		$order->save();
+		wc_get_logger()->warning(
+			sprintf( 'Settlement: renewal order %d was paid after order %d replaced it and paid the same renewal; a refund is needed.', $order->get_id(), (int) $replacement_id ),
+			[
+				'source'      => Package::EXTENSION_SLUG,
+				'contract_id' => $contract_id,
+				'order_id'    => $order->get_id(),
+			]
+		);
+	}
+
+	/**
+	 * A contract's cycle by id, read off its chain page by page.
+	 *
+	 * @param int $contract_id Contract id.
+	 * @param int $cycle_id    Cycle id.
+	 */
+	private static function find_cycle( int $contract_id, int $cycle_id ): ?CycleView {
+		$offset = 0;
+		do {
+			$page       = Contracts::get_cycles( $contract_id, self::CYCLE_PAGE_SIZE, $offset );
+			$page_count = count( $page );
+			foreach ( $page as $cycle ) {
+				if ( $cycle->get_id() === $cycle_id ) {
+					return $cycle;
+				}
+			}
+			$offset += self::CYCLE_PAGE_SIZE;
+		} while ( self::CYCLE_PAGE_SIZE === $page_count );
+
+		return null;
 	}
 
 	/**

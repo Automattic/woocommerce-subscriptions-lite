@@ -104,6 +104,60 @@ final class DeadRenewalOrderTest extends LiteIntegrationTestCase {
 		$this->assertSame( ContractStatus::ACTIVE, $this->get_contract( $contract_id )->get_status() );
 	}
 
+	/**
+	 * Cancel the contract's failed renewal order, then let Renew now replace it with a charge
+	 * that ends `$outcome`.
+	 *
+	 * @param string $outcome Stub charge outcome for the replacement.
+	 * @return array{0: int, 1: WC_Order, 2: int} Contract id, replaced order, replacement order id.
+	 */
+	private function replace_a_cancelled_renewal( string $outcome ): array {
+		[ $contract_id, , $order ] = $this->seed( ContractStatus::ON_HOLD, 'failed', CycleStatus::FAILED );
+		$order->update_status( 'cancelled' );
+		$this->support_engine_charges( 'cod', $outcome );
+		( new RowActionController( null, static fn (): bool => true ) )->handle_renew_now( [ 'contract_id' => $contract_id ] );
+		$replacement_id = (int) $this->head( $contract_id )->get_order_id();
+		$this->assertNotSame( $order->get_id(), $replacement_id );
+
+		return [ $contract_id, $order, $replacement_id ];
+	}
+
+	public function test_a_replaced_order_paid_late_takes_back_a_renewal_that_is_still_unpaid(): void {
+		[ $contract_id, $order, $replacement_id ] = $this->replace_a_cancelled_renewal( 'failed' );
+		$this->assertSame( CycleStatus::FAILED, $this->head( $contract_id )->get_status() );
+
+		wc_get_order( $order->get_id() )->payment_complete();
+
+		$head = $this->head( $contract_id );
+		$this->assertSame( CycleStatus::BILLED, $head->get_status() );
+		$this->assertSame( $order->get_id(), $head->get_order_id(), 'The paid order is relinked to the renewal.' );
+		$this->assertSame( 'cancelled', wc_get_order( $replacement_id )->get_status(), 'The unpaid replacement is cancelled.' );
+		$this->assertSame( ContractStatus::ACTIVE, $this->get_contract( $contract_id )->get_status() );
+	}
+
+	public function test_a_replaced_order_paid_after_its_replacement_paid_is_flagged_for_a_refund(): void {
+		[ $contract_id, $order, $replacement_id ] = $this->replace_a_cancelled_renewal( 'paid' );
+		$this->assertSame( CycleStatus::BILLED, $this->head( $contract_id )->get_status() );
+		$this->capture_log();
+
+		wc_get_order( $order->get_id() )->payment_complete();
+		wc_get_order( $order->get_id() )->update_status( 'completed' );
+
+		$this->assertSame( $replacement_id, $this->head( $contract_id )->get_order_id() );
+		$this->assertTrue( $this->has_logged( 'a refund is needed' ) );
+		$notes = wc_get_order_notes( [ 'order_id' => $order->get_id() ] );
+		$this->assertCount(
+			1,
+			array_filter(
+				$notes,
+				static function ( $note ) use ( $replacement_id ): bool {
+					return false !== strpos( $note->content, '#' . $replacement_id );
+				}
+			),
+			'One note names the replacement that paid, however often the order changes status.'
+		);
+	}
+
 	public function test_a_trashed_manual_renewal_order_fails_its_cycle(): void {
 		[ $contract_id, , $order ] = $this->seed( ContractStatus::ON_HOLD, 'pending', CycleStatus::PENDING );
 
