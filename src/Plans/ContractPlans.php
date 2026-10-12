@@ -17,7 +17,9 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Plans;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Plans;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\PlanView;
+use Automattic\WooCommerce\SubscriptionsEngine\Core\ValueObject\BillingPolicy;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
+use DomainException;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -33,6 +35,26 @@ final class ContractPlans {
 	 */
 	public static function for_contract( ContractView $contract ): ?PlanView {
 		return self::for_contracts( [ $contract ] )[ (int) $contract->get_selling_plan_id() ] ?? null;
+	}
+
+	/**
+	 * The billing policy of a contract's live plan, or null when it has none (no plan, a
+	 * deleted or foreign plan, or a billing payload without a usable cadence).
+	 *
+	 * @param ContractView $contract Contract.
+	 */
+	public static function billing_policy_for( ContractView $contract ): ?BillingPolicy {
+		$plan    = self::for_contract( $contract );
+		$billing = null === $plan ? null : $plan->get_billing_policy();
+		if ( null === $billing ) {
+			return null;
+		}
+
+		try {
+			return BillingPolicy::from_array( $billing );
+		} catch ( DomainException $e ) {
+			return null;
+		}
 	}
 
 	/**
