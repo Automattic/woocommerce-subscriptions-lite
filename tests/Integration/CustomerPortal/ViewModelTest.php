@@ -323,21 +323,38 @@ final class ViewModelTest extends LiteIntegrationTestCase {
 	}
 
 	public function test_on_hold_needs_payment_variant_hides_reactivate(): void {
-		// On hold WITH a scheduled next payment = failed-payment retry path:
-		// the needs-payment notice shows and reactivate is hidden.
+		// On hold with an unpaid renewal = failed-payment path: the needs-payment notice
+		// shows with the order's pay link and reactivate is hidden.
 		$detail = ( new ViewModel() )->build_detail(
 			$this->contract(
 				[
-					'status'           => ContractStatus::ON_HOLD,
-					'next_payment_gmt' => '2099-03-01 00:00:00',
+					'status'               => ContractStatus::ON_HOLD,
+					'next_payment_gmt'     => null,
+					'has_unpaid_renewal'   => true,
+					'unpaid_order_pay_url' => 'https://example.com/checkout/order-pay/42/',
 				]
 			)
 		);
 
 		$this->assertTrue( $detail['needs_payment_notice'] );
+		$this->assertSame( 'https://example.com/checkout/order-pay/42/', $detail['pay_url'] );
 		$this->assertFalse( $detail['reactivate_visible'] );
-		$this->assertSame( 'Next payment date', $detail['date_row_label'] );
-		$this->assertSame( $this->date( '2099-03-01 00:00:00' ), $detail['date_row_value'] );
+	}
+
+	public function test_a_hold_with_a_next_payment_and_no_unpaid_renewal_offers_reactivate(): void {
+		$detail = ( new ViewModel() )->build_detail(
+			$this->contract(
+				[
+					'status'               => ContractStatus::ON_HOLD,
+					'next_payment_gmt'     => '2099-03-01 00:00:00',
+					'unpaid_order_pay_url' => 'https://example.com/checkout/order-pay/42/',
+				]
+			)
+		);
+
+		$this->assertTrue( $detail['reactivate_visible'] );
+		$this->assertFalse( $detail['needs_payment_notice'] );
+		$this->assertSame( '', $detail['pay_url'] );
 	}
 
 	public function test_recurring_summary_interval_one_and_many(): void {

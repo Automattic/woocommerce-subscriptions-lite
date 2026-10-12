@@ -2,10 +2,11 @@
 /**
  * EngineDataProvider - reads customer-portal data from the subscriptions engine.
  *
- * The portal's one data source. It consumes engine functionality through the engine's
- * public {@see Subscriptions} facade ONLY - never the engine's `Integration\` internals -
- * and reduces the facade's return types ({@see ContractView}, `WC_Order`) to the
- * domain-ish arrays {@see ViewModel} and the templates consume. Draft contracts are
+ * The portal's one data source. It reads contracts through the engine's public
+ * {@see Contracts} facade ONLY - never the engine's `Integration\` internals - and the
+ * contract's orders through Lite's {@see RelatedOrders} (the engine has no order facade),
+ * and reduces them ({@see ContractView}, `WC_Order`) to the domain-ish arrays
+ * {@see ViewModel} and the templates consume. Draft contracts are
  * hidden from customers: they are left out of the list and read as not found.
  *
  * Ownership / not-found: {@see self::get_contract()} delegates the asymmetric not-found
@@ -30,13 +31,14 @@ namespace Automattic\WooCommerce\SubscriptionsLite\CustomerPortal;
 use DateTimeInterface;
 use WC_Order;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
-use Automattic\WooCommerce\SubscriptionsEngine\Api\Subscriptions;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\PlanView;
 use Automattic\WooCommerce\SubscriptionsLite\Contracts\AddressFields;
 use Automattic\WooCommerce\SubscriptionsLite\Contracts\CustomerVisibility;
+use Automattic\WooCommerce\SubscriptionsLite\Orders\RelatedOrders;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ContractPlans;
 use Automattic\WooCommerce\SubscriptionsLite\Pricing\BillingTerms;
+use Automattic\WooCommerce\SubscriptionsLite\Renewal\UnpaidRenewal;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -99,16 +101,19 @@ final class EngineDataProvider {
 	 * Live `WC_Order` objects are reduced to plain arrays here; none escape the provider.
 	 *
 	 * @param int $contract_id The contract id.
-	 * @param int $limit       Maximum orders to return; -1 for all.
-	 * @param int $offset      Orders to skip (for paging).
+	 * @param int $limit       Billing cycles to read orders from; -1 for all.
+	 * @param int $offset      Billing cycles to skip (for paging).
 	 * @return array<int, array<string, mixed>>
 	 */
 	public function get_related_orders( int $contract_id, int $limit = -1, int $offset = 0 ): array {
+		$contract = Contracts::get( $contract_id );
+		if ( null === $contract ) {
+			return [];
+		}
+
 		$rows = [];
-		foreach ( Subscriptions::get_related_orders( $contract_id, $limit, $offset ) as $order ) {
-			if ( $order instanceof WC_Order ) {
-				$rows[] = $this->order_to_row( $order );
-			}
+		foreach ( RelatedOrders::for_contract( $contract, $limit, $offset ) as $order ) {
+			$rows[] = $this->order_to_row( $order );
 		}
 		return $rows;
 	}
@@ -140,26 +145,41 @@ final class EngineDataProvider {
 	 * Reduce a contract to the domain-ish detail array {@see ViewModel::build_detail()} reads.
 	 *
 	 * The detail array is the list row plus the contract's date stamps, recurring totals,
-	 * line items, and addresses.
+	 * line items, addresses, and whether a renewal waits on payment (with its pay link).
 	 *
 	 * @param ContractView $contract The contract.
 	 * @return array<string, mixed>
 	 */
 	private function contract_to_detail( ContractView $contract ): array {
+		$unpaid_renewal = UnpaidRenewal::find( $contract );
+
 		return array_merge(
 			$this->contract_to_row( $contract, ContractPlans::for_contract( $contract ) ),
 			[
-				'start_gmt'        => $contract->get_start_gmt(),
-				'end_gmt'          => $contract->get_end_gmt(),
-				'last_payment_gmt' => $contract->get_last_payment_gmt(),
-				'last_updated_gmt' => $this->resolve_last_updated_gmt( $contract ),
-				'discount_total'   => $contract->get_discount_total(),
-				'shipping_total'   => $contract->get_shipping_total(),
-				'tax_total'        => $contract->get_tax_total(),
-				'items'            => $this->items( $contract ),
-				'addresses'        => $this->addresses( $contract ),
+				'start_gmt'            => $contract->get_start_gmt(),
+				'end_gmt'              => $contract->get_end_gmt(),
+				'last_payment_gmt'     => $contract->get_last_payment_gmt(),
+				'last_updated_gmt'     => $this->resolve_last_updated_gmt( $contract ),
+				'discount_total'       => $contract->get_discount_total(),
+				'shipping_total'       => $contract->get_shipping_total(),
+				'tax_total'            => $contract->get_tax_total(),
+				'items'                => $this->items( $contract ),
+				'addresses'            => $this->addresses( $contract ),
+				'has_unpaid_renewal'   => null !== $unpaid_renewal,
+				'unpaid_order_pay_url' => null === $unpaid_renewal ? '' : $this->get_pay_url( $unpaid_renewal->get_order_id() ),
 			]
 		);
+	}
+
+	/**
+	 * The payment URL of an unpaid renewal order, or '' when it cannot be paid now.
+	 *
+	 * @param int|null $order_id Renewal order id.
+	 */
+	private function get_pay_url( ?int $order_id ): string {
+		$order = null === $order_id ? false : wc_get_order( $order_id );
+
+		return $order instanceof WC_Order && $order->needs_payment() ? $order->get_checkout_payment_url() : '';
 	}
 
 	/**
