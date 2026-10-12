@@ -15,6 +15,7 @@ use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\CycleView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\CycleStatus;
+use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\SchemaInstaller;
 use Automattic\WooCommerce\SubscriptionsLite\Checkout\ContractCreationHandler;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\CustomerActionRules;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Hold;
@@ -25,6 +26,7 @@ use Automattic\WooCommerce\SubscriptionsLite\Renewal\UnpaidRenewal;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
 use DateTimeImmutable;
 use DateTimeZone;
+use RuntimeException;
 use WC_Order;
 use WC_Order_Item_Product;
 
@@ -174,6 +176,64 @@ final class RenewalScenariosTest extends LiteIntegrationTestCase {
 		$this->assertSame( ContractStatus::ACTIVE, $this->get_contract( $contract_id )->get_status() );
 		$this->assertSame( CycleStatus::BILLED, $this->head( $contract_id )->get_status() );
 		$this->assertGreaterThan( $this->now(), $this->next_payment( $contract_id ) );
+	}
+
+	/**
+	 * Make the next contract write of `next_payment_gmt` throw once, as if the request died
+	 * between the cycle settlement and the contract write that follows it.
+	 */
+	private function interrupt_next_schedule_write(): void {
+		$contracts_table = SchemaInstaller::get_table_name( SchemaInstaller::TABLE_CONTRACTS );
+		$interrupted     = false;
+		add_filter(
+			'query',
+			static function ( $query ) use ( $contracts_table, &$interrupted ) {
+				if ( ! $interrupted && is_string( $query ) && 0 === strpos( $query, "UPDATE `{$contracts_table}`" ) && false !== strpos( $query, 'next_payment_gmt' ) ) {
+					$interrupted = true;
+					throw new RuntimeException( 'The request died.' );
+				}
+				return $query;
+			}
+		);
+	}
+
+	public function test_a_paid_settlement_cut_short_is_completed_by_the_next_dispatch_without_a_second_charge(): void {
+		$this->support_engine_charges( 'cod' );
+		$contract_id = $this->make_contract_paid( '-1 month -2 days' );
+		$due_before  = $this->next_payment( $contract_id );
+		$now         = $this->now();
+		$this->interrupt_next_schedule_write();
+
+		$this->assertSame( 1, $this->run_due_dispatch( $now ) );
+		$this->assertSame( CycleStatus::BILLED, $this->head( $contract_id )->get_status() );
+		$this->assertEquals( $due_before, $this->next_payment( $contract_id ), 'The contract write was lost.' );
+
+		$this->assertSame( 1, $this->run_due_dispatch( $now->modify( '+901 seconds' ) ) );
+
+		$this->assertSame( 1, $this->charge_count() );
+		$this->assertCount( 1, $this->renewal_orders() );
+		$cycle = $this->head( $contract_id );
+		$this->assertSame( 2, $cycle->get_count() );
+		$this->assertSame( $cycle->get_ends_at_gmt(), $this->get_contract( $contract_id )->get_next_payment_gmt() );
+		$this->assertGreaterThan( $now, $this->next_payment( $contract_id ) );
+	}
+
+	public function test_a_failed_settlement_cut_short_holds_the_contract_on_the_next_dispatch(): void {
+		$this->support_engine_charges( 'cod', 'failed' );
+		$contract_id = $this->make_contract_paid( '-1 month -2 days' );
+		$now         = $this->now();
+		$this->interrupt_next_schedule_write();
+
+		$this->assertSame( 1, $this->run_due_dispatch( $now ) );
+		$this->assertSame( CycleStatus::FAILED, $this->head( $contract_id )->get_status() );
+		$this->assertSame( ContractStatus::ACTIVE, $this->get_contract( $contract_id )->get_status(), 'The contract write was lost.' );
+
+		$this->assertSame( 1, $this->run_due_dispatch( $now->modify( '+901 seconds' ) ) );
+
+		$this->assertSame( 1, $this->charge_count() );
+		$contract = $this->get_contract( $contract_id );
+		$this->assertSame( ContractStatus::ON_HOLD, $contract->get_status() );
+		$this->assertNull( $contract->get_next_payment_gmt() );
 	}
 
 	public function test_a_gateway_without_engine_charges_gets_a_manual_renewal_order(): void {

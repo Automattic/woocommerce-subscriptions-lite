@@ -30,6 +30,7 @@ use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ContractPlans;
 use DateTimeImmutable;
 use DateTimeZone;
+use Throwable;
 use WC_Order;
 
 defined( 'ABSPATH' ) || exit;
@@ -68,14 +69,28 @@ final class Settlement {
 	}
 
 	/**
-	 * Hook entry point: settle the order with this id.
+	 * Hook entry point: settle the order with this id. A failure is logged, not rethrown, so
+	 * the order status change that triggered it still completes; a due renewal that finds the
+	 * cycle settled re-applies the contract write ({@see RenewalProcessor}).
 	 *
 	 * @param mixed $order_id Order id.
 	 */
 	public function handle_order( $order_id ): void {
 		$order = is_numeric( $order_id ) ? wc_get_order( (int) $order_id ) : false;
-		if ( $order instanceof WC_Order ) {
+		if ( ! $order instanceof WC_Order ) {
+			return;
+		}
+
+		try {
 			$this->settle( $order );
+		} catch ( Throwable $e ) {
+			wc_get_logger()->error(
+				sprintf( 'Settlement: settling renewal order %d failed: %s', $order->get_id(), $e->getMessage() ),
+				[
+					'source'   => Package::EXTENSION_SLUG,
+					'order_id' => $order->get_id(),
+				]
+			);
 		}
 	}
 

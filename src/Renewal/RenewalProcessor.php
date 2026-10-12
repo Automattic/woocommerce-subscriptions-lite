@@ -114,8 +114,11 @@ final class RenewalProcessor {
 
 	/**
 	 * Take the cycle this run renews: resume the head when it is an interrupted or (manual)
-	 * failed renewal, else append the next one, claimed. Null when another run holds it or
-	 * the head waits on a payment.
+	 * failed renewal, else append the next one, claimed. Null when another run holds it, the
+	 * head waits on a payment, or the head already settled and only the contract write that
+	 * should have followed was lost (re-applied here: a billed head that covers the period
+	 * re-arms the next due moment, a failed head holds the contract), so a settlement cut
+	 * short never bills the same period twice.
 	 *
 	 * @param ContractView      $contract The contract.
 	 * @param CycleView         $head     The newest cycle.
@@ -130,6 +133,7 @@ final class RenewalProcessor {
 				return Contracts::claim_cycle( $head->get_id(), CycleStatus::PENDING, self::LEASE_SECONDS ) ? $head : null;
 			case CycleStatus::FAILED:
 				if ( ! $manual ) {
+					$this->reapply_hold( $contract );
 					return null;
 				}
 				return Contracts::transition_cycle( $head->get_id(), CycleStatus::FAILED, CycleStatus::PENDING, [ 'lease_seconds' => self::LEASE_SECONDS ] ) ? $head : null;
@@ -141,6 +145,11 @@ final class RenewalProcessor {
 		}
 
 		[ $starts_at, $ends_at ] = BillingPeriod::containing( $anchor, $now, $policy );
+
+		if ( CycleStatus::BILLED === $head->get_status() && new DateTimeImmutable( $head->get_ends_at_gmt(), new DateTimeZone( 'UTC' ) ) >= $ends_at ) {
+			$this->reapply_schedule( $contract, $head, $now, $policy );
+			return null;
+		}
 
 		try {
 			return Contracts::add_cycle(
@@ -158,6 +167,40 @@ final class RenewalProcessor {
 		} catch ( DomainException $e ) {
 			return null; // A concurrent run appended this cycle.
 		}
+	}
+
+	/**
+	 * Re-apply the contract write of a paid settlement: the next due moment after the billed
+	 * head, rolled past now.
+	 *
+	 * @param ContractView      $contract The contract.
+	 * @param CycleView         $head     The billed head.
+	 * @param DateTimeImmutable $now      The current moment.
+	 * @param BillingPolicy     $policy   The billing policy.
+	 */
+	private function reapply_schedule( ContractView $contract, CycleView $head, DateTimeImmutable $now, BillingPolicy $policy ): void {
+		$this->log( 'warning', sprintf( 'contract %d is due for a period its newest cycle already billed; its next due moment is re-applied.', $contract->get_id() ), $contract->get_id() );
+		Contracts::update(
+			$contract->get_id(),
+			[ 'next_payment_gmt' => BillingPeriod::next_due_after( new DateTimeImmutable( $head->get_ends_at_gmt(), new DateTimeZone( 'UTC' ) ), $now, $policy ) ]
+		);
+	}
+
+	/**
+	 * Re-apply the contract write of a failed settlement: hold the contract until the
+	 * customer pays the failed order.
+	 *
+	 * @param ContractView $contract The contract.
+	 */
+	private function reapply_hold( ContractView $contract ): void {
+		$this->log( 'warning', sprintf( 'contract %d is due while its newest renewal failed; it is put on hold until the renewal is paid.', $contract->get_id() ), $contract->get_id() );
+		Contracts::update(
+			$contract->get_id(),
+			[
+				'status'           => ContractStatus::ON_HOLD,
+				'next_payment_gmt' => null,
+			]
+		);
 	}
 
 	/**
