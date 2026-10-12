@@ -127,7 +127,7 @@ final class RenewalProcessor {
 	private function take_cycle( ContractView $contract, CycleView $head, DateTimeImmutable $anchor, DateTimeImmutable $now, bool $manual, BillingPolicy $policy ): ?CycleView {
 		switch ( $head->get_status() ) {
 			case CycleStatus::PENDING:
-				return Contracts::claim_cycle( $head->get_id(), self::LEASE_SECONDS ) ? $head : null;
+				return Contracts::claim_cycle( $head->get_id(), CycleStatus::PENDING, self::LEASE_SECONDS ) ? $head : null;
 			case CycleStatus::FAILED:
 				if ( ! $manual ) {
 					return null;
