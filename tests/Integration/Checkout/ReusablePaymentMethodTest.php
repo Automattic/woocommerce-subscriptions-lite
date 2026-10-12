@@ -11,7 +11,6 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Checkout;
 
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Payments;
 use Automattic\WooCommerce\SubscriptionsLite\Cart\CartPlanHooks;
-use Automattic\WooCommerce\SubscriptionsLite\Checkout\ReusablePaymentMethod;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ApplicabilityStore;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ProductApplicability;
 use Automattic\WooCommerce\SubscriptionsLite\Renewal\RenewalOrderBuilder;
@@ -30,7 +29,6 @@ final class ReusablePaymentMethodTest extends LiteIntegrationTestCase {
 			wc_load_cart();
 		}
 		WC()->cart->empty_cart();
-		ReusablePaymentMethod::register();
 	}
 
 	public function tear_down(): void {

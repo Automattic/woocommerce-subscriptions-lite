@@ -48,13 +48,13 @@ final class Bootstrap {
 		if ( class_exists( \Automattic\WooCommerce\SubscriptionsEngine\Package::class ) ) {
 			\Automattic\WooCommerce\SubscriptionsEngine\Package::init();
 
-			// Declare Lite as a consumer of the engine. The engine stays inert until a
-			// consumer registers - its batch renewal dispatcher charges nothing while the
-			// consumer registry is empty - so this registration is what puts the engine to
-			// work on Lite's behalf. Registered on every load so it is present for the
-			// dispatcher's own scheduled request, not just interactive ones.
+			// Declare Lite as a consumer of the engine with its due handler. Lite renews its
+			// own contracts; the engine's due scan only notifies the owner when a contract is
+			// due. Registered on every load so the handler is present for the scan's own
+			// scheduled request, not just interactive ones.
 			\Automattic\WooCommerce\SubscriptionsEngine\Integration\Ownership\ConsumerRegistry::register(
-				Package::EXTENSION_SLUG
+				Package::EXTENSION_SLUG,
+				[ 'contract_due_handler' => [ new Renewal\DueHandler(), 'handle' ] ]
 			);
 		}
 
@@ -83,16 +83,19 @@ final class Bootstrap {
 		Cart\Blocks\StoreApiExtension::register();
 		Cart\Blocks\Integration::register();
 
-		// Checkout: on payment, turn the order into a subscription contract via the
-		// engine factory and schedule its first renewal; require an account for
-		// subscription carts; and show the new subscription on the order-received page.
+		// Checkout: on payment, turn the order into a subscription contract through
+		// the engine's contracts facade; require an account for subscription carts;
+		// tell gateways when a checkout must leave a reusable payment method; and show
+		// the new subscription on the order-received page.
 		Checkout\ContractCreationHandler::register();
 		Checkout\AccountRequirement::register();
+		Checkout\ReusablePaymentMethod::register();
 		Checkout\OrderReceived::register();
 
-		// Renewal: grant BOGO bonus units on engine-built renewal orders. Renewals run
-		// from Action Scheduler, so this registers on every request.
-		Renewal\BogoRenewalBonus::register();
+		// Renewal: settle Lite renewal orders from their status. Gateways report charge
+		// outcomes from any request (Action Scheduler, webhooks), so this registers on
+		// every request.
+		Renewal\Settlement::register();
 
 		// Customer portal (My Account): the subscriptions list + single
 		// subscription detail, with the lifecycle actions (cancel / hold /
@@ -105,8 +108,8 @@ final class Bootstrap {
 		Lifecycle\CustomerActions::register();
 
 		// Admin (back office only): the WooCommerce > Subscriptions list + detail
-		// page and its Renew now / Cancel handlers (the engine's renewal facade and
-		// Lite's cancel flow). Front-end requests never need this.
+		// page and its Renew now / Cancel handlers (Lite's renewal and cancel flows).
+		// Front-end requests never need this.
 		if ( is_admin() ) {
 			Admin\PageController::register();
 			Admin\RowActionController::register();

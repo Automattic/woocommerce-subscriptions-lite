@@ -22,7 +22,11 @@ use Automattic\WooCommerce\SubscriptionsLite\Plans\PlanOrderController;
 use Automattic\WooCommerce\SubscriptionsLite\Pricing\PlanWriteValidation;
 use Automattic\WooCommerce\SubscriptionsLite\ProductPage\PlanPicker;
 use Automattic\WooCommerce\SubscriptionsLite\ProductPage\VariationPlanData;
-use Automattic\WooCommerce\SubscriptionsLite\Renewal\BogoRenewalBonus;
+use Automattic\WooCommerce\SubscriptionsLite\Renewal\DueHandler;
+use Automattic\WooCommerce\SubscriptionsLite\Renewal\Settlement;
+use Automattic\WooCommerce\SubscriptionsLite\Checkout\ReusablePaymentMethod;
+use Automattic\WooCommerce\SubscriptionsLite\Package;
+use Automattic\WooCommerce\SubscriptionsEngine\Integration\Ownership\ConsumerRegistry;
 
 /**
  * @covers \Automattic\WooCommerce\SubscriptionsLite\Bootstrap
@@ -82,9 +86,21 @@ final class BootstrapTest extends LiteIntegrationTestCase {
 			$this->hook_has_callback_on( 'woocommerce_subscriptions_engine_validate_plan', PlanWriteValidation::class ),
 			'Engine plan writes validate Lite pricing terms.'
 		);
+		$handler = ConsumerRegistry::get_contract_due_handler( Package::EXTENSION_SLUG );
+		$this->assertIsArray( $handler, 'Lite registers a due handler with the engine.' );
+		$this->assertInstanceOf( DueHandler::class, $handler[0] );
+		$this->assertSame( 'handle', $handler[1] );
 		$this->assertTrue(
-			$this->hook_has_callback_on( 'woocommerce_subscriptions_engine_renewal_order_created', BogoRenewalBonus::class ),
-			'Engine-built renewal orders get the BOGO bonus.'
+			$this->hook_has_callback_on( 'woocommerce_payment_complete', Settlement::class ),
+			'Renewal orders settle on payment.'
+		);
+		$this->assertTrue(
+			$this->hook_has_callback_on( 'woocommerce_order_status_failed', Settlement::class ),
+			'Renewal orders settle on failure.'
+		);
+		$this->assertTrue(
+			$this->hook_has_callback_on( 'woocommerce_subscriptions_engine_requires_reusable_payment_method', ReusablePaymentMethod::class ),
+			'Lite answers the reusable payment method query.'
 		);
 	}
 

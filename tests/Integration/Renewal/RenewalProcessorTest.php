@@ -26,9 +26,44 @@ use WC_Order;
 final class RenewalProcessorTest extends LiteIntegrationTestCase {
 
 	/**
-	 * The due moment of a checkout contract paid on 2026-01-15 (monthly).
+	 * When the test contracts were paid: a month and two days ago (midnight UTC), so they
+	 * are due now on the wall clock that settlement from order status hooks reads.
+	 *
+	 * @var string
 	 */
-	private const DUE_AT = '2026-02-15 00:00:00';
+	private $paid_at;
+
+	/**
+	 * The due moment of the test contracts (paid + one month).
+	 *
+	 * @var string
+	 */
+	private $due_at;
+
+	/**
+	 * The end of the period a renewal at the due moment bills (due + one month).
+	 *
+	 * @var string
+	 */
+	private $period_end;
+
+	public function set_up(): void {
+		parent::set_up();
+		$paid             = new DateTimeImmutable( 'today -1 month -2 days', new DateTimeZone( 'UTC' ) );
+		$due              = $paid->modify( '+1 month' );
+		$this->paid_at    = $paid->format( 'Y-m-d H:i:s' );
+		$this->due_at     = $due->format( 'Y-m-d H:i:s' );
+		$this->period_end = $due->modify( '+1 month' )->format( 'Y-m-d H:i:s' );
+	}
+
+	/**
+	 * A moment relative to the wall clock.
+	 *
+	 * @param string $modifier Relative modifier, e.g. `+1 hour`.
+	 */
+	private function from_now( string $modifier ): string {
+		return ( new DateTimeImmutable( 'now ' . $modifier, new DateTimeZone( 'UTC' ) ) )->format( 'Y-m-d H:i:s' );
+	}
 
 	/**
 	 * A UTC moment.
@@ -40,23 +75,31 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 	}
 
 	/**
-	 * An active monthly `cod` contract due at {@see self::DUE_AT}.
+	 * An active monthly `cod` contract due at {@see self::$due_at}.
 	 *
 	 * @param array<string, mixed> $args Extra {@see self::create_contract()} args.
 	 */
 	private function make_contract( array $args = [] ): int {
-		return $this->create_contract( $this->create_customer(), $args + [ 'payment_method' => 'cod' ] );
+		return $this->create_contract(
+			$this->create_customer(),
+			$args + [
+				'payment_method' => 'cod',
+				'date_paid'      => $this->paid_at,
+			]
+		);
 	}
 
 	/**
 	 * Run a scheduled renewal at `$now`.
 	 *
 	 * @param int    $contract_id Contract id.
-	 * @param string $now         GMT now.
+	 * @param string $now         GMT now; the wall clock when empty.
 	 * @param bool   $manual      Manual run.
 	 */
-	private function renew( int $contract_id, string $now = '2026-02-15 01:00:00', bool $manual = false ): ?WC_Order {
-		return ( new RenewalProcessor() )->renew( $this->get_contract( $contract_id ), $this->utc( self::DUE_AT ), $this->utc( $now ), $manual );
+	private function renew( int $contract_id, string $now = '', bool $manual = false ): ?WC_Order {
+		$run_at = '' === $now ? $this->from_now( '' ) : $now;
+
+		return ( new RenewalProcessor() )->renew( $this->get_contract( $contract_id ), $this->utc( $this->due_at ), $this->utc( $run_at ), $manual );
 	}
 
 	/**
@@ -103,9 +146,9 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 		$this->assertSame( CycleStatus::BILLED, $cycle->get_status() );
 		$this->assertSame( 2, $cycle->get_count() );
 		$this->assertSame( $order->get_id(), $cycle->get_order_id() );
-		$this->assertSame( self::DUE_AT, $cycle->get_starts_at_gmt() );
-		$this->assertSame( '2026-03-15 00:00:00', $cycle->get_ends_at_gmt() );
-		$this->assertSame( '2026-03-15 00:00:00', $this->get_contract( $contract_id )->get_next_payment_gmt() );
+		$this->assertSame( $this->due_at, $cycle->get_starts_at_gmt() );
+		$this->assertSame( $this->period_end, $cycle->get_ends_at_gmt() );
+		$this->assertSame( $this->period_end, $this->get_contract( $contract_id )->get_next_payment_gmt() );
 		$this->assertSame( ContractStatus::ACTIVE, $this->get_contract( $contract_id )->get_status() );
 	}
 
@@ -129,7 +172,7 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 		$this->assertInstanceOf( WC_Order::class, $this->renew( $contract_id ) );
 		$this->assertSame( CycleStatus::PROCESSING, $this->head( $contract_id )->get_status() );
 
-		$this->assertNull( $this->renew( $contract_id, '2026-02-15 02:00:00' ) );
+		$this->assertNull( $this->renew( $contract_id, $this->from_now( '+1 hour' ) ) );
 		$this->assertSame( 1, $this->charge_count() );
 		$this->assertCount( 1, $this->renewal_order_ids() );
 	}
@@ -142,8 +185,8 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 			[
 				'status'         => CycleStatus::PENDING,
 				'count'          => 2,
-				'starts_at_gmt'  => self::DUE_AT,
-				'ends_at_gmt'    => '2026-03-15 00:00:00',
+				'starts_at_gmt'  => $this->due_at,
+				'ends_at_gmt'    => $this->period_end,
 				'expected_total' => '19.99',
 				'currency'       => 'USD',
 				'lease_seconds'  => 900,
@@ -158,7 +201,13 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 	public function test_an_interrupted_renewal_resumes_its_order_without_building_another(): void {
 		$this->support_engine_charges( 'cod' );
 		$customer_id = $this->create_customer();
-		$contract_id = $this->create_contract( $customer_id, [ 'payment_method' => 'cod' ] );
+		$contract_id = $this->create_contract(
+			$customer_id,
+			[
+				'payment_method' => 'cod',
+				'date_paid'      => $this->paid_at,
+			]
+		);
 		$existing    = $this->create_renewal_order(
 			$contract_id,
 			$customer_id,
@@ -184,7 +233,7 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 		$contract_id = $this->make_contract();
 		$this->renew( $contract_id );
 
-		$this->assertNull( $this->renew( $contract_id, '2026-02-15 02:00:00' ) );
+		$this->assertNull( $this->renew( $contract_id, $this->from_now( '+1 hour' ) ) );
 		$this->assertSame( 1, $this->charge_count() );
 	}
 
@@ -195,7 +244,7 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 		$this->assertInstanceOf( WC_Order::class, $failed );
 		$this->support_engine_charges( 'cod', 'paid' );
 
-		$order = $this->renew( $contract_id, '2026-02-16 00:00:00', true );
+		$order = $this->renew( $contract_id, $this->from_now( '+1 day' ), true );
 
 		$this->assertInstanceOf( WC_Order::class, $order );
 		$this->assertSame( $failed->get_id(), $order->get_id() );
@@ -203,7 +252,7 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 		$this->assertSame( CycleStatus::BILLED, $this->head( $contract_id )->get_status() );
 		$contract = $this->get_contract( $contract_id );
 		$this->assertSame( ContractStatus::ACTIVE, $contract->get_status() );
-		$this->assertSame( '2026-03-15 00:00:00', $contract->get_next_payment_gmt() );
+		$this->assertSame( $this->period_end, $contract->get_next_payment_gmt() );
 	}
 
 	public function test_a_repeat_failure_on_a_retry_fails_the_cycle_again(): void {
@@ -211,7 +260,7 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 		$contract_id = $this->make_contract();
 		$this->renew( $contract_id );
 
-		$this->assertInstanceOf( WC_Order::class, $this->renew( $contract_id, '2026-02-16 00:00:00', true ) );
+		$this->assertInstanceOf( WC_Order::class, $this->renew( $contract_id, $this->from_now( '+1 day' ), true ) );
 
 		$this->assertSame( 2, $this->charge_count() );
 		$this->assertSame( CycleStatus::FAILED, $this->head( $contract_id )->get_status() );
@@ -242,7 +291,7 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 		$this->assertTrue( wc_get_order( $order->get_id() )->is_paid() );
 		$this->assertSame( 0, $this->charge_count() );
 		$this->assertSame( CycleStatus::BILLED, $this->head( $contract_id )->get_status() );
-		$this->assertSame( '2026-03-15 00:00:00', $this->get_contract( $contract_id )->get_next_payment_gmt() );
+		$this->assertSame( $this->period_end, $this->get_contract( $contract_id )->get_next_payment_gmt() );
 	}
 
 	public function test_a_gateway_without_engine_charges_gets_a_manual_renewal_order(): void {

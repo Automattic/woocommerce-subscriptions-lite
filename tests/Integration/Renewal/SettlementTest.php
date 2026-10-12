@@ -36,6 +36,9 @@ final class SettlementTest extends LiteIntegrationTestCase {
 
 	public function set_up(): void {
 		parent::set_up();
+		// Drive settle() directly with a fixed clock; the bootstrap-bound listeners are
+		// covered by the hook test below (hooks are restored after each test).
+		$this->unhook_settlement();
 		$this->fired = [];
 		foreach ( [ 'woocommerce_subscriptions_lite_renewal_paid', 'woocommerce_subscriptions_lite_renewal_failed' ] as $action ) {
 			add_action(
@@ -44,6 +47,23 @@ final class SettlementTest extends LiteIntegrationTestCase {
 					$this->fired[ $action ] = ( $this->fired[ $action ] ?? 0 ) + 1;
 				}
 			);
+		}
+	}
+
+	/**
+	 * Remove the Settlement listeners the bootstrap bound.
+	 */
+	private function unhook_settlement(): void {
+		global $wp_filter;
+
+		foreach ( $wp_filter as $hook_name => $hook ) {
+			foreach ( $hook->callbacks as $priority => $callbacks ) {
+				foreach ( $callbacks as $callback ) {
+					if ( is_array( $callback['function'] ) && $callback['function'][0] instanceof Settlement ) {
+						remove_filter( $hook_name, $callback['function'], $priority );
+					}
+				}
+			}
 		}
 	}
 
@@ -256,5 +276,16 @@ final class SettlementTest extends LiteIntegrationTestCase {
 
 		$this->assertSame( CycleStatus::BILLED, $this->head( $contract_id )->get_status() );
 		$this->assertSame( ContractStatus::PENDING_CANCELLATION, $this->get_contract( $contract_id )->get_status() );
+	}
+
+	public function test_the_bound_listeners_settle_a_renewal_order_from_its_status(): void {
+		[ $contract_id, $order ] = $this->seed_renewal();
+		Settlement::register();
+
+		$order->payment_complete();
+
+		$this->assertSame( CycleStatus::BILLED, $this->head( $contract_id )->get_status() );
+		$this->assertSame( 1, $this->fired['woocommerce_subscriptions_lite_renewal_paid'] ?? 0 );
+		$this->assertGreaterThan( gmdate( 'Y-m-d H:i:s' ), (string) $this->get_contract( $contract_id )->get_next_payment_gmt() );
 	}
 }

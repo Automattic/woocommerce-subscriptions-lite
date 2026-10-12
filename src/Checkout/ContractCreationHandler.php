@@ -5,9 +5,9 @@
  * Fires when an order reaches a paid status (`woocommerce_order_status_changed`,
  * gated by `is_paid()`) - covering immediate, $0, and offline (BACS/cheque)
  * payments alike - and groups the order's plan-carrying line items by selling
- * plan. A single clean group becomes one contract, then its first renewal is
- * armed. Anything that cannot be one contract - two different plans (Premium's
- * multiple-contracts case) or a mix of plan and one-time lines (WOOSUBS-1775) - is
+ * plan. A single clean group becomes one active contract, due at its first
+ * renewal; Lite's own renewal orders never become contracts. Anything that cannot
+ * be one contract - two different plans (Premium's multiple-contracts case) or a mix of plan and one-time lines (WOOSUBS-1775) - is
  * left uncreated with an order note, a log line, and a flag the order-received page
  * reads. The handler never throws out of the hook and never blocks checkout.
  *
@@ -37,15 +37,14 @@ use Automattic\WooCommerce\SubscriptionsLite\Contracts\AddressFields;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ProductPlanResolver;
 use Automattic\WooCommerce\SubscriptionsLite\Pricing\BillingTerms;
-use Automattic\WooCommerce\SubscriptionsLite\Renewal\RenewalWiring;
+use Automattic\WooCommerce\SubscriptionsLite\Renewal\RenewalOrderBuilder;
 
 defined( 'ABSPATH' ) || exit;
 
 /**
  * Create one contract per paid subscription order.
  *
- * Collaborators (the engine facades, plan resolver, and renewal wiring)
- * are called directly; the grouping, mapping, idempotency, and error paths are
+ * Collaborators (the engine facades and the plan resolver) are called directly; the grouping, mapping, idempotency, and error paths are
  * covered by integration tests against real WooCommerce.
  */
 final class ContractCreationHandler {
@@ -117,7 +116,7 @@ final class ContractCreationHandler {
 	 */
 	public function create_contracts_for_order( int $order_id ): void {
 		$order = wc_get_order( $order_id );
-		if ( ! $order instanceof WC_Order || ! $order->is_paid() ) {
+		if ( ! $order instanceof WC_Order || ! $order->is_paid() || RenewalOrderBuilder::CREATED_VIA === $order->get_created_via() ) {
 			return;
 		}
 
@@ -163,16 +162,9 @@ final class ContractCreationHandler {
 
 		if ( null === $contract ) {
 			wc_get_logger()->warning(
-				sprintf( 'ContractCreationHandler: the contract for order %d no longer exists at activation; its first renewal was not scheduled.', $order_id ),
+				sprintf( 'ContractCreationHandler: the contract for order %d no longer exists at activation.', $order_id ),
 				[ 'source' => self::LOG_SOURCE ]
 			);
-			return;
-		}
-
-		try {
-			( new RenewalWiring() )->schedule_first_renewal( $contract );
-		} catch ( Throwable $e ) {
-			$this->log_error( sprintf( 'failed to schedule the first renewal of contract %d: %s', $contract->get_id(), $e->getMessage() ) );
 		}
 	}
 
