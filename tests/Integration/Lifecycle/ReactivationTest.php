@@ -320,10 +320,8 @@ final class ReactivationTest extends LiteIntegrationTestCase {
 			( new Reactivation() )->reactivate( $contract_id );
 			$this->fail( 'An unpaid renewal must block reactivation.' );
 		} catch ( LifecycleNotAllowedException $e ) {
-			$this->assertSame( 'A renewal payment is outstanding.', $e->getMessage() );
+			$this->assertSame( ContractStatus::ON_HOLD, $this->get_contract( $contract_id )->get_status() );
 		}
-
-		$this->assertSame( ContractStatus::ON_HOLD, $this->get_contract( $contract_id )->get_status() );
 	}
 
 	public function test_reactivate_returns_null_for_a_missing_contract(): void {

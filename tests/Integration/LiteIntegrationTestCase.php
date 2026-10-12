@@ -507,6 +507,26 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Record every engine charge request for `$gateway` in {@see self::$charged_order_ids}
+	 * without making the gateway support engine charges, so a test can prove none was made.
+	 *
+	 * @param string $gateway Gateway id.
+	 */
+	protected function spy_charge_attempts( string $gateway ): void {
+		add_action(
+			'woocommerce_subscriptions_engine_scheduled_payment_' . $gateway,
+			function ( $amount, $order ): void {
+				unset( $amount );
+				if ( $order instanceof WC_Order ) {
+					$this->charged_order_ids[] = $order->get_id();
+				}
+			},
+			10,
+			2
+		);
+	}
+
+	/**
 	 * How many charges the stub charge handler received.
 	 */
 	protected function charge_count(): int {

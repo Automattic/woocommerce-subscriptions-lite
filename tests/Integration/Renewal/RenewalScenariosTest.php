@@ -37,6 +37,13 @@ use WC_Order_Item_Product;
 final class RenewalScenariosTest extends LiteIntegrationTestCase {
 
 	/**
+	 * When a contract that is due now was paid. Plain day arithmetic: 33 days back plus one
+	 * month lands 2 to 5 days ago in every month, where `-1 month -2 days` overflows near
+	 * month ends (on 1, 2 and 31 March its due moment is in the future).
+	 */
+	private const PAID_A_PERIOD_AGO = '-33 days';
+
+	/**
 	 * The wall clock (UTC). Settlement from order status hooks reads it, so the scenarios
 	 * dispatch on it too.
 	 */
@@ -47,7 +54,7 @@ final class RenewalScenariosTest extends LiteIntegrationTestCase {
 	/**
 	 * An active monthly contract paid `$paid_ago` before midnight today (UTC).
 	 *
-	 * @param string               $paid_ago Relative modifier, e.g. `-1 month -2 days`.
+	 * @param string               $paid_ago Relative modifier in days, e.g. {@see self::PAID_A_PERIOD_AGO}.
 	 * @param array<string, mixed> $args     Extra {@see self::create_contract()} args.
 	 */
 	private function make_contract_paid( string $paid_ago, array $args = [] ): int {
@@ -105,7 +112,7 @@ final class RenewalScenariosTest extends LiteIntegrationTestCase {
 
 	public function test_a_reactivated_past_due_contract_is_charged_once_across_two_dispatches(): void {
 		$this->support_engine_charges( 'cod' );
-		$contract_id = $this->make_contract_paid( '-1 month -2 days' );
+		$contract_id = $this->make_contract_paid( self::PAID_A_PERIOD_AGO );
 		( new Hold() )->hold( $contract_id );
 		( new Reactivation() )->reactivate( $contract_id );
 		$due_at = $this->next_payment( $contract_id );
@@ -118,12 +125,13 @@ final class RenewalScenariosTest extends LiteIntegrationTestCase {
 		$this->assertSame( 1, $this->charge_count() );
 		$this->assertCount( 1, $this->renewal_orders() );
 		$this->assertSame( CycleStatus::BILLED, $this->head( $contract_id )->get_status() );
+		$this->assertSame( $this->head( $contract_id )->get_ends_at_gmt(), $this->get_contract( $contract_id )->get_next_payment_gmt(), 'The next period starts where the billed one ends.' );
 		$this->assertGreaterThan( $scan_at, $this->next_payment( $contract_id ) );
 	}
 
 	public function test_a_contract_several_periods_behind_is_billed_once_with_the_next_due_in_the_future(): void {
 		$this->support_engine_charges( 'cod' );
-		$contract_id = $this->make_contract_paid( '-5 months -3 days' );
+		$contract_id = $this->make_contract_paid( '-160 days' );
 		$now         = $this->now();
 
 		$this->assertSame( 1, $this->run_due_dispatch( $now ) );
@@ -140,7 +148,7 @@ final class RenewalScenariosTest extends LiteIntegrationTestCase {
 
 	public function test_overlapping_ticks_notify_once_and_an_async_charge_leaves_the_due_scan(): void {
 		$this->support_engine_charges( 'cod', 'on-hold' );
-		$contract_id = $this->make_contract_paid( '-1 month -2 days' );
+		$contract_id = $this->make_contract_paid( self::PAID_A_PERIOD_AGO );
 		$now         = $this->now();
 
 		$this->assertSame( 1, $this->run_due_dispatch( $now ) );
@@ -160,7 +168,7 @@ final class RenewalScenariosTest extends LiteIntegrationTestCase {
 
 	public function test_a_failed_charge_holds_the_contract_until_the_customer_pays_the_order(): void {
 		$this->support_engine_charges( 'cod', 'failed' );
-		$contract_id = $this->make_contract_paid( '-1 month -2 days' );
+		$contract_id = $this->make_contract_paid( self::PAID_A_PERIOD_AGO );
 
 		$this->assertSame( 1, $this->run_due_dispatch( $this->now() ) );
 
@@ -176,6 +184,7 @@ final class RenewalScenariosTest extends LiteIntegrationTestCase {
 
 		$this->assertSame( ContractStatus::ACTIVE, $this->get_contract( $contract_id )->get_status() );
 		$this->assertSame( CycleStatus::BILLED, $this->head( $contract_id )->get_status() );
+		$this->assertSame( $this->head( $contract_id )->get_ends_at_gmt(), $this->get_contract( $contract_id )->get_next_payment_gmt(), 'The next period starts where the paid one ends.' );
 		$this->assertGreaterThan( $this->now(), $this->next_payment( $contract_id ) );
 	}
 
@@ -200,7 +209,7 @@ final class RenewalScenariosTest extends LiteIntegrationTestCase {
 
 	public function test_a_paid_settlement_cut_short_is_completed_by_the_next_dispatch_without_a_second_charge(): void {
 		$this->support_engine_charges( 'cod' );
-		$contract_id = $this->make_contract_paid( '-1 month -2 days' );
+		$contract_id = $this->make_contract_paid( self::PAID_A_PERIOD_AGO );
 		$due_before  = $this->next_payment( $contract_id );
 		$now         = $this->now();
 		$this->interrupt_next_schedule_write();
@@ -221,7 +230,7 @@ final class RenewalScenariosTest extends LiteIntegrationTestCase {
 
 	public function test_a_failed_settlement_cut_short_holds_the_contract_on_the_next_dispatch(): void {
 		$this->support_engine_charges( 'cod', 'failed' );
-		$contract_id = $this->make_contract_paid( '-1 month -2 days' );
+		$contract_id = $this->make_contract_paid( self::PAID_A_PERIOD_AGO );
 		$now         = $this->now();
 		$this->interrupt_next_schedule_write();
 
@@ -239,7 +248,7 @@ final class RenewalScenariosTest extends LiteIntegrationTestCase {
 
 	public function test_a_customer_hold_survives_a_late_async_payment(): void {
 		$this->support_engine_charges( 'cod', 'on-hold' );
-		$contract_id = $this->make_contract_paid( '-1 month -2 days' );
+		$contract_id = $this->make_contract_paid( self::PAID_A_PERIOD_AGO );
 		$this->assertSame( 1, $this->run_due_dispatch( $this->now() ) );
 		$cycle_end = $this->head( $contract_id )->get_ends_at_gmt();
 
@@ -260,8 +269,9 @@ final class RenewalScenariosTest extends LiteIntegrationTestCase {
 
 	public function test_a_gateway_without_engine_charges_gets_a_manual_renewal_order(): void {
 		$this->support_engine_charges( 'cod' );
+		$this->spy_charge_attempts( 'bacs' );
 		$contract_id = $this->make_contract_paid(
-			'-1 month -2 days',
+			self::PAID_A_PERIOD_AGO,
 			[
 				'payment_method'       => 'bacs',
 				'payment_method_title' => 'Direct bank transfer',
@@ -282,7 +292,7 @@ final class RenewalScenariosTest extends LiteIntegrationTestCase {
 
 	public function test_a_failed_renewal_blocks_reactivation(): void {
 		$this->support_engine_charges( 'cod', 'failed' );
-		$contract_id = $this->make_contract_paid( '-1 month -2 days' );
+		$contract_id = $this->make_contract_paid( self::PAID_A_PERIOD_AGO );
 		$this->run_due_dispatch( $this->now() );
 		$contract = $this->get_contract( $contract_id );
 
@@ -302,7 +312,7 @@ final class RenewalScenariosTest extends LiteIntegrationTestCase {
 			[
 				'quantity'       => 2,
 				'payment_method' => 'cod',
-				'date_paid'      => ( new DateTimeImmutable( 'today -1 month -2 days', new DateTimeZone( 'UTC' ) ) )->format( 'Y-m-d H:i:s' ),
+				'date_paid'      => ( new DateTimeImmutable( 'today ' . self::PAID_A_PERIOD_AGO, new DateTimeZone( 'UTC' ) ) )->format( 'Y-m-d H:i:s' ),
 			]
 		);
 		$this->stamp_plan( $order, $plan );

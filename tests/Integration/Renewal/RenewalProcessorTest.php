@@ -13,6 +13,7 @@ use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\CycleView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\CycleStatus;
+use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\SchemaInstaller;
 use Automattic\WooCommerce\SubscriptionsLite\Renewal\RenewalOrderBuilder;
 use Automattic\WooCommerce\SubscriptionsLite\Renewal\RenewalProcessor;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
@@ -26,8 +27,9 @@ use WC_Order;
 final class RenewalProcessorTest extends LiteIntegrationTestCase {
 
 	/**
-	 * When the test contracts were paid: a month and two days ago (midnight UTC), so they
-	 * are due now on the wall clock that settlement from order status hooks reads.
+	 * When the test contracts were paid: 33 days ago (midnight UTC), so they are due now on
+	 * the wall clock that settlement from order status hooks reads (plain day arithmetic:
+	 * plus one month lands 2 to 5 days ago in every month, with no month-end overflow).
 	 *
 	 * @var string
 	 */
@@ -49,7 +51,7 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 
 	public function set_up(): void {
 		parent::set_up();
-		$paid             = new DateTimeImmutable( 'today -1 month -2 days', new DateTimeZone( 'UTC' ) );
+		$paid             = new DateTimeImmutable( 'today -33 days', new DateTimeZone( 'UTC' ) );
 		$due              = $paid->modify( '+1 month' );
 		$this->paid_at    = $paid->format( 'Y-m-d H:i:s' );
 		$this->due_at     = $due->format( 'Y-m-d H:i:s' );
@@ -232,6 +234,103 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 		$this->assertSame( [], $this->renewal_order_ids() );
 	}
 
+	public function test_a_lost_order_link_deletes_the_draft_and_charges_nothing(): void {
+		$this->support_engine_charges( 'cod' );
+		$contract_id = $this->make_contract();
+		// Another actor moves the cycle while this run builds its order.
+		$draft_id = 0;
+		add_action(
+			'woocommerce_after_order_object_save',
+			static function ( $order ) use ( $contract_id, &$draft_id ): void {
+				if ( $order instanceof WC_Order && RenewalOrderBuilder::CREATED_VIA === $order->get_created_via() ) {
+					$draft_id = $order->get_id();
+					$head     = Contracts::get_cycles( $contract_id, 1 )[0];
+					Contracts::transition_cycle( $head->get_id(), CycleStatus::PENDING, CycleStatus::CANCELLED );
+				}
+			}
+		);
+
+		$this->assertNull( $this->renew( $contract_id ) );
+
+		$this->assertGreaterThan( 0, $draft_id );
+		$this->assertFalse( wc_get_order( $draft_id ), 'The draft that lost the link is deleted.' );
+		$this->assertSame( 0, $this->charge_count() );
+		$this->assertSame( CycleStatus::CANCELLED, $this->head( $contract_id )->get_status() );
+	}
+
+	public function test_a_concurrent_append_of_the_same_cycle_leaves_the_renewal_to_the_other_run(): void {
+		global $wpdb;
+
+		$this->support_engine_charges( 'cod' );
+		$contract_id  = $this->make_contract();
+		$cycles_table = SchemaInstaller::get_table_name( SchemaInstaller::TABLE_CYCLES );
+		$raced        = false;
+		// Another run appends cycle 2 between this run's head read and its own append.
+		add_filter(
+			'query',
+			function ( $query ) use ( $contract_id, $cycles_table, &$raced ) {
+				if ( ! $raced && is_string( $query ) && 0 === strpos( $query, "INSERT INTO `{$cycles_table}`" ) ) {
+					$raced = true;
+					Contracts::add_cycle(
+						$contract_id,
+						[
+							'status'         => CycleStatus::PENDING,
+							'count'          => 2,
+							'starts_at_gmt'  => $this->due_at,
+							'ends_at_gmt'    => $this->period_end,
+							'expected_total' => '19.99',
+							'currency'       => 'USD',
+							'lease_seconds'  => 900,
+						]
+					);
+				}
+				return $query;
+			}
+		);
+		$suppressed = $wpdb->suppress_errors( true );
+
+		try {
+			$this->assertNull( $this->renew( $contract_id ) );
+		} finally {
+			$wpdb->suppress_errors( $suppressed );
+		}
+
+		$this->assertTrue( $raced );
+		$this->assertSame( 0, $this->charge_count() );
+		$this->assertSame( [], $this->renewal_order_ids() );
+		$this->assertCount( 2, Contracts::get_cycles( $contract_id ), 'Only the other run appended.' );
+	}
+
+	public function test_an_expired_pending_cycle_without_an_order_is_resumed(): void {
+		global $wpdb;
+
+		$this->support_engine_charges( 'cod' );
+		$contract_id = $this->make_contract();
+		$cycle       = Contracts::add_cycle(
+			$contract_id,
+			[
+				'status'         => CycleStatus::PENDING,
+				'count'          => 2,
+				'starts_at_gmt'  => $this->due_at,
+				'ends_at_gmt'    => $this->period_end,
+				'expected_total' => '19.99',
+				'currency'       => 'USD',
+				'lease_seconds'  => 900,
+			]
+		);
+		// The run that appended it died before building the order; its lease ran out.
+		$wpdb->update( SchemaInstaller::get_table_name( SchemaInstaller::TABLE_CYCLES ), [ 'claimed_until' => '2000-01-01 00:00:00' ], [ 'id' => $cycle->get_id() ] ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+
+		$order = $this->renew( $contract_id );
+
+		$this->assertInstanceOf( WC_Order::class, $order );
+		$head = $this->head( $contract_id );
+		$this->assertSame( $cycle->get_id(), $head->get_id(), 'The interrupted cycle is resumed, not appended again.' );
+		$this->assertSame( CycleStatus::BILLED, $head->get_status() );
+		$this->assertSame( $order->get_id(), $head->get_order_id() );
+		$this->assertSame( [ $order->get_id() ], $this->charged_order_ids );
+	}
+
 	public function test_an_interrupted_renewal_resumes_its_order_without_building_another(): void {
 		$this->support_engine_charges( 'cod' );
 		$customer_id = $this->create_customer();
@@ -306,10 +405,20 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 		$this->capture_log();
 		// WooCommerce does not know the contract's currency, so setting it on the order throws.
 		Contracts::update( $contract_id, [ 'currency' => 'ZZZ' ] );
+		$draft_id = 0;
+		add_action(
+			'woocommerce_after_order_object_save',
+			static function ( $order ) use ( &$draft_id ): void {
+				if ( $order instanceof WC_Order && RenewalOrderBuilder::CREATED_VIA === $order->get_created_via() ) {
+					$draft_id = $order->get_id();
+				}
+			}
+		);
 
 		$this->assertNull( $this->renew( $contract_id ) );
 
-		$this->assertSame( [], $this->renewal_order_ids(), 'The draft is deleted.' );
+		$this->assertGreaterThan( 0, $draft_id );
+		$this->assertFalse( wc_get_order( $draft_id ), 'The draft is deleted.' );
 		$this->assertSame( 0, $this->charge_count() );
 		$this->assertNull( $this->get_contract( $contract_id )->get_next_payment_gmt() );
 		$this->assertTrue( $this->has_logged( 'could not be built' ) );
@@ -348,6 +457,7 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 	}
 
 	public function test_a_gateway_without_engine_charges_gets_a_manual_renewal_order(): void {
+		$this->spy_charge_attempts( 'cod' );
 		$contract_id = $this->make_contract();
 
 		$order = $this->renew( $contract_id );

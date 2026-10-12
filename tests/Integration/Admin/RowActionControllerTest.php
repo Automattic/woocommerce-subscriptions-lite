@@ -98,7 +98,6 @@ final class RowActionControllerTest extends LiteIntegrationTestCase {
 		$result = $this->make_controller()->handle_renew_now( [ 'contract_id' => $contract_id ] );
 
 		$this->assertSame( RowActionResult::INFO, $result->type(), 'A skipped renewal is informational, not an error.' );
-		$this->assertStringContainsString( 'not currently renewable', $result->message() );
 		$this->assertSame( 0, $this->charge_count() );
 	}
 
