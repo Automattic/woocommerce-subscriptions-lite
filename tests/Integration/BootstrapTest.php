@@ -26,6 +26,7 @@ use Automattic\WooCommerce\SubscriptionsLite\Renewal\DueHandler;
 use Automattic\WooCommerce\SubscriptionsLite\Renewal\Settlement;
 use Automattic\WooCommerce\SubscriptionsLite\Checkout\ReusablePaymentMethod;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
+use Automattic\WooCommerce\SubscriptionsEngine\Integration\Dispatch\DueDispatcher;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Ownership\ConsumerRegistry;
 
 /**
@@ -143,6 +144,22 @@ final class BootstrapTest extends LiteIntegrationTestCase {
 		}
 
 		return false;
+	}
+
+	public function test_deactivation_deregisters_lite_and_removes_the_due_scan(): void {
+		$handler = ConsumerRegistry::get_contract_due_handler( Package::EXTENSION_SLUG );
+		$this->assertNotNull( $handler );
+		update_option( 'woocommerce_subscriptions_engine_due_dispatch_scheduled_check', time() + 3600 );
+		as_schedule_recurring_action( time() + 600, 600, DueDispatcher::HOOK, [], DueDispatcher::GROUP, true );
+
+		try {
+			do_action( 'deactivate_' . plugin_basename( Package::get_path() . '/woocommerce-subscriptions-lite.php' ) );
+
+			$this->assertNull( ConsumerRegistry::get_contract_due_handler( Package::EXTENSION_SLUG ) );
+			$this->assertFalse( as_next_scheduled_action( DueDispatcher::HOOK, [], DueDispatcher::GROUP ), 'With no due handler left the scan is removed.' );
+		} finally {
+			ConsumerRegistry::register( Package::EXTENSION_SLUG, [ 'contract_due_handler' => $handler ] );
+		}
 	}
 
 	public function test_init_is_idempotent(): void {
