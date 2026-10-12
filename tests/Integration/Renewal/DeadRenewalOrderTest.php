@@ -21,6 +21,7 @@ use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\LifecycleNotAllowedExcept
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Reactivation;
 use Automattic\WooCommerce\SubscriptionsLite\Renewal\Settlement;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
+use Automattic\WooCommerce\Utilities\OrderUtil;
 use WC_Order;
 
 /**
@@ -170,6 +171,38 @@ final class DeadRenewalOrderTest extends LiteIntegrationTestCase {
 		$this->assertSame( $order_id, $head->get_order_id() );
 		$this->assertSame( 'trash', wc_get_order( $order_id )->get_status(), 'The order was trashed, not deleted.' );
 		$this->assertSame( ContractStatus::ON_HOLD, $this->get_contract( $contract_id )->get_status() );
+	}
+
+	public function test_a_permanently_deleted_unpaid_renewal_order_fails_its_cycle(): void {
+		[ $contract_id, , $order ] = $this->seed( ContractStatus::ACTIVE, 'on-hold', CycleStatus::PROCESSING );
+
+		$order->delete( true );
+
+		$head = $this->head( $contract_id );
+		$this->assertSame( CycleStatus::FAILED, $head->get_status() );
+		$this->assertSame( Settlement::REASON_ORDER_CANCELLED, $head->get_reason() );
+		$this->assertSame( ContractStatus::ON_HOLD, $this->get_contract( $contract_id )->get_status() );
+	}
+
+	public function test_an_unpaid_renewal_order_trashed_from_the_legacy_posts_screen_fails_its_cycle(): void {
+		if ( OrderUtil::custom_orders_table_usage_is_enabled() ) {
+			$this->markTestSkipped( 'The suite runs on the orders table; the legacy posts screen only exists with post storage.' );
+		}
+		[ $contract_id, , $order ] = $this->seed( ContractStatus::ACTIVE, 'on-hold', CycleStatus::PROCESSING );
+
+		wp_trash_post( $order->get_id() );
+
+		$this->assertSame( CycleStatus::FAILED, $this->head( $contract_id )->get_status() );
+		$this->assertSame( ContractStatus::ON_HOLD, $this->get_contract( $contract_id )->get_status() );
+	}
+
+	public function test_a_deleted_paid_renewal_order_changes_nothing(): void {
+		[ $contract_id, , $order ] = $this->seed( ContractStatus::ACTIVE, 'completed', CycleStatus::BILLED );
+
+		$order->delete( true );
+
+		$this->assertSame( CycleStatus::BILLED, $this->head( $contract_id )->get_status() );
+		$this->assertSame( ContractStatus::ACTIVE, $this->get_contract( $contract_id )->get_status() );
 	}
 
 	public function test_a_cancelled_async_renewal_order_holds_an_active_contract(): void {

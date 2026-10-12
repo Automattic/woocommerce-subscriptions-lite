@@ -96,6 +96,50 @@ final class Settlement {
 		add_action( 'woocommerce_order_status_changed', [ $instance, 'handle_order' ] );
 		add_action( 'woocommerce_payment_complete', [ $instance, 'handle_order' ] );
 		add_action( 'woocommerce_trash_order', [ $instance, 'handle_order' ] );
+		// Removal before it happens, while the order can still be read: permanent deletion,
+		// and trash or deletion through the posts screens of the legacy order storage.
+		add_action( 'woocommerce_before_delete_order', [ $instance, 'handle_removed_order' ] );
+		add_action( 'wp_trash_post', [ $instance, 'handle_removed_post' ] );
+		add_action( 'before_delete_post', [ $instance, 'handle_removed_post' ] );
+	}
+
+	/**
+	 * Hook entry point for an order post about to be trashed or deleted (legacy order storage).
+	 *
+	 * @param mixed $post_id Post id.
+	 */
+	public function handle_removed_post( $post_id ): void {
+		if ( is_numeric( $post_id ) && 'shop_order' === get_post_type( (int) $post_id ) ) {
+			$this->handle_removed_order( $post_id );
+		}
+	}
+
+	/**
+	 * Hook entry point for a renewal order about to be trashed or deleted: an unpaid one dies
+	 * like a cancelled one. A failure is logged, not rethrown.
+	 *
+	 * @param mixed $order_id Order id.
+	 */
+	public function handle_removed_order( $order_id ): void {
+		$order = is_numeric( $order_id ) ? wc_get_order( (int) $order_id ) : false;
+		if ( ! $order instanceof WC_Order || RenewalOrderBuilder::CREATED_VIA !== $order->get_created_via() || $order->is_paid() ) {
+			return;
+		}
+
+		try {
+			$match = $this->find_lite_cycle( $order->get_id() );
+			if ( null !== $match ) {
+				$this->settle_dead( $match['contract'], $match['cycle'] );
+			}
+		} catch ( Throwable $e ) {
+			wc_get_logger()->error(
+				sprintf( 'Settlement: settling removed renewal order %d failed: %s', $order->get_id(), $e->getMessage() ),
+				[
+					'source'   => Package::EXTENSION_SLUG,
+					'order_id' => $order->get_id(),
+				]
+			);
+		}
 	}
 
 	/**
