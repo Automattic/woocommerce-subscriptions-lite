@@ -19,6 +19,7 @@ use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ContractPlans;
+use Automattic\WooCommerce\SubscriptionsLite\Renewal\UnpaidRenewal;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -39,7 +40,7 @@ final class Reactivation {
 	 * @param int                    $contract_id Contract id.
 	 * @param DateTimeImmutable|null $now         The current moment; the UTC wall clock when omitted.
 	 * @return ContractView|null The reactivated contract, or null when it does not exist or is not Lite's.
-	 * @throws LifecycleNotAllowedException If the contract is not on hold.
+	 * @throws LifecycleNotAllowedException If the contract is not on hold, or a renewal payment is outstanding.
 	 */
 	public function reactivate( int $contract_id, ?DateTimeImmutable $now = null ): ?ContractView {
 		$contract = Contracts::get( $contract_id );
@@ -50,6 +51,11 @@ final class Reactivation {
 		// An active contract must never reach the forward roll: it would skip an owed charge.
 		if ( ContractStatus::ON_HOLD !== $contract->get_status() ) {
 			throw new LifecycleNotAllowedException( 'Only an on-hold contract can be reactivated.' );
+		}
+
+		// A renewal waiting on payment resumes the contract when it is paid, not before.
+		if ( null !== UnpaidRenewal::find( $contract ) ) {
+			throw new LifecycleNotAllowedException( 'A renewal payment is outstanding.' );
 		}
 
 		$utc          = new DateTimeZone( 'UTC' );

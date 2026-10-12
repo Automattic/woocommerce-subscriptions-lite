@@ -15,6 +15,7 @@ use DateTimeZone;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
+use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\CycleStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\PlanStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\SchemaInstaller;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Hold;
@@ -295,6 +296,34 @@ final class ReactivationTest extends LiteIntegrationTestCase {
 
 		$this->expectException( LifecycleNotAllowedException::class );
 		( new Reactivation() )->reactivate( $contract_id, $this->utc( '2026-06-01 00:00:00' ) );
+	}
+
+	public function test_reactivate_rejects_a_contract_with_an_unpaid_renewal(): void {
+		$customer_id = $this->create_customer();
+		$contract_id = $this->create_contract(
+			$customer_id,
+			[
+				'payment_method' => 'cod',
+				'status'         => 'on-hold',
+			]
+		);
+		$this->create_renewal_order(
+			$contract_id,
+			$customer_id,
+			[
+				'status'       => 'failed',
+				'cycle_status' => CycleStatus::FAILED,
+			]
+		);
+
+		try {
+			( new Reactivation() )->reactivate( $contract_id );
+			$this->fail( 'An unpaid renewal must block reactivation.' );
+		} catch ( LifecycleNotAllowedException $e ) {
+			$this->assertSame( 'A renewal payment is outstanding.', $e->getMessage() );
+		}
+
+		$this->assertSame( ContractStatus::ON_HOLD, $this->get_contract( $contract_id )->get_status() );
 	}
 
 	public function test_reactivate_returns_null_for_a_missing_contract(): void {
