@@ -166,7 +166,7 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 	}
 
 	public function test_an_async_charge_leaves_the_cycle_processing_and_is_not_charged_again(): void {
-		$this->support_engine_charges( 'cod', 'async' );
+		$this->support_engine_charges( 'cod', 'on-hold' );
 		$contract_id = $this->make_contract();
 
 		$this->assertInstanceOf( WC_Order::class, $this->renew( $contract_id ) );
@@ -175,6 +175,40 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 		$this->assertNull( $this->renew( $contract_id, $this->from_now( '+1 hour' ) ) );
 		$this->assertSame( 1, $this->charge_count() );
 		$this->assertCount( 1, $this->renewal_order_ids() );
+	}
+
+	/**
+	 * @dataProvider provide_charges_without_an_outcome
+	 *
+	 * @param string $outcome Stub charge outcome.
+	 */
+	public function test_a_charge_that_leaves_the_order_pending_is_a_failed_charge( string $outcome ): void {
+		$this->support_engine_charges( 'cod', $outcome );
+		$contract_id = $this->make_contract();
+
+		$order = $this->renew( $contract_id );
+
+		$this->assertInstanceOf( WC_Order::class, $order );
+		$this->assertSame( 1, $this->charge_count() );
+		$reloaded = wc_get_order( $order->get_id() );
+		$this->assertSame( 'failed', $reloaded->get_status() );
+		$this->assertTrue( $reloaded->needs_payment(), 'The customer can still pay the order.' );
+		$this->assertSame( CycleStatus::FAILED, $this->head( $contract_id )->get_status() );
+		$contract = $this->get_contract( $contract_id );
+		$this->assertSame( ContractStatus::ON_HOLD, $contract->get_status() );
+		$this->assertNull( $contract->get_next_payment_gmt() );
+	}
+
+	/**
+	 * Charges that report no outcome.
+	 *
+	 * @return array<string, array{0: string}>
+	 */
+	public function provide_charges_without_an_outcome(): array {
+		return [
+			'the gateway does nothing' => [ 'none' ],
+			'the gateway throws'       => [ 'throw' ],
+		];
 	}
 
 	public function test_a_cycle_held_by_another_run_is_left_alone(): void {

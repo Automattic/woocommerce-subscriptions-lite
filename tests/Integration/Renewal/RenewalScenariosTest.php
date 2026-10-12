@@ -136,7 +136,7 @@ final class RenewalScenariosTest extends LiteIntegrationTestCase {
 	}
 
 	public function test_overlapping_ticks_notify_once_and_an_untouched_due_moment_waits_for_the_claim_to_expire(): void {
-		$this->support_engine_charges( 'cod', 'async' );
+		$this->support_engine_charges( 'cod', 'on-hold' );
 		$contract_id = $this->make_contract_paid( '-1 month -2 days' );
 		$now         = $this->now();
 

@@ -134,6 +134,7 @@ final class RenewalProcessor {
 				}
 				return Contracts::transition_cycle( $head->get_id(), CycleStatus::FAILED, CycleStatus::PENDING, [ 'lease_seconds' => self::LEASE_SECONDS ] ) ? $head : null;
 			case CycleStatus::PROCESSING:
+				$this->log( 'info', sprintf( 'contract %d is due while its renewal awaits a charge confirmation; nothing is charged.', $contract->get_id() ), $contract->get_id() );
 				return null;
 			default:
 				break;
@@ -202,6 +203,11 @@ final class RenewalProcessor {
 	 * through the engine when the gateway accepts engine charges, else leave a manual
 	 * renewal order for the customer and hold the contract.
 	 *
+	 * After a charge the order status is the outcome: paid, failed, or on-hold while an
+	 * asynchronous charge awaits confirmation. An order still pending (the charge was not
+	 * handed over, the gateway threw, or it reported nothing) is a failed charge: the order
+	 * is marked failed, so the cycle fails and the contract waits on the customer's payment.
+	 *
 	 * @param ContractView      $contract The contract.
 	 * @param CycleView         $cycle    The cycle being billed.
 	 * @param WC_Order          $order    The pending renewal order.
@@ -222,7 +228,18 @@ final class RenewalProcessor {
 		}
 
 		if ( Payments::supports_gateway( (string) $contract->get_payment_method() ) ) {
-			Payments::charge( $order );
+			$handed_over = Payments::charge( $order );
+			$charged     = wc_get_order( $order->get_id() );
+			if ( $charged instanceof WC_Order && $charged->has_status( OrderStatus::PENDING ) ) {
+				// No outcome reported: nothing is in flight, so this is a failed charge the
+				// customer can still pay on order-pay.
+				$charged->update_status(
+					OrderStatus::FAILED,
+					$handed_over
+						? __( 'Renewal payment failed: the payment gateway did not report an outcome for the charge.', 'woocommerce-subscriptions-lite' )
+						: __( 'Renewal payment failed: the charge could not be handed to the payment gateway.', 'woocommerce-subscriptions-lite' )
+				);
+			}
 			$settlement->settle( $order, $now );
 			return;
 		}

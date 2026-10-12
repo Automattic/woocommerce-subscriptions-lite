@@ -39,6 +39,7 @@ use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Renewal\RenewalOrderBuilder;
 use DateTimeImmutable;
 use DateTimeZone;
+use RuntimeException;
 use WC_Order;
 use WC_Product_Simple;
 use WP_UnitTestCase;
@@ -429,7 +430,8 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 
 	/**
 	 * Outcome of the stub charge handler installed by {@see self::support_engine_charges()}:
-	 * `paid`, `failed`, `on-hold`, or `async` (the order is left pending).
+	 * `paid`, `failed`, `on-hold` (an asynchronous charge), `none` (the order is left pending)
+	 * or `throw` (the gateway throws, leaving the order pending).
 	 *
 	 * @var string
 	 */
@@ -493,6 +495,8 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 					case 'on-hold':
 						$order->update_status( 'on-hold' );
 						break;
+					case 'throw':
+						throw new RuntimeException( 'The gateway is unreachable.' );
 					default:
 						break;
 				}

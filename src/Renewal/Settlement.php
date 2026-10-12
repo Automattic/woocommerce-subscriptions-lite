@@ -9,7 +9,8 @@
  *   moment armed past now; a winding-down or cancelled contract only records the payment;
  * - failed: cycle failed; an active contract goes on hold with no due moment, and the
  *   customer pays the failed order to resume;
- * - pending or on-hold (an asynchronous charge): cycle processing, so it is not charged again.
+ * - on-hold (an asynchronous charge awaits confirmation): cycle processing, so it is not
+ *   charged again.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Renewal
  */
@@ -101,7 +102,7 @@ final class Settlement {
 			$this->settle_paid( $fresh_order, $match['contract'], $match['cycle'], $utc_now );
 		} elseif ( $fresh_order->has_status( OrderStatus::FAILED ) ) {
 			$this->settle_failed( $fresh_order, $match['contract'], $match['cycle'], $utc_now );
-		} elseif ( $fresh_order->has_status( [ OrderStatus::PENDING, OrderStatus::ON_HOLD ] ) ) {
+		} elseif ( $fresh_order->has_status( OrderStatus::ON_HOLD ) ) {
 			$this->settle_in_progress( $match['cycle'] );
 		}
 	}

@@ -205,12 +205,13 @@ final class SettlementTest extends LiteIntegrationTestCase {
 		$this->assertSame( [], $this->fired );
 	}
 
-	public function test_a_pending_order_after_a_charge_moves_the_cycle_to_processing(): void {
+	public function test_a_pending_order_leaves_the_cycle_alone(): void {
 		[ $contract_id, $order ] = $this->seed_renewal( 'pending' );
 
 		( new Settlement() )->settle( $order );
 
-		$this->assertSame( CycleStatus::PROCESSING, $this->head( $contract_id )->get_status() );
+		$this->assertSame( CycleStatus::PENDING, $this->head( $contract_id )->get_status() );
+		$this->assertSame( [], $this->fired );
 	}
 
 	public function test_an_order_that_is_not_a_renewal_order_is_ignored(): void {
