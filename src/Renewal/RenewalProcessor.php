@@ -265,9 +265,10 @@ final class RenewalProcessor {
 	 * renewal order for the customer and hold the contract.
 	 *
 	 * After a charge the order status is the outcome: paid, failed, or on-hold while an
-	 * asynchronous charge awaits confirmation. An order still pending (the charge was not
-	 * handed over, the gateway threw, or it reported nothing) is a failed charge: the order
-	 * is marked failed, so the cycle fails and the contract waits on the customer's payment.
+	 * asynchronous charge awaits confirmation. An order left pending is a failed charge,
+	 * whatever the reason (not handed over, the gateway threw, or it reported nothing): the
+	 * order is marked failed, so the cycle fails and the contract waits on the customer's
+	 * payment. A gateway that paid and then threw left a paid order, which settles as paid.
 	 *
 	 * @param ContractView      $contract The contract.
 	 * @param CycleView         $cycle    The cycle being billed.
@@ -293,12 +294,13 @@ final class RenewalProcessor {
 			$charged     = wc_get_order( $order->get_id() );
 			if ( $charged instanceof WC_Order && $charged->has_status( OrderStatus::PENDING ) ) {
 				// No outcome reported: nothing is in flight, so this is a failed charge the
-				// customer can still pay on order-pay.
+				// customer can still pay on order-pay. A false hand-over may also mean the
+				// gateway threw part way, so the note does not claim the charge never ran.
 				$charged->update_status(
 					OrderStatus::FAILED,
 					$handed_over
 						? __( 'Renewal payment failed: the payment gateway did not report an outcome for the charge.', 'woocommerce-subscriptions-lite' )
-						: __( 'Renewal payment failed: the charge could not be handed to the payment gateway.', 'woocommerce-subscriptions-lite' )
+						: __( 'Renewal payment failed: the payment could not be completed automatically. Check the payment gateway logs before taking a payment again.', 'woocommerce-subscriptions-lite' )
 				);
 			}
 			$settlement->settle( $order, $now );

@@ -197,6 +197,15 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 		$reloaded = wc_get_order( $order->get_id() );
 		$this->assertSame( 'failed', $reloaded->get_status() );
 		$this->assertTrue( $reloaded->needs_payment(), 'The customer can still pay the order.' );
+		$this->assertCount(
+			1,
+			wc_get_order_notes(
+				[
+					'order_id' => $order->get_id(),
+					'search'   => 'Renewal payment failed',
+				]
+			)
+		);
 		$this->assertSame( CycleStatus::FAILED, $this->head( $contract_id )->get_status() );
 		$contract = $this->get_contract( $contract_id );
 		$this->assertSame( ContractStatus::ON_HOLD, $contract->get_status() );
