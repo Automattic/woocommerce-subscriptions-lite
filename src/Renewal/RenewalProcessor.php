@@ -204,8 +204,9 @@ final class RenewalProcessor {
 	}
 
 	/**
-	 * The order of a taken cycle: its linked order when it has one, else a new draft built
-	 * and linked while the lease is held.
+	 * The order of a taken cycle: its linked order when it has one that can still be paid,
+	 * else a new draft built and linked while the lease is held (a cancelled, trashed or
+	 * deleted order is replaced).
 	 *
 	 * @param ContractView $contract The contract.
 	 * @param CycleView    $cycle    The taken cycle.
@@ -214,7 +215,7 @@ final class RenewalProcessor {
 		$order_id = $cycle->get_order_id();
 		if ( null !== $order_id ) {
 			$order = wc_get_order( $order_id );
-			if ( $order instanceof WC_Order ) {
+			if ( $order instanceof WC_Order && ! Settlement::is_dead( $order ) ) {
 				return $order;
 			}
 		}

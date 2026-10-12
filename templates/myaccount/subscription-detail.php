@@ -107,10 +107,12 @@ $has_actions = $detail['cancel_visible'] || $detail['hold_visible'] || $detail['
 
 			<?php if ( $detail['needs_payment_notice'] ) : ?>
 				<div class="woocommerce-message woocommerce-info subscription-needs-payment-notice">
-					<?php if ( '' !== $detail['pay_url'] ) : ?>
-						<a href="<?php echo esc_url( $detail['pay_url'] ); ?>" class="button wc-forward"><?php esc_html_e( 'Pay now', 'woocommerce-subscriptions-lite' ); ?></a>
-					<?php endif; ?>
 					<?php esc_html_e( 'A renewal payment for this subscription is outstanding. The subscription resumes once it is paid.', 'woocommerce-subscriptions-lite' ); ?>
+					<?php if ( '' !== $detail['pay_url'] ) : ?>
+						<a href="<?php echo esc_url( $detail['pay_url'] ); ?>" class="button wc-forward<?php echo esc_attr( $wp_button_class ); ?>"><?php esc_html_e( 'Pay now', 'woocommerce-subscriptions-lite' ); ?></a>
+					<?php else : ?>
+						<?php esc_html_e( 'Please contact us to arrange the payment.', 'woocommerce-subscriptions-lite' ); ?>
+					<?php endif; ?>
 				</div>
 			<?php endif; ?>
 

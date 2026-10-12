@@ -117,6 +117,25 @@ final class RowActionControllerTest extends LiteIntegrationTestCase {
 		$this->assertSame( ContractStatus::ACTIVE, $this->get_contract( $contract_id )->get_status() );
 	}
 
+	public function test_renew_now_reports_a_failed_charge_as_an_error(): void {
+		$this->support_engine_charges( 'cod', 'failed' );
+		$contract_id = $this->create_contract( $this->create_customer(), [ 'payment_method' => 'cod' ] );
+
+		$result = $this->make_controller()->handle_renew_now( [ 'contract_id' => $contract_id ] );
+
+		$this->assertSame( RowActionResult::ERROR, $result->type() );
+		$this->assertSame( 1, $this->charge_count() );
+	}
+
+	public function test_renew_now_reports_a_manual_renewal_order_as_awaiting_payment(): void {
+		$contract_id = $this->create_contract( $this->create_customer(), [ 'payment_method' => 'bacs' ] );
+
+		$result = $this->make_controller()->handle_renew_now( [ 'contract_id' => $contract_id ] );
+
+		$this->assertSame( RowActionResult::INFO, $result->type() );
+		$this->assertSame( ContractStatus::ON_HOLD, $this->get_contract( $contract_id )->get_status() );
+	}
+
 	public function test_renew_now_is_forbidden_without_the_capability(): void {
 		$this->support_engine_charges( 'cod' );
 		$contract_id = $this->create_contract( $this->create_customer(), [ 'payment_method' => 'cod' ] );

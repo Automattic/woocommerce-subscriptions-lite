@@ -269,7 +269,36 @@ final class EndpointsRenderTest extends LiteIntegrationTestCase {
 
 		$this->assertStringContainsString( 'subscription-needs-payment-notice', $html );
 		$this->assertStringContainsString( 'href="' . esc_url( $order->get_checkout_payment_url() ) . '"', $html );
+		$this->assertLessThan(
+			strpos( $html, 'href="' . esc_url( $order->get_checkout_payment_url() ) . '"' ),
+			strpos( $html, 'renewal payment for this subscription is outstanding' ),
+			'The explanation comes before the Pay now link.'
+		);
 		$this->assertStringNotContainsString( 'actions.submitReactivate', $html );
+	}
+
+	public function test_an_unpaid_renewal_whose_order_was_cancelled_asks_the_customer_to_get_in_touch(): void {
+		$contract_id = $this->create_contract( $this->customer_id, [ 'status' => 'on-hold' ] );
+		$order       = $this->create_renewal_order(
+			$contract_id,
+			$this->customer_id,
+			[
+				'status'       => 'failed',
+				'cycle_status' => CycleStatus::FAILED,
+			]
+		);
+		$order->update_status( 'cancelled' );
+
+		$endpoints = new Endpoints();
+		$html      = $this->capture(
+			static function () use ( $endpoints, $contract_id ): void {
+				$endpoints->render_detail( $contract_id );
+			}
+		);
+
+		$this->assertStringContainsString( 'subscription-needs-payment-notice', $html );
+		$this->assertStringNotContainsString( esc_url( $order->get_checkout_payment_url() ), $html );
+		$this->assertStringContainsString( 'contact us', $html );
 	}
 
 	public function test_a_customer_hold_with_a_next_payment_shows_reactivate_and_no_notice(): void {

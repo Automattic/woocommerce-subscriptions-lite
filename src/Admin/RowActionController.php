@@ -26,6 +26,8 @@ declare( strict_types=1 );
 namespace Automattic\WooCommerce\SubscriptionsLite\Admin;
 
 use Throwable;
+use WC_Order;
+use Automattic\WooCommerce\Enums\OrderStatus;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Cancellation;
 use Automattic\WooCommerce\SubscriptionsLite\Renewal\RenewalProcessor;
 
@@ -177,13 +179,44 @@ final class RowActionController {
 			);
 		}
 
-		return RowActionResult::success(
-			sprintf(
+		return $this->renewal_outcome( $order, $contract_id );
+	}
+
+	/**
+	 * Report what a Renew now actually did, read off the renewal order's status.
+	 *
+	 * @param WC_Order $order       The renewal order.
+	 * @param int      $contract_id Subscription number.
+	 */
+	private function renewal_outcome( WC_Order $order, int $contract_id ): RowActionResult {
+		$fresh    = wc_get_order( $order->get_id() );
+		$order    = $fresh instanceof WC_Order ? $fresh : $order;
+		$order_id = (int) $order->get_id();
+
+		if ( $order->is_paid() ) {
+			return RowActionResult::success(
 				/* translators: 1: renewal order number, 2: subscription number. */
-				__( 'Renewal order #%1$d created for subscription #%2$d.', 'woocommerce-subscriptions-lite' ),
-				(int) $order->get_id(),
-				$contract_id
-			)
+				sprintf( __( 'Renewal order #%1$d for subscription #%2$d was paid.', 'woocommerce-subscriptions-lite' ), $order_id, $contract_id )
+			);
+		}
+
+		if ( $order->has_status( OrderStatus::FAILED ) ) {
+			return RowActionResult::failed(
+				/* translators: 1: renewal order number, 2: subscription number. */
+				sprintf( __( 'Renewal order #%1$d for subscription #%2$d could not be charged. The subscription is on hold until the order is paid.', 'woocommerce-subscriptions-lite' ), $order_id, $contract_id )
+			);
+		}
+
+		if ( $order->has_status( OrderStatus::ON_HOLD ) ) {
+			return RowActionResult::info(
+				/* translators: 1: renewal order number, 2: subscription number. */
+				sprintf( __( 'Renewal order #%1$d for subscription #%2$d awaits the payment gateway\'s confirmation.', 'woocommerce-subscriptions-lite' ), $order_id, $contract_id )
+			);
+		}
+
+		return RowActionResult::info(
+			/* translators: 1: renewal order number, 2: subscription number. */
+			sprintf( __( 'Renewal order #%1$d for subscription #%2$d awaits the customer\'s payment.', 'woocommerce-subscriptions-lite' ), $order_id, $contract_id )
 		);
 	}
 

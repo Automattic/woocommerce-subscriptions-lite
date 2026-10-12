@@ -10,7 +10,10 @@
  * - failed: cycle failed; an active contract goes on hold with no due moment, and the
  *   customer pays the failed order to resume;
  * - on-hold (an asynchronous charge awaits confirmation): cycle processing and no due
- *   moment, so it is not charged again.
+ *   moment, so it is not charged again;
+ * - cancelled or trashed while unpaid: cycle failed (`order-cancelled`); an active contract
+ *   goes on hold, as for a failed payment, so a dead order never renews for free. The
+ *   merchant can restore the order or use Renew now, which builds a new one.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Renewal
  */
@@ -46,6 +49,11 @@ final class Settlement {
 	public const REASON_PAYMENT_FAILED = 'payment-failed';
 
 	/**
+	 * Failure reason recorded on an unpaid cycle whose renewal order was cancelled or trashed.
+	 */
+	public const REASON_ORDER_CANCELLED = 'order-cancelled';
+
+	/**
 	 * Cycle statuses a paid order settles from.
 	 */
 	private const PAYABLE_CYCLE_STATUSES = [ CycleStatus::PENDING, CycleStatus::PROCESSING, CycleStatus::FAILED ];
@@ -63,6 +71,8 @@ final class Settlement {
 		add_action( 'woocommerce_payment_complete', [ $instance, 'handle_order' ] );
 		add_action( 'woocommerce_order_status_failed', [ $instance, 'handle_order' ] );
 		add_action( 'woocommerce_order_status_on-hold', [ $instance, 'handle_order' ] );
+		add_action( 'woocommerce_order_status_cancelled', [ $instance, 'handle_order' ] );
+		add_action( 'woocommerce_trash_order', [ $instance, 'handle_order' ] );
 		foreach ( wc_get_is_paid_statuses() as $paid_status ) {
 			add_action( 'woocommerce_order_status_' . $paid_status, [ $instance, 'handle_order' ] );
 		}
@@ -119,6 +129,8 @@ final class Settlement {
 			$this->settle_failed( $fresh_order, $match['contract'], $match['cycle'], $utc_now );
 		} elseif ( $fresh_order->has_status( OrderStatus::ON_HOLD ) ) {
 			$this->settle_in_progress( $match['contract'], $match['cycle'] );
+		} elseif ( self::is_dead( $fresh_order ) ) {
+			$this->settle_dead( $match['contract'], $match['cycle'] );
 		}
 	}
 
@@ -235,6 +247,39 @@ final class Settlement {
 			&& Contracts::transition_cycle( $cycle->get_id(), CycleStatus::PENDING, CycleStatus::PROCESSING ) ) {
 			Contracts::update( $contract->get_id(), [ 'next_payment_gmt' => null ] );
 		}
+	}
+
+	/**
+	 * An unpaid cycle whose order was cancelled or trashed fails, and an active contract goes
+	 * on hold: the renewal is still owed, and only a payment resumes the contract.
+	 *
+	 * @param ContractView $contract The contract.
+	 * @param CycleView    $cycle    The cycle the order bills.
+	 */
+	private function settle_dead( ContractView $contract, CycleView $cycle ): void {
+		if ( ! in_array( $cycle->get_status(), self::OPEN_CYCLE_STATUSES, true )
+			|| ! Contracts::transition_cycle( $cycle->get_id(), $cycle->get_status(), CycleStatus::FAILED, [ 'reason' => self::REASON_ORDER_CANCELLED ] ) ) {
+			return;
+		}
+
+		if ( ContractStatus::ACTIVE === $contract->get_status() ) {
+			Contracts::update(
+				$contract->get_id(),
+				[
+					'status'           => ContractStatus::ON_HOLD,
+					'next_payment_gmt' => null,
+				]
+			);
+		}
+	}
+
+	/**
+	 * Whether a renewal order can no longer be paid as it is: cancelled or trashed.
+	 *
+	 * @param WC_Order $order The order.
+	 */
+	public static function is_dead( WC_Order $order ): bool {
+		return $order->has_status( [ OrderStatus::CANCELLED, OrderStatus::TRASH ] );
 	}
 
 	/**
