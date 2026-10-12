@@ -135,7 +135,10 @@ final class Settlement {
 	}
 
 	/**
-	 * The paid order bills its cycle; the contract resumes or records the payment.
+	 * The paid order bills its cycle; the contract resumes or records the payment. A repeat
+	 * paid signal for the newest cycle, already billed by this order, completes a contract
+	 * write that was cut short (a held, manual or async renewal has no due moment, so the due
+	 * scan never would).
 	 *
 	 * @param WC_Order          $order    The paid order.
 	 * @param ContractView      $contract The contract.
@@ -143,6 +146,13 @@ final class Settlement {
 	 * @param DateTimeImmutable $now      The current moment (UTC).
 	 */
 	private function settle_paid( WC_Order $order, ContractView $contract, CycleView $cycle, DateTimeImmutable $now ): void {
+		if ( CycleStatus::BILLED === $cycle->get_status() ) {
+			if ( $order->get_id() === $cycle->get_order_id() && self::is_head( $cycle ) && ! self::contract_records_payment( $contract, $cycle ) ) {
+				$this->record_payment( $order, $contract, $cycle, $now );
+			}
+			return;
+		}
+
 		if ( ! in_array( $cycle->get_status(), self::PAYABLE_CYCLE_STATUSES, true )
 			|| ! Contracts::transition_cycle(
 				$cycle->get_id(),
@@ -156,39 +166,9 @@ final class Settlement {
 			return;
 		}
 
-		$date_paid    = $order->get_date_paid();
-		$last_payment = null === $date_paid ? $now : new DateTimeImmutable( '@' . $date_paid->getTimestamp() );
-		$contract_id  = $contract->get_id();
+		$this->record_payment( $order, $contract, $cycle, $now );
 
-		$status = $contract->get_status();
-		if ( ! in_array( $status, [ ContractStatus::ACTIVE, ContractStatus::ON_HOLD ], true ) ) {
-			Contracts::update( $contract_id, [ 'last_payment_gmt' => $last_payment ] );
-		} else {
-			$policy = ContractPlans::billing_policy_for( $contract );
-			$next   = null === $policy
-				? null
-				: BillingPeriod::next_due_after( new DateTimeImmutable( $cycle->get_ends_at_gmt(), new DateTimeZone( 'UTC' ) ), $now, $policy );
-
-			if ( ContractStatus::ON_HOLD === $status && null !== HoldAnchor::read( $contract_id ) ) {
-				// A customer hold absorbs a late payment: it resumes from the period after this one.
-				if ( null !== $next ) {
-					HoldAnchor::store( $contract_id, $next->format( 'Y-m-d H:i:s' ) );
-				}
-				Contracts::update( $contract_id, [ 'last_payment_gmt' => $last_payment ] );
-			} else {
-				Contracts::update(
-					$contract_id,
-					[
-						'status'           => ContractStatus::ACTIVE,
-						'next_payment_gmt' => $next,
-						'last_payment_gmt' => $last_payment,
-					]
-				);
-				HoldAnchor::clear( $contract_id );
-			}
-		}
-
-		$settled = $this->read_settled( $contract_id, $cycle->get_id(), $order->get_id() );
+		$settled = $this->read_settled( $contract->get_id(), $cycle->get_id(), $order->get_id() );
 		if ( null === $settled ) {
 			return;
 		}
@@ -201,6 +181,90 @@ final class Settlement {
 		 * @param WC_Order     $order    The paid renewal order.
 		 */
 		do_action( 'woocommerce_subscriptions_lite_renewal_paid', $settled['contract'], $settled['cycle'], $order );
+	}
+
+	/**
+	 * The contract half of a paid settlement: an active contract, or one on Lite's own hold,
+	 * becomes active with the next due moment after the paid cycle; a customer hold moves its
+	 * anchor there instead; a winding-down or cancelled contract only records the payment.
+	 *
+	 * @param WC_Order          $order    The paid order.
+	 * @param ContractView      $contract The contract.
+	 * @param CycleView         $cycle    The billed cycle.
+	 * @param DateTimeImmutable $now      The current moment (UTC).
+	 */
+	private function record_payment( WC_Order $order, ContractView $contract, CycleView $cycle, DateTimeImmutable $now ): void {
+		$date_paid    = $order->get_date_paid();
+		$last_payment = null === $date_paid ? $now : new DateTimeImmutable( '@' . $date_paid->getTimestamp() );
+		$contract_id  = $contract->get_id();
+		$status       = $contract->get_status();
+
+		if ( ! in_array( $status, [ ContractStatus::ACTIVE, ContractStatus::ON_HOLD ], true ) ) {
+			Contracts::update( $contract_id, [ 'last_payment_gmt' => $last_payment ] );
+			return;
+		}
+
+		$policy = ContractPlans::billing_policy_for( $contract );
+		$next   = null === $policy
+			? null
+			: BillingPeriod::next_due_after( new DateTimeImmutable( $cycle->get_ends_at_gmt(), new DateTimeZone( 'UTC' ) ), $now, $policy );
+
+		if ( ContractStatus::ON_HOLD === $status && null !== HoldAnchor::read( $contract_id ) ) {
+			// A customer hold absorbs a late payment: it resumes from the period after this one.
+			if ( null !== $next ) {
+				HoldAnchor::store( $contract_id, $next->format( 'Y-m-d H:i:s' ) );
+			}
+			Contracts::update( $contract_id, [ 'last_payment_gmt' => $last_payment ] );
+			return;
+		}
+
+		Contracts::update(
+			$contract_id,
+			[
+				'status'           => ContractStatus::ACTIVE,
+				'next_payment_gmt' => $next,
+				'last_payment_gmt' => $last_payment,
+			]
+		);
+		HoldAnchor::clear( $contract_id );
+	}
+
+	/**
+	 * Whether the contract already shows the payment of its billed newest cycle: active (or
+	 * held by the customer) with the next due moment (or anchor) at or after the cycle end.
+	 * A winding-down or cancelled contract has nothing to resume, so it counts as recorded.
+	 *
+	 * @param ContractView $contract The contract.
+	 * @param CycleView    $cycle    The billed cycle.
+	 */
+	private static function contract_records_payment( ContractView $contract, CycleView $cycle ): bool {
+		$status = $contract->get_status();
+		if ( ContractStatus::ACTIVE === $status ) {
+			$resumes_at = $contract->get_next_payment_gmt();
+		} elseif ( ContractStatus::ON_HOLD === $status ) {
+			$resumes_at = HoldAnchor::read( $contract->get_id() );
+			if ( null === $resumes_at ) {
+				return false; // Lite's own hold over a renewal that is now paid.
+			}
+		} else {
+			return true;
+		}
+
+		// An active contract with no due moment and no billing policy stays parked.
+		return null === $resumes_at
+			? null === ContractPlans::billing_policy_for( $contract )
+			: $resumes_at >= (string) $cycle->get_ends_at_gmt();
+	}
+
+	/**
+	 * Whether the cycle is its contract's newest.
+	 *
+	 * @param CycleView $cycle The cycle.
+	 */
+	private static function is_head( CycleView $cycle ): bool {
+		$head = Contracts::get_cycles( $cycle->get_contract_id(), 1 )[0] ?? null;
+
+		return null !== $head && $head->get_id() === $cycle->get_id();
 	}
 
 	/**

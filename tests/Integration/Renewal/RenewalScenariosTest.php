@@ -189,22 +189,25 @@ final class RenewalScenariosTest extends LiteIntegrationTestCase {
 	}
 
 	/**
-	 * Make the next contract write of `next_payment_gmt` throw once, as if the request died
-	 * between the cycle settlement and the contract write that follows it.
+	 * Make every contract write of `next_payment_gmt` throw, as if each request died between
+	 * the cycle settlement and the contract write that follows it, until the returned
+	 * callback is called.
+	 *
+	 * @return callable(): void Stops the interruption.
 	 */
-	private function interrupt_next_schedule_write(): void {
+	private function interrupt_schedule_writes(): callable {
 		$contracts_table = SchemaInstaller::get_table_name( SchemaInstaller::TABLE_CONTRACTS );
-		$interrupted     = false;
-		add_filter(
-			'query',
-			static function ( $query ) use ( $contracts_table, &$interrupted ) {
-				if ( ! $interrupted && is_string( $query ) && 0 === strpos( $query, "UPDATE `{$contracts_table}`" ) && false !== strpos( $query, 'next_payment_gmt' ) ) {
-					$interrupted = true;
-					throw new RuntimeException( 'The request died.' );
-				}
-				return $query;
+		$interrupt       = static function ( $query ) use ( $contracts_table ) {
+			if ( is_string( $query ) && 0 === strpos( $query, "UPDATE `{$contracts_table}`" ) && false !== strpos( $query, 'next_payment_gmt' ) ) {
+				throw new RuntimeException( 'The request died.' );
 			}
-		);
+			return $query;
+		};
+		add_filter( 'query', $interrupt );
+
+		return static function () use ( $interrupt ): void {
+			remove_filter( 'query', $interrupt );
+		};
 	}
 
 	public function test_a_paid_settlement_cut_short_is_completed_by_the_next_dispatch_without_a_second_charge(): void {
@@ -212,11 +215,12 @@ final class RenewalScenariosTest extends LiteIntegrationTestCase {
 		$contract_id = $this->make_contract_paid( self::PAID_A_PERIOD_AGO );
 		$due_before  = $this->next_payment( $contract_id );
 		$now         = $this->now();
-		$this->interrupt_next_schedule_write();
+		$resume      = $this->interrupt_schedule_writes();
 
 		$this->assertSame( 1, $this->run_due_dispatch( $now ) );
 		$this->assertSame( CycleStatus::BILLED, $this->head( $contract_id )->get_status() );
 		$this->assertEquals( $due_before, $this->next_payment( $contract_id ), 'The contract write was lost.' );
+		$resume();
 
 		$this->assertSame( 1, $this->run_due_dispatch_after_claims_expire( $now ) );
 
@@ -232,11 +236,12 @@ final class RenewalScenariosTest extends LiteIntegrationTestCase {
 		$this->support_engine_charges( 'cod', 'failed' );
 		$contract_id = $this->make_contract_paid( self::PAID_A_PERIOD_AGO );
 		$now         = $this->now();
-		$this->interrupt_next_schedule_write();
+		$resume      = $this->interrupt_schedule_writes();
 
 		$this->assertSame( 1, $this->run_due_dispatch( $now ) );
 		$this->assertSame( CycleStatus::FAILED, $this->head( $contract_id )->get_status() );
 		$this->assertSame( ContractStatus::ACTIVE, $this->get_contract( $contract_id )->get_status(), 'The contract write was lost.' );
+		$resume();
 
 		$this->assertSame( 1, $this->run_due_dispatch_after_claims_expire( $now ) );
 
@@ -265,6 +270,43 @@ final class RenewalScenariosTest extends LiteIntegrationTestCase {
 
 		$this->assertSame( ContractStatus::ACTIVE, $this->get_contract( $contract_id )->get_status() );
 		$this->assertSame( $cycle_end, $this->get_contract( $contract_id )->get_next_payment_gmt(), 'Billing resumes after the paid period.' );
+	}
+
+	public function test_a_paid_manual_renewal_cut_short_is_completed_by_the_next_paid_signal(): void {
+		$contract_id = $this->make_contract_paid(
+			self::PAID_A_PERIOD_AGO,
+			[
+				'payment_method'       => 'bacs',
+				'payment_method_title' => 'Direct bank transfer',
+			]
+		);
+		$this->assertSame( 1, $this->run_due_dispatch( $this->now() ) );
+		$this->assertSame( ContractStatus::ON_HOLD, $this->get_contract( $contract_id )->get_status() );
+		$order  = $this->renewal_orders()[0];
+		$resume = $this->interrupt_schedule_writes();
+
+		$order->payment_complete();
+
+		$this->assertSame( CycleStatus::BILLED, $this->head( $contract_id )->get_status() );
+		$this->assertSame( ContractStatus::ON_HOLD, $this->get_contract( $contract_id )->get_status(), 'The contract write was lost.' );
+		$resume();
+
+		$order->update_status( 'completed' );
+
+		$contract = $this->get_contract( $contract_id );
+		$this->assertSame( ContractStatus::ACTIVE, $contract->get_status() );
+		$this->assertSame( $this->head( $contract_id )->get_ends_at_gmt(), $contract->get_next_payment_gmt(), 'The next period is armed.' );
+	}
+
+	public function test_a_later_status_change_of_a_settled_renewal_order_leaves_the_contract_alone(): void {
+		$this->support_engine_charges( 'cod' );
+		$contract_id = $this->make_contract_paid( self::PAID_A_PERIOD_AGO );
+		$this->assertSame( 1, $this->run_due_dispatch( $this->now() ) );
+		Contracts::update( $contract_id, [ 'next_payment_gmt' => '2099-01-01 00:00:00' ] );
+
+		$this->renewal_orders()[0]->update_status( 'completed' );
+
+		$this->assertSame( '2099-01-01 00:00:00', $this->get_contract( $contract_id )->get_next_payment_gmt() );
 	}
 
 	public function test_a_gateway_without_engine_charges_gets_a_manual_renewal_order(): void {
