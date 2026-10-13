@@ -45,6 +45,12 @@ final class RenewalProcessor {
 	public const CLAIM_SECONDS = 900;
 
 	/**
+	 * The gateway feature, besides the engine's, that says a gateway can charge renewals
+	 * automatically: the WooCommerce feature gateways already declare for subscriptions.
+	 */
+	public const GATEWAY_RENEWAL_FEATURE = 'subscriptions';
+
+	/**
 	 * Failure reason recorded on a cycle whose renewal order could not be built.
 	 */
 	public const REASON_ORDER_BUILD_FAILED = 'order-build-failed';
@@ -261,8 +267,9 @@ final class RenewalProcessor {
 
 	/**
 	 * Collect the order's payment: settle an already paid order, complete a free one, charge
-	 * through the engine when the gateway accepts engine charges, else leave a manual
-	 * renewal order for the customer and hold the contract.
+	 * through the engine when the gateway supports the engine and automatic renewal payments
+	 * ({@see self::GATEWAY_RENEWAL_FEATURE}), else leave a manual renewal order for the
+	 * customer and hold the contract.
 	 *
 	 * After a charge the order status is the outcome: paid, failed, or on-hold while an
 	 * asynchronous charge awaits confirmation. An order left pending is a failed charge,
@@ -289,7 +296,7 @@ final class RenewalProcessor {
 			return;
 		}
 
-		if ( Payments::supports_gateway( (string) $contract->get_payment_method() ) ) {
+		if ( Payments::supports_gateway( (string) $contract->get_payment_method(), self::GATEWAY_RENEWAL_FEATURE ) ) {
 			$handed_over = Payments::charge( $order );
 			$charged     = wc_get_order( $order->get_id() );
 			if ( $charged instanceof WC_Order && $charged->has_status( OrderStatus::PENDING ) ) {

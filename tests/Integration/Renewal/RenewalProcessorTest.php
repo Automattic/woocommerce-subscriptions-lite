@@ -526,6 +526,32 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 		$this->assertSame( [ $order->get_id() ], $this->charged_order_ids, 'The spy would have seen a charge.' );
 	}
 
+	public function test_an_engine_gateway_without_the_renewal_feature_gets_a_manual_renewal_order(): void {
+		add_filter(
+			'woocommerce_payment_gateway_supports',
+			static function ( $supported, $feature, $gateway ) {
+				return Payments::GATEWAY_FEATURE === $feature && is_object( $gateway ) && 'cod' === $gateway->id ? true : $supported;
+			},
+			10,
+			3
+		);
+		$charges = 0;
+		add_action(
+			'woocommerce_subscriptions_engine_scheduled_payment_cod',
+			static function () use ( &$charges ): void {
+				++$charges;
+			}
+		);
+		$contract_id = $this->make_contract();
+
+		$order = $this->renew( $contract_id );
+
+		$this->assertInstanceOf( WC_Order::class, $order );
+		$this->assertSame( 'pending', wc_get_order( $order->get_id() )->get_status() );
+		$this->assertSame( 0, $charges, 'The gateway supports the engine but not renewal payments.' );
+		$this->assertSame( ContractStatus::ON_HOLD, $this->get_contract( $contract_id )->get_status() );
+	}
+
 	public function test_renew_now_applies_to_active_lite_contracts(): void {
 		$this->assertTrue( RenewalProcessor::can_renew_now( $this->get_contract( $this->seed_contract() ) ) );
 		$this->assertFalse( RenewalProcessor::can_renew_now( $this->get_contract( $this->seed_contract( [ 'extension_slug' => 'another-extension' ] ) ) ), 'Lite renews only its own contracts.' );
