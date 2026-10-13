@@ -522,7 +522,7 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 		$this->assertSame( ContractStatus::ON_HOLD, $contract->get_status() );
 		$this->assertNull( $contract->get_next_payment_gmt() );
 
-		Payments::charge( $reloaded );
+		Payments::process_scheduled_payment( $reloaded );
 		$this->assertSame( [ $order->get_id() ], $this->charged_order_ids, 'The spy would have seen a charge.' );
 	}
 

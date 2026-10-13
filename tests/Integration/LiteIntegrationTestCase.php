@@ -480,8 +480,7 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 		);
 		add_action(
 			'woocommerce_subscriptions_engine_scheduled_payment_' . $gateway,
-			function ( $amount, $order ): void {
-				unset( $amount );
+			function ( $order ): void {
 				if ( ! $order instanceof WC_Order ) {
 					return;
 				}
@@ -501,16 +500,14 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 					default:
 						break;
 				}
-			},
-			10,
-			2
+			}
 		);
 	}
 
 	/**
 	 * Record every engine charge request for `$gateway` in {@see self::$charged_order_ids}
 	 * while the gateway does not support engine charges, so a test can prove none was made.
-	 * The gateway answers the feature check only inside `Payments::charge()` (so the
+	 * The gateway answers the feature check only inside `Payments::process_scheduled_payment()` (so the
 	 * charge reaches the spy should anyone call it); Lite's own check still reads no.
 	 *
 	 * @param string $gateway Gateway id.
@@ -529,24 +526,21 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 		);
 		add_action(
 			'woocommerce_subscriptions_engine_scheduled_payment_' . $gateway,
-			function ( $amount, $order ): void {
-				unset( $amount );
+			function ( $order ): void {
 				if ( $order instanceof WC_Order ) {
 					$this->charged_order_ids[] = $order->get_id();
 				}
-			},
-			10,
-			2
+			}
 		);
 	}
 
 	/**
-	 * Whether `Payments::charge()` is on the call stack.
+	 * Whether `Payments::process_scheduled_payment()` is on the call stack.
 	 */
 	private static function inside_charge(): bool {
 		// phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_debug_backtrace -- a test spy reads its caller.
 		foreach ( debug_backtrace( DEBUG_BACKTRACE_IGNORE_ARGS ) as $frame ) {
-			if ( Payments::class === ( $frame['class'] ?? '' ) && 'charge' === $frame['function'] ) {
+			if ( Payments::class === ( $frame['class'] ?? '' ) && 'process_scheduled_payment' === $frame['function'] ) {
 				return true;
 			}
 		}

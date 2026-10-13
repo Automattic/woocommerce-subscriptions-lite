@@ -297,7 +297,7 @@ final class RenewalProcessor {
 		}
 
 		if ( Payments::gateway_supports( (string) $contract->get_payment_method(), self::GATEWAY_RENEWAL_FEATURE ) ) {
-			$handed_over = Payments::charge( $order );
+			$handed_over = Payments::process_scheduled_payment( $order );
 			$charged     = wc_get_order( $order->get_id() );
 			if ( $charged instanceof WC_Order && $charged->has_status( OrderStatus::PENDING ) ) {
 				// No outcome reported: nothing is in flight, so this is a failed charge the
