@@ -355,6 +355,56 @@ final class SettlementTest extends LiteIntegrationTestCase {
 		$this->assertSame( CycleStatus::BILLED, $this->head( $contract_id )->get_status() );
 	}
 
+	/**
+	 * @dataProvider provide_contract_states_after_a_settled_payment
+	 *
+	 * @param string      $status          Contract status after the settlement.
+	 * @param string|null $next_payment    Its next due moment.
+	 * @param string|null $anchor          Its hold anchor.
+	 * @param string      $expected_status Status after a repeat paid signal.
+	 * @param string|null $expected_next   Next due moment after it.
+	 * @param string|null $expected_anchor Hold anchor after it.
+	 */
+	public function test_a_repeat_paid_signal_completes_only_a_contract_that_does_not_show_the_payment( string $status, ?string $next_payment, ?string $anchor, string $expected_status, ?string $expected_next, ?string $expected_anchor ): void {
+		[ $contract_id, $order ] = $this->seed_renewal();
+		$this->pay( $order );
+		( new Settlement() )->settle( $order, $this->utc( '2026-02-16 12:00:00' ) );
+		Contracts::update(
+			$contract_id,
+			[
+				'status'           => $status,
+				'next_payment_gmt' => $next_payment,
+			]
+		);
+		HoldAnchor::store( $contract_id, $anchor );
+
+		( new Settlement() )->settle( $order, $this->utc( '2026-02-20 12:00:00' ) );
+
+		$contract = $this->get_contract( $contract_id );
+		$this->assertSame( $expected_status, $contract->get_status() );
+		$this->assertSame( $expected_next, $contract->get_next_payment_gmt() );
+		$this->assertSame( $expected_anchor, HoldAnchor::read( $contract_id ) );
+	}
+
+	/**
+	 * Contract states after the 2026-02-15 to 2026-03-15 cycle was billed, and what a repeat
+	 * paid signal leaves.
+	 *
+	 * @return array<string, array{0: string, 1: ?string, 2: ?string, 3: string, 4: ?string, 5: ?string}>
+	 */
+	public function provide_contract_states_after_a_settled_payment(): array {
+		return [
+			'active, armed at the cycle end'         => [ 'active', '2026-03-15 00:00:00', null, 'active', '2026-03-15 00:00:00', null ],
+			'active, armed later (edited)'           => [ 'active', '2026-04-15 00:00:00', null, 'active', '2026-04-15 00:00:00', null ],
+			'active, no due moment (cut short)'      => [ 'active', null, null, 'active', '2026-03-15 00:00:00', null ],
+			'active, due before the cycle end'       => [ 'active', '2026-02-15 00:00:00', null, 'active', '2026-03-15 00:00:00', null ],
+			'Lite hold (cut short)'                  => [ 'on-hold', null, null, 'active', '2026-03-15 00:00:00', null ],
+			'customer hold, anchor at a later point' => [ 'on-hold', null, '2026-04-15 00:00:00', 'on-hold', null, '2026-04-15 00:00:00' ],
+			'customer hold, anchor before the end'   => [ 'on-hold', null, '2026-02-15 00:00:00', 'on-hold', null, '2026-03-15 00:00:00' ],
+			'cancelled'                              => [ 'cancelled', null, null, 'cancelled', null, null ],
+		];
+	}
+
 	public function test_the_bound_listeners_settle_a_renewal_order_from_its_status(): void {
 		[ $contract_id, $order ] = $this->seed_renewal();
 		Settlement::register();

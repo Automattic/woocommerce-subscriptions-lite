@@ -186,8 +186,9 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 	 * @dataProvider provide_charges_without_an_outcome
 	 *
 	 * @param string $outcome Stub charge outcome.
+	 * @param string $note    The fragment that tells this case's failure note apart.
 	 */
-	public function test_a_charge_that_leaves_the_order_pending_is_a_failed_charge( string $outcome ): void {
+	public function test_a_charge_that_leaves_the_order_pending_is_a_failed_charge( string $outcome, string $note ): void {
 		$this->support_engine_charges( 'cod', $outcome );
 		$contract_id = $this->make_contract();
 
@@ -203,7 +204,7 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 			wc_get_order_notes(
 				[
 					'order_id' => $order->get_id(),
-					'search'   => 'Renewal payment failed',
+					'search'   => $note,
 				]
 			)
 		);
@@ -216,13 +217,36 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 	/**
 	 * Charges that report no outcome.
 	 *
-	 * @return array<string, array{0: string}>
+	 * @return array<string, array{0: string, 1: string}>
 	 */
 	public function provide_charges_without_an_outcome(): array {
 		return [
-			'the gateway does nothing' => [ 'none' ],
-			'the gateway throws'       => [ 'throw' ],
+			'the gateway does nothing' => [ 'none', 'did not report an outcome' ],
+			'the gateway throws'       => [ 'throw', 'could not be completed automatically' ],
 		];
+	}
+
+	public function test_renew_now_recovers_a_renewal_whose_order_could_not_be_built(): void {
+		$this->support_engine_charges( 'cod' );
+		$contract_id = $this->make_contract();
+		$product_id  = (int) ( $this->get_contract( $contract_id )->get_items()[0]['product_id'] ?? 0 );
+		$this->assertGreaterThan( 0, $product_id );
+		// The product is not a product while the renewal runs, so the order line cannot be built.
+		set_post_type( $product_id, 'post' );
+
+		$this->assertNull( $this->renew( $contract_id ) );
+		$this->assertSame( RenewalProcessor::REASON_ORDER_BUILD_FAILED, $this->head( $contract_id )->get_reason() );
+		$this->assertSame( ContractStatus::ON_HOLD, $this->get_contract( $contract_id )->get_status() );
+
+		set_post_type( $product_id, 'product' );
+		$result = ( new RowActionController( null, static fn (): bool => true ) )->handle_renew_now( [ 'contract_id' => $contract_id ] );
+
+		$this->assertTrue( $result->is_success() );
+		$head = $this->head( $contract_id );
+		$this->assertSame( CycleStatus::BILLED, $head->get_status() );
+		$this->assertNotNull( $head->get_order_id() );
+		$this->assertSame( [ $head->get_order_id() ], $this->charged_order_ids );
+		$this->assertSame( ContractStatus::ACTIVE, $this->get_contract( $contract_id )->get_status() );
 	}
 
 	public function test_a_cycle_held_by_another_run_is_left_alone(): void {

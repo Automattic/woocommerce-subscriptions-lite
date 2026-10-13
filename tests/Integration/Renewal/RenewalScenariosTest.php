@@ -285,6 +285,29 @@ final class RenewalScenariosTest extends LiteIntegrationTestCase {
 		$this->assertSame( $cycle_end, $this->get_contract( $contract_id )->get_next_payment_gmt(), 'Billing resumes after the paid period.' );
 	}
 
+	public function test_a_customer_hold_whose_async_charge_fails_becomes_lite_s_hold_and_paying_resumes_it(): void {
+		$this->support_engine_charges( 'cod', 'on-hold' );
+		$contract_id = $this->make_contract_paid( self::PAID_A_PERIOD_AGO );
+		$this->assertSame( 1, $this->run_due_dispatch( $this->now() ) );
+		$cycle_end = $this->head( $contract_id )->get_ends_at_gmt();
+		( new Hold() )->hold( $contract_id );
+		$this->assertSame( $cycle_end, HoldAnchor::read( $contract_id ) );
+		$order = $this->renewal_orders()[0];
+
+		$order->update_status( 'failed' );
+
+		$this->assertSame( CycleStatus::FAILED, $this->head( $contract_id )->get_status() );
+		$this->assertSame( ContractStatus::ON_HOLD, $this->get_contract( $contract_id )->get_status() );
+		$this->assertNull( HoldAnchor::read( $contract_id ), 'The failed renewal replaces the pause with Lite\'s hold.' );
+
+		wc_get_order( $order->get_id() )->payment_complete();
+
+		$contract = $this->get_contract( $contract_id );
+		$this->assertSame( CycleStatus::BILLED, $this->head( $contract_id )->get_status() );
+		$this->assertSame( ContractStatus::ACTIVE, $contract->get_status(), 'Paying the failed order resumes the subscription.' );
+		$this->assertSame( $cycle_end, $contract->get_next_payment_gmt() );
+	}
+
 	public function test_a_paid_manual_renewal_cut_short_is_completed_by_the_next_paid_signal(): void {
 		$contract_id = $this->make_contract_paid(
 			self::PAID_A_PERIOD_AGO,
