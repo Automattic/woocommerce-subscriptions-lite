@@ -3,8 +3,8 @@
  * RenewalProcessor - renews a Lite contract: one cycle, one order, one charge.
  *
  * Works on the engine's cycle tools so concurrent runs renew once: the new cycle is
- * appended claimed (append-if-absent with a lease), an interrupted cycle is resumed only
- * by the run that takes its expired lease, and settlement moves cycles by
+ * appended claimed (append-if-absent with a claim), an interrupted cycle is resumed only
+ * by the run that takes its expired claim, and settlement moves cycles by
  * compare-and-set. A due contract several periods behind bills the one period containing
  * now ({@see BillingPeriod}). Gateways that accept engine charges are charged through the
  * engine; any other gateway gets a manual renewal order the customer pays, with the
@@ -30,7 +30,6 @@ use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ContractPlans;
 use DateTimeImmutable;
 use DateTimeZone;
-use DomainException;
 use WC_Order;
 
 defined( 'ABSPATH' ) || exit;
@@ -43,7 +42,7 @@ final class RenewalProcessor {
 	/**
 	 * How long a run holds the cycle it renews, in seconds.
 	 */
-	public const LEASE_SECONDS = 900;
+	public const CLAIM_SECONDS = 900;
 
 	/**
 	 * Failure reason recorded on a cycle whose renewal order could not be built.
@@ -146,13 +145,13 @@ final class RenewalProcessor {
 	private function take_cycle( ContractView $contract, CycleView $head, DateTimeImmutable $anchor, DateTimeImmutable $now, bool $manual, BillingPolicy $policy ): ?CycleView {
 		switch ( $head->get_status() ) {
 			case CycleStatus::PENDING:
-				return Contracts::claim_cycle( $head->get_id(), CycleStatus::PENDING, self::LEASE_SECONDS ) ? $head : null;
+				return Contracts::claim_cycle( $head->get_id(), CycleStatus::PENDING, self::CLAIM_SECONDS ) ? $head : null;
 			case CycleStatus::FAILED:
 				if ( ! $manual ) {
 					$this->reapply_hold( $contract );
 					return null;
 				}
-				return Contracts::transition_cycle( $head->get_id(), CycleStatus::FAILED, CycleStatus::PENDING, [ 'lease_seconds' => self::LEASE_SECONDS ] ) ? $head : null;
+				return Contracts::transition_cycle( $head->get_id(), CycleStatus::FAILED, CycleStatus::PENDING, [ 'claim_seconds' => self::CLAIM_SECONDS ] ) ? $head : null;
 			case CycleStatus::PROCESSING:
 				$this->log( 'info', sprintf( 'contract %d is due while its renewal awaits a charge confirmation; nothing is charged.', $contract->get_id() ), $contract->get_id() );
 				return null;
@@ -167,22 +166,19 @@ final class RenewalProcessor {
 			return null;
 		}
 
-		try {
-			return Contracts::add_cycle(
-				$contract->get_id(),
-				[
-					'status'         => CycleStatus::PENDING,
-					'count'          => (int) $head->get_count() + 1,
-					'starts_at_gmt'  => $starts_at,
-					'ends_at_gmt'    => $ends_at,
-					'expected_total' => $contract->get_billing_total(),
-					'currency'       => $contract->get_currency() ?? get_woocommerce_currency(),
-					'lease_seconds'  => self::LEASE_SECONDS,
-				]
-			);
-		} catch ( DomainException $e ) {
-			return null; // A concurrent run appended this cycle.
-		}
+		// Null when a concurrent run appended this cycle first.
+		return Contracts::add_cycle(
+			$contract->get_id(),
+			[
+				'status'         => CycleStatus::PENDING,
+				'count'          => (int) $head->get_count() + 1,
+				'starts_at_gmt'  => $starts_at,
+				'ends_at_gmt'    => $ends_at,
+				'expected_total' => $contract->get_billing_total(),
+				'currency'       => $contract->get_currency() ?? get_woocommerce_currency(),
+				'claim_seconds'  => self::CLAIM_SECONDS,
+			]
+		);
 	}
 
 	/**
@@ -215,7 +211,7 @@ final class RenewalProcessor {
 
 	/**
 	 * The order of a taken cycle: its linked order when it has one that can still be paid,
-	 * else a new draft built and linked while the lease is held (a cancelled, trashed or
+	 * else a new draft built and linked while the claim is held (a cancelled, trashed or
 	 * deleted order is replaced).
 	 *
 	 * @param ContractView $contract The contract.
@@ -246,7 +242,7 @@ final class RenewalProcessor {
 			CycleStatus::PENDING,
 			[
 				'order_id'      => $order->get_id(),
-				'lease_seconds' => self::LEASE_SECONDS,
+				'claim_seconds' => self::CLAIM_SECONDS,
 			]
 		);
 		if ( ! $linked ) {

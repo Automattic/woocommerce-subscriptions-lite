@@ -387,7 +387,7 @@ final class Settlement {
 	}
 
 	/**
-	 * An order awaiting an asynchronous charge moves its cycle to processing (no lease) and
+	 * An order awaiting an asynchronous charge moves its cycle to processing (no claim) and
 	 * clears the contract's due moment, so the due scan leaves it alone until the charge
 	 * reports: paid re-arms the next period, failed holds the contract.
 	 *

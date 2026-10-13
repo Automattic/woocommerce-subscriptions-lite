@@ -214,7 +214,9 @@ final class ContractCreationHandler {
 	 * @param WC_Order $order The paid order.
 	 * @param PlanView $plan  The order's selling plan.
 	 * @return ContractView|null The active contract; null when it was deleted before activation.
-	 * @throws Throwable When the billing payload does not parse or an engine write fails.
+	 * @throws LogicException When cycle 1 of the new contract already exists. Any other
+	 *                        failure (an unparseable billing payload, a failed engine
+	 *                        write) propagates as thrown.
 	 */
 	public function create_contract( WC_Order $order, PlanView $plan ): ?ContractView {
 		$plan_id    = $plan->get_id();
@@ -257,7 +259,7 @@ final class ContractCreationHandler {
 			]
 		);
 
-		Contracts::add_cycle(
+		$first_cycle = Contracts::add_cycle(
 			$contract->get_id(),
 			[
 				'status'         => CycleStatus::BILLED,
@@ -269,6 +271,10 @@ final class ContractCreationHandler {
 				'currency'       => $order->get_currency(),
 			]
 		);
+		if ( null === $first_cycle ) {
+			// The draft is new, so its first position cannot be taken: fail like any other write.
+			throw new LogicException( 'Contract creation: cycle 1 of the new contract already exists.' );
+		}
 
 		return Contracts::update(
 			$contract->get_id(),

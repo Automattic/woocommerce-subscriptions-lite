@@ -261,7 +261,7 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 				'ends_at_gmt'    => $this->period_end,
 				'expected_total' => '19.99',
 				'currency'       => 'USD',
-				'lease_seconds'  => 900,
+				'claim_seconds'  => 900,
 			]
 		);
 
@@ -319,7 +319,7 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 							'ends_at_gmt'    => $this->period_end,
 							'expected_total' => '19.99',
 							'currency'       => 'USD',
-							'lease_seconds'  => 900,
+							'claim_seconds'  => 900,
 						]
 					);
 				}
@@ -354,10 +354,10 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 				'ends_at_gmt'    => $this->period_end,
 				'expected_total' => '19.99',
 				'currency'       => 'USD',
-				'lease_seconds'  => 900,
+				'claim_seconds'  => 900,
 			]
 		);
-		// The run that appended it died before building the order; its lease ran out.
+		// The run that appended it died before building the order; its claim ran out.
 		$wpdb->update( SchemaInstaller::get_table_name( SchemaInstaller::TABLE_CYCLES ), [ 'claimed_until' => '2000-01-01 00:00:00' ], [ 'id' => $cycle->get_id() ] ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 
 		$order = $this->renew( $contract_id );
