@@ -9,13 +9,15 @@
  *   becomes active with its next due moment armed past now; a customer hold (a hold anchor
  *   is present) stays on hold and its anchor moves to the next due moment; a winding-down
  *   or cancelled contract only records the payment;
- * - failed: cycle failed; the contract goes on the system hold ({@see SystemHold}: no due
- *   moment, no customer hold anchor), and the customer pays the failed order to resume;
+ * - failed: cycle failed; an active or held contract (a customer hold included) goes on
+ *   the system hold ({@see SystemHold}: no due moment, no customer hold anchor), and the
+ *   customer pays the failed order to resume;
  * - on-hold (an asynchronous charge awaits confirmation): cycle processing and no due
  *   moment, so it is not charged again;
- * - cancelled or trashed while unpaid: cycle failed (`order-cancelled`); an active contract
- *   goes on hold, as for a failed payment, so a dead order never renews for free. The
- *   merchant can restore the order or use Renew now, which builds a new one.
+ * - cancelled, trashed or deleted while unpaid: cycle failed (`order-cancelled`); an active
+ *   or held contract goes on the system hold, as for a failed payment, so a dead order
+ *   never renews for free. The merchant can restore the order or use Renew now, which
+ *   builds a new one.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Renewal
  */
@@ -218,7 +220,9 @@ final class Settlement {
 	 * The paid order bills its cycle; the contract resumes or records the payment. A repeat
 	 * paid signal for the newest cycle, already billed by this order, completes a contract
 	 * write that was cut short (a held, manual or async renewal has no due moment, so the due
-	 * scan never would).
+	 * scan never would) and then fires the paid action, which the cut-short attempt never
+	 * reached. The action is therefore delivered at least once: concurrent duplicate signals
+	 * that both see the write missing can both fire it.
 	 *
 	 * @param WC_Order          $order    The paid order.
 	 * @param ContractView      $contract The contract.
@@ -227,13 +231,10 @@ final class Settlement {
 	 */
 	private function settle_paid( WC_Order $order, ContractView $contract, CycleView $cycle, DateTimeImmutable $now ): void {
 		if ( CycleStatus::BILLED === $cycle->get_status() ) {
-			if ( $order->get_id() === $cycle->get_order_id() && self::is_head( $cycle ) && ! self::contract_records_payment( $contract, $cycle ) ) {
-				$this->record_payment( $order, $contract, $cycle, $now );
+			if ( $order->get_id() !== $cycle->get_order_id() || ! self::is_head( $cycle ) || self::contract_records_payment( $contract, $cycle ) ) {
+				return;
 			}
-			return;
-		}
-
-		if ( ! in_array( $cycle->get_status(), self::PAYABLE_CYCLE_STATUSES, true )
+		} elseif ( ! in_array( $cycle->get_status(), self::PAYABLE_CYCLE_STATUSES, true )
 			|| ! Contracts::transition_cycle(
 				$cycle->get_id(),
 				$cycle->get_status(),
@@ -254,7 +255,9 @@ final class Settlement {
 		}
 
 		/**
-		 * Fires after a Lite renewal order was paid and its cycle billed.
+		 * Fires after a Lite renewal order was paid and its cycle billed. Delivered at least
+		 * once: completing a cut-short settlement fires it, and concurrent duplicate signals
+		 * can both do so.
 		 *
 		 * @param ContractView $contract The contract after the payment was recorded.
 		 * @param CycleView    $cycle    The billed cycle.
@@ -348,7 +351,8 @@ final class Settlement {
 	}
 
 	/**
-	 * The failed order fails its cycle; an active contract goes on hold until the customer pays.
+	 * The failed order fails its cycle; an active or held contract (a customer hold included)
+	 * goes on the system hold until the customer pays.
 	 *
 	 * @param WC_Order          $order    The failed order.
 	 * @param ContractView      $contract The contract.
@@ -398,8 +402,9 @@ final class Settlement {
 	}
 
 	/**
-	 * An unpaid cycle whose order was cancelled or trashed fails, and an active contract goes
-	 * on hold: the renewal is still owed, and only a payment resumes the contract.
+	 * An unpaid cycle whose order was cancelled, trashed or deleted fails, and an active or held
+	 * contract goes on the system hold: the renewal is still owed, and only a payment resumes
+	 * the contract.
 	 *
 	 * @param ContractView $contract The contract.
 	 * @param CycleView    $cycle    The cycle the order bills.

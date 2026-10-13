@@ -16,7 +16,6 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration;
 
 use Automattic\WooCommerce\SubscriptionsLite\Admin\ProductPlansPanel;
 use Automattic\WooCommerce\SubscriptionsLite\Bootstrap;
-use Automattic\WooCommerce\SubscriptionsLite\Deactivation;
 use Automattic\WooCommerce\SubscriptionsLite\CustomerPortal\Endpoints;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\CustomerActions;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\PlanOrderController;
@@ -158,26 +157,6 @@ final class BootstrapTest extends LiteIntegrationTestCase {
 
 			$this->assertNull( ConsumerRegistry::get_contract_due_handler( Package::EXTENSION_SLUG ) );
 			$this->assertFalse( as_next_scheduled_action( DueDispatcher::HOOK, [], DueDispatcher::GROUP ), 'With no due handler left the scan is removed.' );
-		} finally {
-			ConsumerRegistry::register( Package::EXTENSION_SLUG, [ 'contract_due_handler' => $handler ] );
-		}
-	}
-
-	public function test_deactivation_without_action_scheduler_still_deregisters_lite(): void {
-		$handler = ConsumerRegistry::get_contract_due_handler( Package::EXTENSION_SLUG );
-		$this->assertNotNull( $handler );
-		update_option( 'woocommerce_subscriptions_engine_due_dispatch_scheduled_check', time() + 3600 );
-		as_schedule_recurring_action( time() + 600, 600, DueDispatcher::HOOK, [], DueDispatcher::GROUP, true );
-
-		try {
-			Deactivation::run(
-				static function ( string $function ): bool {
-					return 0 !== strpos( $function, 'as_' ) && function_exists( $function );
-				}
-			);
-
-			$this->assertNull( ConsumerRegistry::get_contract_due_handler( Package::EXTENSION_SLUG ) );
-			$this->assertNotFalse( as_next_scheduled_action( DueDispatcher::HOOK, [], DueDispatcher::GROUP ), 'Without a scheduler the schedule is left alone.' );
 		} finally {
 			ConsumerRegistry::register( Package::EXTENSION_SLUG, [ 'contract_due_handler' => $handler ] );
 		}

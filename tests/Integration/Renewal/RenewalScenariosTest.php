@@ -297,6 +297,13 @@ final class RenewalScenariosTest extends LiteIntegrationTestCase {
 		$this->assertSame( ContractStatus::ON_HOLD, $this->get_contract( $contract_id )->get_status() );
 		$order  = $this->renewal_orders()[0];
 		$resume = $this->interrupt_schedule_writes();
+		$paid   = 0;
+		add_action(
+			'woocommerce_subscriptions_lite_renewal_paid',
+			static function () use ( &$paid ): void {
+				++$paid;
+			}
+		);
 
 		$order->payment_complete();
 
@@ -309,6 +316,7 @@ final class RenewalScenariosTest extends LiteIntegrationTestCase {
 		$contract = $this->get_contract( $contract_id );
 		$this->assertSame( ContractStatus::ACTIVE, $contract->get_status() );
 		$this->assertSame( $this->head( $contract_id )->get_ends_at_gmt(), $contract->get_next_payment_gmt(), 'The next period is armed.' );
+		$this->assertSame( 1, $paid, 'The completed settlement fires the paid action.' );
 	}
 
 	public function test_a_later_status_change_of_a_settled_renewal_order_leaves_the_contract_alone(): void {

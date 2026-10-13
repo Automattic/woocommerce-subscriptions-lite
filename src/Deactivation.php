@@ -6,8 +6,12 @@
  * its schedule: with no due handler left it removes its recurring scan. This must happen
  * here because the engine only loads through its consumers - once Lite is inactive, no
  * engine code runs to clean up after it. The re-evaluation needs Action Scheduler, which
- * ships with WooCommerce; when WooCommerce is already inactive there is no scheduler (and no
- * scan to run), so it is skipped rather than fataling the deactivation request.
+ * ships with WooCommerce. When WooCommerce is already inactive it is skipped rather than
+ * fataling the deactivation request: the stored scan action is left in place, and the
+ * engine removes it on its next load with no due handler (Action Scheduler also stops
+ * retrying an action that has no callback). Current engine builds skip it themselves;
+ * Lite keeps its own check because highest-version-wins can load an older engine copy of
+ * the same version that does not.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite
  */
@@ -33,29 +37,23 @@ final class Deactivation {
 
 	/**
 	 * Deregister Lite and let the due dispatcher re-evaluate its schedule.
-	 *
-	 * @param (callable(string): bool)|null $function_exists Function lookup; defaults to
-	 *                                                       `function_exists()` (tests pass
-	 *                                                       a lookup without the scheduler).
 	 */
-	public static function run( ?callable $function_exists = null ): void {
+	public static function run(): void {
 		if ( class_exists( ConsumerRegistry::class ) ) {
 			ConsumerRegistry::unregister( Package::EXTENSION_SLUG );
 		}
 
-		if ( class_exists( DueDispatcher::class ) && self::scheduler_available( $function_exists ?? 'function_exists' ) ) {
+		if ( class_exists( DueDispatcher::class ) && self::scheduler_available() ) {
 			DueDispatcher::ensure_scheduled();
 		}
 	}
 
 	/**
 	 * Whether Action Scheduler is loaded.
-	 *
-	 * @param callable(string): bool $function_exists Function lookup.
 	 */
-	private static function scheduler_available( callable $function_exists ): bool {
+	private static function scheduler_available(): bool {
 		foreach ( self::SCHEDULER_FUNCTIONS as $function ) {
-			if ( ! $function_exists( $function ) ) {
+			if ( ! function_exists( $function ) ) {
 				return false;
 			}
 		}
