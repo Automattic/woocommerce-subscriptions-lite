@@ -170,6 +170,55 @@ final class DeadRenewalOrderTest extends LiteIntegrationTestCase {
 		$this->assertArrayHasKey( 'cancel', wc_get_account_orders_actions( $plain ), 'Other orders keep the cancel action.' );
 	}
 
+	/**
+	 * The refund notes an order carries.
+	 *
+	 * @param int $order_id Order id.
+	 */
+	private function refund_notes( int $order_id ): int {
+		return count(
+			array_filter(
+				wc_get_order_notes( [ 'order_id' => $order_id ] ),
+				static function ( $note ): bool {
+					return false !== stripos( $note->content, 'refund one of the two payments' );
+				}
+			)
+		);
+	}
+
+	public function test_a_late_payment_never_takes_back_a_renewal_whose_replacement_charge_is_in_flight(): void {
+		[ $contract_id, $order, $replacement_id ] = $this->replace_a_cancelled_renewal( 'on-hold' );
+		$this->assertSame( CycleStatus::PROCESSING, $this->head( $contract_id )->get_status() );
+		$this->capture_log();
+
+		wc_get_order( $order->get_id() )->payment_complete();
+
+		$this->assertSame( $replacement_id, $this->head( $contract_id )->get_order_id(), 'The in-flight replacement keeps the renewal.' );
+		$this->assertSame( 'on-hold', wc_get_order( $replacement_id )->get_status(), 'It is not cancelled under its pending charge.' );
+		$this->assertSame( 1, $this->refund_notes( $order->get_id() ) );
+		$this->assertTrue( $this->has_logged( 'in flight' ) );
+
+		wc_get_order( $replacement_id )->payment_complete();
+
+		$head = $this->head( $contract_id );
+		$this->assertSame( CycleStatus::BILLED, $head->get_status() );
+		$this->assertSame( $replacement_id, $head->get_order_id(), 'One payment settles the renewal.' );
+		$this->assertSame( 0, $this->refund_notes( $replacement_id ) );
+		$this->assertSame( 1, $this->refund_notes( $order->get_id() ), 'The other is flagged once.' );
+	}
+
+	public function test_a_cancelled_replacement_that_is_paid_after_all_is_flagged_for_a_refund(): void {
+		[ $contract_id, $order, $replacement_id ] = $this->replace_a_cancelled_renewal( 'failed' );
+		wc_get_order( $order->get_id() )->payment_complete();
+		$this->assertSame( 'cancelled', wc_get_order( $replacement_id )->get_status() );
+		$this->assertSame( $order->get_id(), $this->head( $contract_id )->get_order_id() );
+
+		wc_get_order( $replacement_id )->payment_complete();
+
+		$this->assertSame( $order->get_id(), $this->head( $contract_id )->get_order_id() );
+		$this->assertSame( 1, $this->refund_notes( $replacement_id ), 'The stamped replacement is flagged.' );
+	}
+
 	public function test_a_trashed_manual_renewal_order_fails_its_cycle(): void {
 		[ $contract_id, , $order ] = $this->seed( ContractStatus::ON_HOLD, 'pending', CycleStatus::PENDING );
 

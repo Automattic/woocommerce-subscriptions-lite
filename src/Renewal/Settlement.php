@@ -429,10 +429,12 @@ final class Settlement {
 	}
 
 	/**
-	 * A replaced renewal order was paid after all. While its renewal is still unpaid, it takes
-	 * the renewal back: the cycle is relinked to it, the unpaid replacement is cancelled, and
-	 * the payment settles. Once the replacement paid the renewal, the customer paid twice:
-	 * the order gets a note and a warning is logged, so the merchant refunds one payment.
+	 * A replaced renewal order was paid after all. While its renewal is still unpaid and the
+	 * replacement's charge is not in flight, it takes the renewal back: the cycle is relinked
+	 * to it, the unpaid replacement is stamped as replaced and cancelled, and the payment
+	 * settles. Otherwise the replacement keeps the renewal and this order gets one note and a
+	 * warning is logged, so the merchant refunds one payment: once the replacement paid, or
+	 * while its charge awaits confirmation (it may still complete).
 	 *
 	 * @param WC_Order               $order The paid replaced order.
 	 * @param DateTimeImmutable|null $now   The current moment.
@@ -447,14 +449,19 @@ final class Settlement {
 		}
 
 		$replacement_id = $cycle->get_order_id();
+		$replacement    = null === $replacement_id || $replacement_id === $order->get_id() ? false : wc_get_order( $replacement_id );
+		$in_flight      = CycleStatus::PROCESSING === $cycle->get_status()
+			|| ( $replacement instanceof WC_Order && $replacement->has_status( OrderStatus::ON_HOLD ) );
 
-		if ( in_array( $cycle->get_status(), self::PAYABLE_CYCLE_STATUSES, true ) ) {
+		if ( in_array( $cycle->get_status(), self::PAYABLE_CYCLE_STATUSES, true ) && ! $in_flight ) {
 			if ( ! Contracts::transition_cycle( $cycle_id, $cycle->get_status(), $cycle->get_status(), [ 'order_id' => $order->get_id() ] ) ) {
 				return;
 			}
 
-			$replacement = null === $replacement_id ? false : wc_get_order( $replacement_id );
 			if ( $replacement instanceof WC_Order && ! $replacement->is_paid() && ! self::is_dead( $replacement ) ) {
+				// Stamped first, so should the cancelled replacement still be paid, its payment
+				// is flagged for a refund like this one would have been.
+				self::mark_replaced( $replacement, $contract_id, $cycle_id );
 				/* translators: %d: order number. */
 				$replacement->update_status( OrderStatus::CANCELLED, sprintf( __( 'Order #%d paid this renewal after this order replaced it.', 'woocommerce-subscriptions-lite' ), $order->get_id() ) );
 			}
@@ -463,16 +470,29 @@ final class Settlement {
 			return;
 		}
 
-		if ( CycleStatus::BILLED !== $cycle->get_status() || $replacement_id === $order->get_id() || '' !== (string) $order->get_meta( self::REFUND_FLAGGED_META ) ) {
+		if ( null === $replacement_id || $replacement_id === $order->get_id() || '' !== (string) $order->get_meta( self::REFUND_FLAGGED_META ) ) {
 			return;
 		}
 
-		/* translators: %d: order number. */
-		$order->add_order_note( sprintf( __( 'This renewal order was paid after order #%d replaced it and paid the same renewal. Refund one of the two payments.', 'woocommerce-subscriptions-lite' ), (int) $replacement_id ) );
+		if ( CycleStatus::BILLED === $cycle->get_status() ) {
+			/* translators: %d: order number. */
+			$note    = sprintf( __( 'This renewal order was paid after order #%d replaced it and paid the same renewal. Refund one of the two payments.', 'woocommerce-subscriptions-lite' ), $replacement_id );
+			$message = sprintf( 'Settlement: renewal order %d was paid after order %d replaced it and paid the same renewal; a refund is needed.', $order->get_id(), $replacement_id );
+		} elseif ( $in_flight ) {
+			// The replacement's charge may still complete: it keeps the renewal, so at most one
+			// payment settles it and the other is flagged here rather than cancelled unseen.
+			/* translators: %d: order number. */
+			$note    = sprintf( __( 'This renewal order was paid after order #%d replaced it, while that order\'s payment was still awaiting confirmation. If that payment completes, refund one of the two payments.', 'woocommerce-subscriptions-lite' ), $replacement_id );
+			$message = sprintf( 'Settlement: renewal order %d was paid after order %d replaced it while that order\'s payment was in flight; a refund is likely needed.', $order->get_id(), $replacement_id );
+		} else {
+			return;
+		}
+
+		$order->add_order_note( $note );
 		$order->update_meta_data( self::REFUND_FLAGGED_META, '1' );
 		$order->save();
 		wc_get_logger()->warning(
-			sprintf( 'Settlement: renewal order %d was paid after order %d replaced it and paid the same renewal; a refund is needed.', $order->get_id(), (int) $replacement_id ),
+			$message,
 			[
 				'source'      => Package::EXTENSION_SLUG,
 				'contract_id' => $contract_id,
