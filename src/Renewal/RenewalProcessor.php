@@ -165,7 +165,7 @@ final class RenewalProcessor {
 				break;
 		}
 
-		[ $starts_at, $ends_at ] = BillingPeriod::containing( $anchor, $now, $policy );
+		[ $starts_at, $ends_at ] = BillingPeriod::get_period_to_bill( $anchor, $now, $policy );
 
 		if ( CycleStatus::BILLED === $head->get_status() && new DateTimeImmutable( $head->get_ends_at_gmt(), new DateTimeZone( 'UTC' ) ) >= $ends_at ) {
 			$this->reapply_schedule( $contract, $head, $now, $policy );
@@ -200,7 +200,7 @@ final class RenewalProcessor {
 		$this->log( 'warning', sprintf( 'contract %d is due for a period its newest cycle already billed; its next due moment is re-applied.', $contract->get_id() ), $contract->get_id() );
 		Contracts::update(
 			$contract->get_id(),
-			[ 'next_payment_gmt' => BillingPeriod::next_due_after( new DateTimeImmutable( $head->get_ends_at_gmt(), new DateTimeZone( 'UTC' ) ), $now, $policy ) ]
+			[ 'next_payment_gmt' => BillingPeriod::get_next_due_after( new DateTimeImmutable( $head->get_ends_at_gmt(), new DateTimeZone( 'UTC' ) ), $now, $policy ) ]
 		);
 	}
 

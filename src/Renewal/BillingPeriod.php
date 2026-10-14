@@ -41,7 +41,7 @@ final class BillingPeriod {
 	 * @param BillingPolicy     $policy The plan's billing policy.
 	 * @return array{0: DateTimeImmutable, 1: DateTimeImmutable} Period start and end (UTC).
 	 */
-	public static function containing( DateTimeImmutable $anchor, DateTimeImmutable $now, BillingPolicy $policy ): array {
+	public static function get_period_to_bill( DateTimeImmutable $anchor, DateTimeImmutable $now, BillingPolicy $policy ): array {
 		$utc   = new DateTimeZone( 'UTC' );
 		$start = $anchor->setTimezone( $utc );
 		$now   = $now->setTimezone( $utc );
@@ -54,7 +54,7 @@ final class BillingPeriod {
 		}
 
 		if ( $end <= $now ) {
-			self::log_cap( 'containing', $anchor );
+			self::log_cap( 'get_period_to_bill', $anchor );
 			$start = $now;
 			$end   = $policy->compute_next_renewal_from( $start );
 		}
@@ -71,7 +71,7 @@ final class BillingPeriod {
 	 * @param DateTimeImmutable $now    The current moment.
 	 * @param BillingPolicy     $policy The plan's billing policy.
 	 */
-	public static function next_due_after( DateTimeImmutable $from, DateTimeImmutable $now, BillingPolicy $policy ): DateTimeImmutable {
+	public static function get_next_due_after( DateTimeImmutable $from, DateTimeImmutable $now, BillingPolicy $policy ): DateTimeImmutable {
 		$utc  = new DateTimeZone( 'UTC' );
 		$next = $from->setTimezone( $utc );
 		$now  = $now->setTimezone( $utc );
@@ -82,7 +82,7 @@ final class BillingPeriod {
 		}
 
 		if ( $next <= $now ) {
-			self::log_cap( 'next_due_after', $from );
+			self::log_cap( 'get_next_due_after', $from );
 			$next = $policy->compute_next_renewal_from( $now );
 		}
 
