@@ -1,8 +1,8 @@
 <?php
 /**
- * ReusablePaymentMethod - tells gateways when a checkout must leave a chargeable payment method.
+ * PaymentRequirement - make subscription checkouts collect a payment method Lite can charge later.
  *
- * Answers the engine's reusable-payment-method query for carts and orders that start a
+ * The payment-side counterpart of {@see AccountRequirement}. Answers the engine's reusable-payment-method query for carts and orders that start a
  * Lite subscription (a plan line) and for Lite renewal orders (paying one on order-pay
  * should leave a method that can be charged next time). A free first order whose
  * subscription will charge later (a recurring total above 0) still needs payment, so the
@@ -24,28 +24,28 @@ use WC_Order_Item_Product;
 defined( 'ABSPATH' ) || exit;
 
 /**
- * Reusable payment method answers.
+ * Payment requirements for subscription checkouts.
  */
-final class ReusablePaymentMethod {
+final class PaymentRequirement {
 
 	/**
-	 * Bind the query answer and the free-first-order payment filters.
+	 * Bind the saved-method query and the free-first-order payment filters.
 	 */
 	public static function register(): void {
 		$instance = new self();
-		add_filter( 'woocommerce_subscriptions_engine_requires_reusable_payment_method', [ $instance, 'answer' ], 10, 2 );
-		add_filter( 'woocommerce_cart_needs_payment', [ $instance, 'cart_needs_payment' ], 10, 2 );
-		add_filter( 'woocommerce_order_needs_payment', [ $instance, 'order_needs_payment' ], 10, 3 );
+		add_filter( 'woocommerce_subscriptions_engine_requires_reusable_payment_method', [ $instance, 'is_saving_payment_method_required' ], 10, 2 );
+		add_filter( 'woocommerce_cart_needs_payment', [ $instance, 'is_cart_payment_required' ], 10, 2 );
+		add_filter( 'woocommerce_order_needs_payment', [ $instance, 'is_order_payment_required' ], 10, 3 );
 	}
 
 	/**
-	 * Whether the order (or, with null, the current cart) needs a reusable payment method.
+	 * Whether paying the order (or, with null, the current cart) must save a reusable payment method.
 	 *
 	 * @param mixed $requires The answer so far.
 	 * @param mixed $order    The order being paid, or null for the current cart.
 	 * @return mixed True when Lite will charge it later; else the answer so far.
 	 */
-	public function answer( $requires, $order = null ) {
+	public function is_saving_payment_method_required( $requires, $order = null ) {
 		if ( true === $requires ) {
 			return $requires;
 		}
@@ -62,14 +62,14 @@ final class ReusablePaymentMethod {
 	}
 
 	/**
-	 * A free cart that starts a subscription charging later still needs payment, so the
-	 * method is saved.
+	 * Whether the cart needs payment: a free cart that starts a subscription charging later
+	 * still does, so the method is saved.
 	 *
 	 * @param mixed $needs_payment Whether the cart needs payment.
 	 * @param mixed $cart          The cart.
 	 * @return mixed
 	 */
-	public function cart_needs_payment( $needs_payment, $cart ) {
+	public function is_cart_payment_required( $needs_payment, $cart ) {
 		if ( false !== $needs_payment || ! $cart instanceof WC_Cart || (float) $cart->get_total( 'edit' ) > 0 ) {
 			return $needs_payment;
 		}
@@ -78,8 +78,8 @@ final class ReusablePaymentMethod {
 	}
 
 	/**
-	 * A free order that starts a subscription charging later still needs payment while it is
-	 * in a payable status, so the method is saved. Never for Lite renewal orders: a free
+	 * Whether the order needs payment: a free order that starts a subscription charging later
+	 * still does while it is in a payable status, so the method is saved. Never for Lite renewal orders: a free
 	 * renewal is completed by Lite.
 	 *
 	 * @param mixed $needs_payment        Whether the order needs payment.
@@ -87,7 +87,7 @@ final class ReusablePaymentMethod {
 	 * @param mixed $valid_order_statuses Statuses in which the order can be paid.
 	 * @return mixed
 	 */
-	public function order_needs_payment( $needs_payment, $order, $valid_order_statuses = [] ) {
+	public function is_order_payment_required( $needs_payment, $order, $valid_order_statuses = [] ) {
 		if ( false !== $needs_payment || ! $order instanceof WC_Order || ! is_array( $valid_order_statuses )
 			|| (float) $order->get_total() > 0
 			|| RenewalOrderBuilder::CREATED_VIA === $order->get_created_via()

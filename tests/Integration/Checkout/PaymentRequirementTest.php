@@ -1,6 +1,6 @@
 <?php
 /**
- * Integration tests for ReusablePaymentMethod.
+ * Integration tests for PaymentRequirement.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Tests
  */
@@ -20,9 +20,9 @@ use WC_Order_Item_Fee;
 use WC_Product_Simple;
 
 /**
- * @covers \Automattic\WooCommerce\SubscriptionsLite\Checkout\ReusablePaymentMethod
+ * @covers \Automattic\WooCommerce\SubscriptionsLite\Checkout\PaymentRequirement
  */
-final class ReusablePaymentMethodTest extends LiteIntegrationTestCase {
+final class PaymentRequirementTest extends LiteIntegrationTestCase {
 
 	public function set_up(): void {
 		parent::set_up();

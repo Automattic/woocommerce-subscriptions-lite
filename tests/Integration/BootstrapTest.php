@@ -24,7 +24,7 @@ use Automattic\WooCommerce\SubscriptionsLite\ProductPage\PlanPicker;
 use Automattic\WooCommerce\SubscriptionsLite\ProductPage\VariationPlanData;
 use Automattic\WooCommerce\SubscriptionsLite\Renewal\DueHandler;
 use Automattic\WooCommerce\SubscriptionsLite\Renewal\Settlement;
-use Automattic\WooCommerce\SubscriptionsLite\Checkout\ReusablePaymentMethod;
+use Automattic\WooCommerce\SubscriptionsLite\Checkout\PaymentRequirement;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Dispatch\DueDispatcher;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Ownership\ConsumerRegistry;
@@ -100,7 +100,7 @@ final class BootstrapTest extends LiteIntegrationTestCase {
 			'Renewal orders settle when trashed.'
 		);
 		$this->assertTrue(
-			$this->hook_has_callback_on( 'woocommerce_subscriptions_engine_requires_reusable_payment_method', ReusablePaymentMethod::class ),
+			$this->hook_has_callback_on( 'woocommerce_subscriptions_engine_requires_reusable_payment_method', PaymentRequirement::class ),
 			'Lite answers the reusable payment method query.'
 		);
 	}

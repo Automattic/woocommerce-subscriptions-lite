@@ -89,7 +89,7 @@ final class Bootstrap {
 		// the new subscription on the order-received page.
 		Checkout\ContractCreationHandler::register();
 		Checkout\AccountRequirement::register();
-		Checkout\ReusablePaymentMethod::register();
+		Checkout\PaymentRequirement::register();
 		Checkout\OrderReceived::register();
 
 		// Renewal: settle Lite renewal orders from their status. Gateways report charge
