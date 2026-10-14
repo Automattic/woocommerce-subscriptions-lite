@@ -272,11 +272,12 @@ final class RenewalProcessor {
 	 * ({@see self::GATEWAY_RENEWAL_FEATURE}), else leave a manual renewal order for the
 	 * customer and hold the contract.
 	 *
-	 * After a charge the order status is the outcome: paid, failed, or on-hold while an
-	 * asynchronous charge awaits confirmation. An order left pending is a failed charge,
-	 * whatever the reason (not handed over, the gateway threw, or it reported nothing): the
-	 * order is marked failed, so the cycle fails and the contract waits on the customer's
-	 * payment. A gateway that paid and then threw left a paid order, which settles as paid.
+	 * After a charge the order status is the outcome the gateway set: paid, failed, or on-hold
+	 * while an asynchronous charge awaits confirmation. Lite never sets it. An order the gateway
+	 * left pending (it awaits the customer, reports later, or threw) is left for payment like a
+	 * manual renewal order: the contract goes on the system hold, so it is not charged again,
+	 * and resumes when the order is paid. A gateway that paid and then threw left a paid order,
+	 * which settles as paid.
 	 *
 	 * @param ContractView      $contract The contract.
 	 * @param CycleView         $cycle    The cycle being billed.
@@ -297,25 +298,47 @@ final class RenewalProcessor {
 			return;
 		}
 
-		if ( Payments::gateway_supports( (string) $contract->get_payment_method(), self::GATEWAY_RENEWAL_FEATURE ) ) {
-			$handed_over = Payments::process_scheduled_payment( $order );
-			$charged     = wc_get_order( $order->get_id() );
-			if ( $charged instanceof WC_Order && $charged->has_status( OrderStatus::PENDING ) ) {
-				// No outcome reported: nothing is in flight, so this is a failed charge the
-				// customer can still pay on order-pay. A false hand-over may also mean the
-				// gateway threw part way, so the note does not claim the charge never ran.
-				$charged->update_status(
-					OrderStatus::FAILED,
-					$handed_over
-						? __( 'Renewal payment failed: the payment gateway did not report an outcome for the charge.', 'woocommerce-subscriptions-lite' )
-						: __( 'Renewal payment failed: the payment could not be completed automatically. Check the payment gateway logs before taking a payment again.', 'woocommerce-subscriptions-lite' )
-				);
-			}
-			$settlement->settle( $order, $now );
+		if ( ! Payments::gateway_supports( (string) $contract->get_payment_method(), self::GATEWAY_RENEWAL_FEATURE ) ) {
+			$this->leave_for_payment(
+				$contract,
+				$cycle,
+				$order,
+				__( 'Renewal order created for manual payment: the payment method cannot be charged automatically. The subscription is on hold until the customer pays this order.', 'woocommerce-subscriptions-lite' )
+			);
 			return;
 		}
 
-		$order->add_order_note( __( 'Renewal order created for manual payment: the payment method cannot be charged automatically. The subscription is on hold until the customer pays this order.', 'woocommerce-subscriptions-lite' ) );
+		$handed_over = Payments::process_scheduled_payment( $order );
+		$charged     = wc_get_order( $order->get_id() );
+		if ( $charged instanceof WC_Order && $charged->has_status( OrderStatus::PENDING ) ) {
+			// The gateway reported no outcome yet. A false hand-over may also mean it threw part
+			// way, so that note does not claim the charge never ran.
+			$this->leave_for_payment(
+				$contract,
+				$cycle,
+				$charged,
+				$handed_over
+					? __( 'Renewal payment not completed yet: the payment gateway did not report an outcome. The subscription is on hold until this order is paid.', 'woocommerce-subscriptions-lite' )
+					: __( 'Renewal payment not completed: the payment gateway reported an error. Check the payment gateway logs before taking a payment again. The subscription is on hold until this order is paid.', 'woocommerce-subscriptions-lite' )
+			);
+			return;
+		}
+
+		$settlement->settle( $order, $now );
+	}
+
+	/**
+	 * Leave a pending renewal order for payment: note it, release the cycle's claim with the
+	 * order linked, and put the contract on the system hold, so it is not charged again. Paying
+	 * the order settles the cycle and resumes the contract.
+	 *
+	 * @param ContractView $contract The contract.
+	 * @param CycleView    $cycle    The cycle the order bills.
+	 * @param WC_Order     $order    The pending renewal order.
+	 * @param string       $note     Order note saying why the order awaits payment.
+	 */
+	private function leave_for_payment( ContractView $contract, CycleView $cycle, WC_Order $order, string $note ): void {
+		$order->add_order_note( $note );
 		Contracts::transition_cycle( $cycle->get_id(), CycleStatus::PENDING, CycleStatus::PENDING, [ 'order_id' => $order->get_id() ] );
 		Hold::system_hold( $contract->get_id() );
 	}

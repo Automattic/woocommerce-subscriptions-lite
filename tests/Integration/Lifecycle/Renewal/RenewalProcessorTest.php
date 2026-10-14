@@ -186,9 +186,9 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 	 * @dataProvider provide_charges_without_an_outcome
 	 *
 	 * @param string $outcome Stub charge outcome.
-	 * @param string $note    The fragment that tells this case's failure note apart.
+	 * @param string $note    The fragment that tells this case's order note apart.
 	 */
-	public function test_a_charge_that_leaves_the_order_pending_is_a_failed_charge( string $outcome, string $note ): void {
+	public function test_a_charge_that_leaves_the_order_pending_holds_the_contract_until_it_is_paid( string $outcome, string $note ): void {
 		$this->support_engine_charges( 'cod', $outcome );
 		$contract_id = $this->make_contract();
 
@@ -197,7 +197,7 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 		$this->assertInstanceOf( WC_Order::class, $order );
 		$this->assertSame( 1, $this->charge_count() );
 		$reloaded = wc_get_order( $order->get_id() );
-		$this->assertSame( 'failed', $reloaded->get_status() );
+		$this->assertSame( 'pending', $reloaded->get_status(), 'Lite leaves the order status to the gateway.' );
 		$this->assertTrue( $reloaded->needs_payment(), 'The customer can still pay the order.' );
 		$this->assertCount(
 			1,
@@ -208,10 +208,19 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 				]
 			)
 		);
-		$this->assertSame( CycleStatus::FAILED, $this->head( $contract_id )->get_status() );
+		$head = $this->head( $contract_id );
+		$this->assertSame( CycleStatus::PENDING, $head->get_status() );
+		$this->assertSame( $order->get_id(), $head->get_order_id() );
 		$contract = $this->get_contract( $contract_id );
 		$this->assertSame( ContractStatus::ON_HOLD, $contract->get_status() );
-		$this->assertNull( $contract->get_next_payment_gmt() );
+		$this->assertNull( $contract->get_next_payment_gmt(), 'No due moment, so the order is not charged again.' );
+
+		$reloaded->payment_complete();
+
+		$this->assertSame( CycleStatus::BILLED, $this->head( $contract_id )->get_status() );
+		$resumed = $this->get_contract( $contract_id );
+		$this->assertSame( ContractStatus::ACTIVE, $resumed->get_status(), 'Paying the order resumes the contract.' );
+		$this->assertNotNull( $resumed->get_next_payment_gmt() );
 	}
 
 	/**
@@ -222,7 +231,7 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 	public function provide_charges_without_an_outcome(): array {
 		return [
 			'the gateway does nothing' => [ 'none', 'did not report an outcome' ],
-			'the gateway throws'       => [ 'throw', 'could not be completed automatically' ],
+			'the gateway throws'       => [ 'throw', 'reported an error' ],
 		];
 	}
 

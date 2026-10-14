@@ -2,7 +2,7 @@
 /**
  * UnpaidRenewal - the renewal a contract still waits to be paid for.
  *
- * A failed charge and a manual renewal order both leave the contract on hold with no due
+ * A failed charge, a charge the gateway left pending and a manual renewal order all leave the contract on hold with no due
  * moment, which a customer hold also does; what tells them apart is the fact on the chain:
  * the newest cycle is unpaid (`failed`, or `pending` / `processing` with an order).
  *
