@@ -54,7 +54,7 @@ final class Bootstrap {
 			// scheduled request, not just interactive ones.
 			\Automattic\WooCommerce\SubscriptionsEngine\Integration\Ownership\ConsumerRegistry::register(
 				Package::EXTENSION_SLUG,
-				[ 'contract_due_handler' => [ new Lifecycle\Renewal\DueHandler(), 'handle' ] ]
+				[ 'contract_due_handler' => [ new Lifecycle\ContractDueHandler(), 'handle' ] ]
 			);
 		}
 

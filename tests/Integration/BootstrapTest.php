@@ -22,7 +22,7 @@ use Automattic\WooCommerce\SubscriptionsLite\Plans\PlanOrderController;
 use Automattic\WooCommerce\SubscriptionsLite\Pricing\PlanWriteValidation;
 use Automattic\WooCommerce\SubscriptionsLite\ProductPage\PlanPicker;
 use Automattic\WooCommerce\SubscriptionsLite\ProductPage\VariationPlanData;
-use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\DueHandler;
+use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\ContractDueHandler;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\Settlement;
 use Automattic\WooCommerce\SubscriptionsLite\Checkout\PaymentRequirement;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
@@ -89,7 +89,7 @@ final class BootstrapTest extends LiteIntegrationTestCase {
 		);
 		$handler = ConsumerRegistry::get_contract_due_handler( Package::EXTENSION_SLUG );
 		$this->assertIsArray( $handler, 'Lite registers a due handler with the engine.' );
-		$this->assertInstanceOf( DueHandler::class, $handler[0] );
+		$this->assertInstanceOf( ContractDueHandler::class, $handler[0] );
 		$this->assertSame( 'handle', $handler[1] );
 		$this->assertTrue(
 			$this->hook_has_callback_on( 'woocommerce_order_status_changed', Settlement::class ),

@@ -1,24 +1,24 @@
 <?php
 /**
- * Integration tests for DueHandler.
+ * Integration tests for ContractDueHandler.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Tests
  */
 
 declare( strict_types=1 );
 
-namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Lifecycle\Renewal;
+namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Lifecycle;
 
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\CycleStatus;
-use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\DueHandler;
+use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\ContractDueHandler;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
 use DateTimeImmutable;
 use DateTimeZone;
 
 /**
- * @covers \Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\DueHandler
+ * @covers \Automattic\WooCommerce\SubscriptionsLite\Lifecycle\ContractDueHandler
  */
 final class DueHandlerTest extends LiteIntegrationTestCase {
 
@@ -36,7 +36,7 @@ final class DueHandlerTest extends LiteIntegrationTestCase {
 		$this->support_engine_charges( 'cod' );
 		$contract_id = $this->create_contract( $this->create_customer(), [ 'payment_method' => 'cod' ] );
 
-		( new DueHandler() )->handle( $this->get_contract( $contract_id ), $this->context() );
+		( new ContractDueHandler() )->handle( $this->get_contract( $contract_id ), $this->context() );
 
 		$this->assertSame( 1, $this->charge_count() );
 		$head = Contracts::get_cycles( $contract_id, 1 )[0];
@@ -55,7 +55,7 @@ final class DueHandlerTest extends LiteIntegrationTestCase {
 		);
 		$this->capture_log();
 
-		( new DueHandler() )->handle( $this->get_contract( $contract_id ), $this->context() );
+		( new ContractDueHandler() )->handle( $this->get_contract( $contract_id ), $this->context() );
 
 		$this->assertNull( $this->get_contract( $contract_id )->get_next_payment_gmt() );
 		$this->assertSame( ContractStatus::ON_HOLD, $this->get_contract( $contract_id )->get_status() );
@@ -70,9 +70,9 @@ final class DueHandlerTest extends LiteIntegrationTestCase {
 		$contract    = $this->get_contract( $contract_id );
 		$this->capture_log();
 
-		( new DueHandler() )->handle( $contract, [] );
-		( new DueHandler() )->handle( $contract, [ 'due_at' => '2026-02-15 00:00:00' ] );
-		( new DueHandler() )->handle( $contract_id, $this->context() );
+		( new ContractDueHandler() )->handle( $contract, [] );
+		( new ContractDueHandler() )->handle( $contract, [ 'due_at' => '2026-02-15 00:00:00' ] );
+		( new ContractDueHandler() )->handle( $contract_id, $this->context() );
 
 		$this->assertSame( 0, $this->charge_count() );
 		$this->assertCount( 1, Contracts::get_cycles( $contract_id ) );
