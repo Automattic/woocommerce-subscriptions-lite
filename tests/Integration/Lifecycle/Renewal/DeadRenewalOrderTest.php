@@ -8,7 +8,7 @@
 
 declare( strict_types=1 );
 
-namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Renewal;
+namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Lifecycle\Renewal;
 
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\CycleView;
@@ -19,14 +19,14 @@ use Automattic\WooCommerce\SubscriptionsLite\CustomerPortal\EngineDataProvider;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\HoldAnchor;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\LifecycleNotAllowedException;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Reactivation;
-use Automattic\WooCommerce\SubscriptionsLite\Renewal\Settlement;
+use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\Settlement;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
 use Automattic\WooCommerce\Utilities\OrderUtil;
 use WC_Order;
 
 /**
- * @covers \Automattic\WooCommerce\SubscriptionsLite\Renewal\Settlement
- * @covers \Automattic\WooCommerce\SubscriptionsLite\Renewal\RenewalProcessor
+ * @covers \Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\Settlement
+ * @covers \Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\RenewalProcessor
  */
 final class DeadRenewalOrderTest extends LiteIntegrationTestCase {
 

@@ -7,7 +7,7 @@
 
 declare( strict_types=1 );
 
-namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Renewal;
+namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Lifecycle\Renewal;
 
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Payments;
@@ -17,15 +17,15 @@ use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\CycleStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\SchemaInstaller;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\RowActionController;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\RowActionResult;
-use Automattic\WooCommerce\SubscriptionsLite\Renewal\RenewalOrderBuilder;
-use Automattic\WooCommerce\SubscriptionsLite\Renewal\RenewalProcessor;
+use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\RenewalOrderBuilder;
+use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\RenewalProcessor;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
 use DateTimeImmutable;
 use DateTimeZone;
 use WC_Order;
 
 /**
- * @covers \Automattic\WooCommerce\SubscriptionsLite\Renewal\RenewalProcessor
+ * @covers \Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\RenewalProcessor
  */
 final class RenewalProcessorTest extends LiteIntegrationTestCase {
 

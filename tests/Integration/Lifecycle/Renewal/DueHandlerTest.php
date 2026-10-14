@@ -7,18 +7,18 @@
 
 declare( strict_types=1 );
 
-namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Renewal;
+namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Lifecycle\Renewal;
 
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\CycleStatus;
-use Automattic\WooCommerce\SubscriptionsLite\Renewal\DueHandler;
+use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\DueHandler;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
 use DateTimeImmutable;
 use DateTimeZone;
 
 /**
- * @covers \Automattic\WooCommerce\SubscriptionsLite\Renewal\DueHandler
+ * @covers \Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\DueHandler
  */
 final class DueHandlerTest extends LiteIntegrationTestCase {
 

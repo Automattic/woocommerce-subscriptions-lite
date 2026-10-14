@@ -158,13 +158,13 @@ final class ReactivationTest extends LiteIntegrationTestCase {
 		$this->assertNull( $stored->get_next_payment_gmt() );
 	}
 
-	public function test_reactivate_floors_past_due_at_now_when_the_roll_cap_exhausts(): void {
+	public function test_reactivate_floors_past_due_one_cadence_after_now_when_the_roll_cap_exhausts(): void {
 		// Daily cadence, about 6.5 years past due: more rolls than the cap allows.
 		$contract_id = $this->seed_held_contract( '2020-01-01 00:00:00', (int) $this->make_plan( 'day' )->get_id() );
 
 		( new Reactivation() )->reactivate( $contract_id, $this->utc( '2026-07-06 00:00:00' ) );
 
-		$this->assertSame( '2026-07-06 00:00:00', $this->get_contract( $contract_id )->get_next_payment_gmt() );
+		$this->assertSame( '2026-07-07 00:00:00', $this->get_contract( $contract_id )->get_next_payment_gmt(), 'As for any roll, the next due moment is in the future.' );
 	}
 
 	public function test_reactivate_floors_past_due_at_now_without_a_plan(): void {

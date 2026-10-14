@@ -8,12 +8,12 @@
  * rethrown: the engine's dispatch claim keeps the contract from being notified again
  * until it expires.
  *
- * @package Automattic\WooCommerce\SubscriptionsLite\Renewal
+ * @package Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal
  */
 
 declare( strict_types=1 );
 
-namespace Automattic\WooCommerce\SubscriptionsLite\Renewal;
+namespace Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal;
 
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;

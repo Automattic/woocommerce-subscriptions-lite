@@ -19,7 +19,8 @@ use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ContractPlans;
-use Automattic\WooCommerce\SubscriptionsLite\Renewal\UnpaidRenewal;
+use Automattic\WooCommerce\SubscriptionsLite\Pricing\BillingTerms;
+use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\UnpaidRenewal;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -27,11 +28,6 @@ defined( 'ABSPATH' ) || exit;
  * Reactivate a held contract.
  */
 final class Reactivation {
-
-	/**
-	 * Bound on the forward roll, so a fine-grained cadence after a very long hold cannot loop unboundedly.
-	 */
-	private const MAX_FORWARD_ROLLS = 1000;
 
 	/**
 	 * Reactivate an on-hold contract. The anchor is the next payment when one was set
@@ -90,8 +86,8 @@ final class Reactivation {
 	 * The next payment after a hold.
 	 *
 	 * A future anchor is kept; a past-due one is rolled forward by whole plan cadences until
-	 * it is in the future, floored at `$now` when there is no cadence or the roll cap runs
-	 * out (logged); no anchor leaves the contract unscheduled.
+	 * it is in the future ({@see BillingTerms::get_next_due_after()}), or floored at `$now`
+	 * when there is no cadence; no anchor leaves the contract unscheduled.
 	 *
 	 * @param ContractView      $contract The contract being reactivated.
 	 * @param string|null       $anchor   GMT moment to recompute from, or null.
@@ -113,23 +109,6 @@ final class Reactivation {
 			return $now->format( 'Y-m-d H:i:s' );
 		}
 
-		$rolls_left = self::MAX_FORWARD_ROLLS;
-		while ( $next_payment <= $now && $rolls_left-- > 0 ) {
-			$next_payment = $billing_policy->compute_next_renewal_from( $next_payment );
-		}
-
-		if ( $next_payment <= $now ) {
-			wc_get_logger()->warning(
-				sprintf( 'Reactivation: contract %d exhausted the forward-roll cap; next payment floored at now.', $contract->get_id() ),
-				[
-					'source'      => 'woocommerce-subscriptions-lite',
-					'contract_id' => $contract->get_id(),
-				]
-			);
-
-			return $now->format( 'Y-m-d H:i:s' );
-		}
-
-		return $next_payment->format( 'Y-m-d H:i:s' );
+		return BillingTerms::get_next_due_after( $next_payment, $now, $billing_policy )->format( 'Y-m-d H:i:s' );
 	}
 }

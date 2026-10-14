@@ -38,7 +38,7 @@ use Automattic\WooCommerce\SubscriptionsLite\Contracts\AddressFields;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ProductPlanResolver;
 use Automattic\WooCommerce\SubscriptionsLite\Pricing\BillingTerms;
-use Automattic\WooCommerce\SubscriptionsLite\Renewal\RenewalOrderBuilder;
+use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\RenewalOrderBuilder;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -208,7 +208,7 @@ final class ContractCreationHandler {
 	 * then cycle 1 (billed by the order), then activation with the first renewal date.
 	 * Activation comes last, so a failure part-way leaves a draft that is never due.
 	 *
-	 * The first renewal date comes from {@see BillingTerms::first_renewal_from()}, the
+	 * The first renewal date comes from {@see BillingTerms::get_first_renewal_from()}, the
 	 * same parse that decides whether a plan is billable.
 	 *
 	 * @param WC_Order $order The paid order.
@@ -231,7 +231,7 @@ final class ContractCreationHandler {
 		$start = null !== $paid
 			? new DateTimeImmutable( '@' . $paid->getTimestamp() )
 			: new DateTimeImmutable( 'now', new DateTimeZone( 'UTC' ) );
-		$next  = BillingTerms::first_renewal_from( $plan, $start );
+		$next  = BillingTerms::get_first_renewal_from( $plan, $start );
 
 		$totals = $this->get_recurring_totals( $order, $plan_lines );
 

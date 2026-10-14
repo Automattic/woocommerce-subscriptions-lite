@@ -16,7 +16,7 @@ declare( strict_types=1 );
 namespace Automattic\WooCommerce\SubscriptionsLite\Checkout;
 
 use Automattic\WooCommerce\SubscriptionsLite\Cart\CartPlanHooks;
-use Automattic\WooCommerce\SubscriptionsLite\Renewal\RenewalOrderBuilder;
+use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\RenewalOrderBuilder;
 use WC_Cart;
 use WC_Order;
 use WC_Order_Item_Product;

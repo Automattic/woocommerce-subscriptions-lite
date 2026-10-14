@@ -7,16 +7,16 @@
 
 declare( strict_types=1 );
 
-namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Renewal;
+namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Lifecycle\Renewal;
 
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\CycleView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\CycleStatus;
-use Automattic\WooCommerce\SubscriptionsLite\Renewal\UnpaidRenewal;
+use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\UnpaidRenewal;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
 
 /**
- * @covers \Automattic\WooCommerce\SubscriptionsLite\Renewal\UnpaidRenewal
+ * @covers \Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\UnpaidRenewal
  */
 final class UnpaidRenewalTest extends LiteIntegrationTestCase {
 

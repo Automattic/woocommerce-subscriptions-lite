@@ -54,7 +54,7 @@ final class Bootstrap {
 			// scheduled request, not just interactive ones.
 			\Automattic\WooCommerce\SubscriptionsEngine\Integration\Ownership\ConsumerRegistry::register(
 				Package::EXTENSION_SLUG,
-				[ 'contract_due_handler' => [ new Renewal\DueHandler(), 'handle' ] ]
+				[ 'contract_due_handler' => [ new Lifecycle\Renewal\DueHandler(), 'handle' ] ]
 			);
 		}
 
@@ -95,7 +95,7 @@ final class Bootstrap {
 		// Renewal: settle Lite renewal orders from their status. Gateways report charge
 		// outcomes from any request (Action Scheduler, webhooks), so this registers on
 		// every request.
-		Renewal\Settlement::register();
+		Lifecycle\Renewal\Settlement::register();
 
 		// Customer portal (My Account): the subscriptions list + single
 		// subscription detail, with the lifecycle actions (cancel / hold /

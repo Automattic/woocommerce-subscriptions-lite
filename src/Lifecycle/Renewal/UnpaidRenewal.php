@@ -6,12 +6,12 @@
  * moment, which a customer hold also does; what tells them apart is the fact on the chain:
  * the newest cycle is unpaid (`failed`, or `pending` / `processing` with an order).
  *
- * @package Automattic\WooCommerce\SubscriptionsLite\Renewal
+ * @package Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal
  */
 
 declare( strict_types=1 );
 
-namespace Automattic\WooCommerce\SubscriptionsLite\Renewal;
+namespace Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal;
 
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;

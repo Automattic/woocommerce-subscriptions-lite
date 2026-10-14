@@ -6,16 +6,16 @@
  * appended claimed (append-if-absent with a claim), an interrupted cycle is resumed only
  * by the run that takes its expired claim, and settlement moves cycles by
  * compare-and-set. A due contract several periods behind bills the one period containing
- * now ({@see BillingPeriod}). Gateways that accept engine charges are charged through the
+ * now ({@see BillingTerms::get_period_to_bill()}). Gateways that accept engine charges are charged through the
  * engine; any other gateway gets a manual renewal order the customer pays, with the
  * contract on hold until then.
  *
- * @package Automattic\WooCommerce\SubscriptionsLite\Renewal
+ * @package Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal
  */
 
 declare( strict_types=1 );
 
-namespace Automattic\WooCommerce\SubscriptionsLite\Renewal;
+namespace Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal;
 
 use Automattic\WooCommerce\Enums\OrderStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
@@ -25,6 +25,7 @@ use Automattic\WooCommerce\SubscriptionsEngine\Api\View\CycleView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\CycleStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\ValueObject\BillingPolicy;
+use Automattic\WooCommerce\SubscriptionsLite\Pricing\BillingTerms;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Hold;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ContractPlans;
@@ -165,7 +166,7 @@ final class RenewalProcessor {
 				break;
 		}
 
-		[ $starts_at, $ends_at ] = BillingPeriod::get_period_to_bill( $anchor, $now, $policy );
+		[ $starts_at, $ends_at ] = BillingTerms::get_period_to_bill( $anchor, $now, $policy );
 
 		if ( CycleStatus::BILLED === $head->get_status() && new DateTimeImmutable( $head->get_ends_at_gmt(), new DateTimeZone( 'UTC' ) ) >= $ends_at ) {
 			$this->reapply_schedule( $contract, $head, $now, $policy );
@@ -200,7 +201,7 @@ final class RenewalProcessor {
 		$this->log( 'warning', sprintf( 'contract %d is due for a period its newest cycle already billed; its next due moment is re-applied.', $contract->get_id() ), $contract->get_id() );
 		Contracts::update(
 			$contract->get_id(),
-			[ 'next_payment_gmt' => BillingPeriod::get_next_due_after( new DateTimeImmutable( $head->get_ends_at_gmt(), new DateTimeZone( 'UTC' ) ), $now, $policy ) ]
+			[ 'next_payment_gmt' => BillingTerms::get_next_due_after( new DateTimeImmutable( $head->get_ends_at_gmt(), new DateTimeZone( 'UTC' ) ), $now, $policy ) ]
 		);
 	}
 

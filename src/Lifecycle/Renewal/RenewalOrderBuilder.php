@@ -8,12 +8,12 @@
  * The total is the cycle's expected total. The order is returned as a saved draft: the
  * caller links it to the cycle first and only then makes it a live pending order.
  *
- * @package Automattic\WooCommerce\SubscriptionsLite\Renewal
+ * @package Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal
  */
 
 declare( strict_types=1 );
 
-namespace Automattic\WooCommerce\SubscriptionsLite\Renewal;
+namespace Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal;
 
 use Automattic\WooCommerce\Enums\OrderStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;

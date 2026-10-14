@@ -19,7 +19,7 @@ use Automattic\WooCommerce\SubscriptionsEngine\Api\ContractActions;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 use Automattic\WooCommerce\SubscriptionsLite\Contracts\CustomerVisibility;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
-use Automattic\WooCommerce\SubscriptionsLite\Renewal\UnpaidRenewal;
+use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\UnpaidRenewal;
 
 defined( 'ABSPATH' ) || exit;
 

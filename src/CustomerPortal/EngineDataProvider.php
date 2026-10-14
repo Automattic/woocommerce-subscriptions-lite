@@ -39,7 +39,7 @@ use Automattic\WooCommerce\SubscriptionsLite\Contracts\CustomerVisibility;
 use Automattic\WooCommerce\SubscriptionsLite\Orders\RelatedOrders;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ContractPlans;
 use Automattic\WooCommerce\SubscriptionsLite\Pricing\BillingTerms;
-use Automattic\WooCommerce\SubscriptionsLite\Renewal\UnpaidRenewal;
+use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\UnpaidRenewal;
 
 defined( 'ABSPATH' ) || exit;
 
