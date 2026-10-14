@@ -108,7 +108,7 @@ final class Reactivation {
 			return $anchor;
 		}
 
-		$billing_policy = ContractPlans::billing_policy_for( $contract );
+		$billing_policy = ContractPlans::get_billing_policy_for( $contract );
 		if ( null === $billing_policy ) {
 			return $now->format( 'Y-m-d H:i:s' );
 		}

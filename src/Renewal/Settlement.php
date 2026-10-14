@@ -287,7 +287,7 @@ final class Settlement {
 			return;
 		}
 
-		$policy = ContractPlans::billing_policy_for( $contract );
+		$policy = ContractPlans::get_billing_policy_for( $contract );
 		$next   = null === $policy
 			? null
 			: BillingPeriod::next_due_after( new DateTimeImmutable( $cycle->get_ends_at_gmt(), new DateTimeZone( 'UTC' ) ), $now, $policy );
@@ -335,7 +335,7 @@ final class Settlement {
 
 		// An active contract with no due moment and no billing policy stays parked.
 		return null === $resumes_at
-			? null === ContractPlans::billing_policy_for( $contract )
+			? null === ContractPlans::get_billing_policy_for( $contract )
 			: $resumes_at >= (string) $cycle->get_ends_at_gmt();
 	}
 

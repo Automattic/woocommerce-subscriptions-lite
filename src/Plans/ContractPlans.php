@@ -43,7 +43,7 @@ final class ContractPlans {
 	 *
 	 * @param ContractView $contract Contract.
 	 */
-	public static function billing_policy_for( ContractView $contract ): ?BillingPolicy {
+	public static function get_billing_policy_for( ContractView $contract ): ?BillingPolicy {
 		$plan    = self::for_contract( $contract );
 		$billing = null === $plan ? null : $plan->get_billing_policy();
 		if ( null === $billing ) {

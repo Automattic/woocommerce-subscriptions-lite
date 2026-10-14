@@ -67,7 +67,7 @@ final class RenewalProcessor {
 	 */
 	public function renew( ContractView $contract, DateTimeImmutable $anchor, DateTimeImmutable $now, bool $manual ): ?WC_Order {
 		$contract_id = $contract->get_id();
-		$policy      = ContractPlans::billing_policy_for( $contract );
+		$policy      = ContractPlans::get_billing_policy_for( $contract );
 		$head        = Contracts::get_cycles( $contract_id, 1 )[0] ?? null;
 		if ( null === $policy || null === $head ) {
 			$this->log( 'warning', sprintf( 'contract %d has no billing policy or no billing chain; its due moment is cleared.', $contract_id ), $contract_id );
