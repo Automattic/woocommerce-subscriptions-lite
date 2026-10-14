@@ -5,7 +5,7 @@
  * {@see Hold} stores it before disarming the contract; {@see Reactivation} resumes from
  * it and {@see Cancellation} ends a held contract at it. Its presence marks a customer hold:
  * a renewal paid during the hold moves it to the next due moment and keeps the contract on
- * hold. Lite's own holds for an unpaid renewal ({@see SystemHold}) drop it. Lite-owned data.
+ * hold. Lite's own holds for an unpaid renewal ({@see Hold::system_hold()}) drop it. Lite-owned data.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Lifecycle
  */

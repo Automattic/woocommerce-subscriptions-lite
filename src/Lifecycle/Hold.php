@@ -9,6 +9,10 @@
  * of its newest period instead, so every customer hold carries an anchor: that is what tells
  * it apart from Lite's own hold, and a payment that lands during it keeps it on hold.
  *
+ * Lite's own hold ({@see self::system_hold()}) is placed while a renewal waits to be paid: a
+ * failed or unbuildable renewal, a dead renewal order or a manual renewal order. It drops the
+ * anchor instead, so the hold ends when the unpaid renewal is paid.
+ *
  * @package Automattic\WooCommerce\SubscriptionsLite\Lifecycle
  */
 
@@ -73,6 +77,25 @@ final class Hold {
 		do_action( 'woocommerce_subscriptions_lite_contract_held', $held_contract );
 
 		return $held_contract;
+	}
+
+	/**
+	 * Place Lite's hold for an unpaid renewal: on hold with no due moment, and no hold anchor.
+	 * No checks and no `contract_held` action; the renewal flow calling it has decided. The
+	 * anchor goes first, so a reader that sees the contract on hold never finds a stale one.
+	 *
+	 * @param int                  $contract_id Contract id.
+	 * @param array<string, mixed> $fields      Further contract fields to write with the hold.
+	 */
+	public static function system_hold( int $contract_id, array $fields = [] ): void {
+		HoldAnchor::clear( $contract_id );
+		Contracts::update(
+			$contract_id,
+			[
+				'status'           => ContractStatus::ON_HOLD,
+				'next_payment_gmt' => null,
+			] + $fields
+		);
 	}
 
 	/**

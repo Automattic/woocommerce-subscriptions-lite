@@ -10,7 +10,7 @@
  *   is present) stays on hold and its anchor moves to the next due moment; a winding-down
  *   or cancelled contract only records the payment;
  * - failed: cycle failed; an active or held contract (a customer hold included) goes on
- *   the system hold ({@see SystemHold}: no due moment, no customer hold anchor), and the
+ *   the system hold ({@see Hold::system_hold()}: no due moment, no customer hold anchor), and the
  *   customer pays the failed order to resume;
  * - on-hold (an asynchronous charge awaits confirmation): cycle processing and no due
  *   moment, so it is not charged again;
@@ -33,7 +33,7 @@ use Automattic\WooCommerce\SubscriptionsEngine\Api\View\CycleView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\CycleStatus;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\HoldAnchor;
-use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\SystemHold;
+use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Hold;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ContractPlans;
 use DateTimeImmutable;
@@ -368,7 +368,7 @@ final class Settlement {
 		$contract_id = $contract->get_id();
 		if ( in_array( $contract->get_status(), [ ContractStatus::ACTIVE, ContractStatus::ON_HOLD ], true ) ) {
 			// Also over a customer hold: its anchor would sit on the end of an unpaid period.
-			SystemHold::place( $contract_id, [ 'last_attempt_gmt' => $now ] );
+			Hold::system_hold( $contract_id, [ 'last_attempt_gmt' => $now ] );
 		}
 
 		$settled = $this->read_settled( $contract_id, $cycle->get_id(), $order->get_id() );
@@ -416,7 +416,7 @@ final class Settlement {
 		}
 
 		if ( in_array( $contract->get_status(), [ ContractStatus::ACTIVE, ContractStatus::ON_HOLD ], true ) ) {
-			SystemHold::place( $contract->get_id() );
+			Hold::system_hold( $contract->get_id() );
 		}
 	}
 

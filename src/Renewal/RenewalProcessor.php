@@ -25,7 +25,7 @@ use Automattic\WooCommerce\SubscriptionsEngine\Api\View\CycleView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\CycleStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\ValueObject\BillingPolicy;
-use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\SystemHold;
+use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Hold;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ContractPlans;
 use DateTimeImmutable;
@@ -212,7 +212,7 @@ final class RenewalProcessor {
 	 */
 	private function reapply_hold( ContractView $contract ): void {
 		$this->log( 'warning', sprintf( 'contract %d is due while its newest renewal failed; it is put on hold until the renewal is paid.', $contract->get_id() ), $contract->get_id() );
-		SystemHold::place( $contract->get_id() );
+		Hold::system_hold( $contract->get_id() );
 	}
 
 	/**
@@ -237,7 +237,7 @@ final class RenewalProcessor {
 			// database error) is fixed.
 			$this->log( 'error', sprintf( 'contract %d: the renewal order could not be built; the renewal failed and the contract is on hold until it is renewed by hand.', $contract->get_id() ), $contract->get_id() );
 			if ( Contracts::transition_cycle( $cycle->get_id(), CycleStatus::PENDING, CycleStatus::FAILED, [ 'reason' => self::REASON_ORDER_BUILD_FAILED ] ) ) {
-				SystemHold::place( $contract->get_id() );
+				Hold::system_hold( $contract->get_id() );
 			}
 			return null;
 		}
@@ -316,7 +316,7 @@ final class RenewalProcessor {
 
 		$order->add_order_note( __( 'Renewal order created for manual payment: the payment method cannot be charged automatically. The subscription is on hold until the customer pays this order.', 'woocommerce-subscriptions-lite' ) );
 		Contracts::transition_cycle( $cycle->get_id(), CycleStatus::PENDING, CycleStatus::PENDING, [ 'order_id' => $order->get_id() ] );
-		SystemHold::place( $contract->get_id() );
+		Hold::system_hold( $contract->get_id() );
 	}
 
 	/**
