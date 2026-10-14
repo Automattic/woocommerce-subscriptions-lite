@@ -53,10 +53,10 @@ final class PaymentRequirement {
 		}
 
 		if ( $order instanceof WC_Order ) {
-			return self::has_plan_line( $order ) || RenewalOrderBuilder::CREATED_VIA === $order->get_created_via();
+			return self::order_has_item_with_plan( $order ) || RenewalOrderBuilder::CREATED_VIA === $order->get_created_via();
 		}
 
-		return null === $order && function_exists( 'WC' ) && WC()->cart instanceof WC_Cart && self::cart_has_plan_item( WC()->cart );
+		return null === $order && function_exists( 'WC' ) && WC()->cart instanceof WC_Cart && self::cart_has_item_with_plan( WC()->cart );
 	}
 
 	/**
@@ -140,7 +140,7 @@ final class PaymentRequirement {
 	 *
 	 * @param WC_Order $order The order.
 	 */
-	private static function has_plan_line( WC_Order $order ): bool {
+	private static function order_has_item_with_plan( WC_Order $order ): bool {
 		foreach ( $order->get_items() as $item ) {
 			if ( $item instanceof WC_Order_Item_Product && (int) $item->get_meta( CartPlanHooks::SELLING_PLAN_ID_KEY ) > 0 ) {
 				return true;
@@ -155,7 +155,7 @@ final class PaymentRequirement {
 	 *
 	 * @param WC_Cart $cart The cart.
 	 */
-	private static function cart_has_plan_item( WC_Cart $cart ): bool {
+	private static function cart_has_item_with_plan( WC_Cart $cart ): bool {
 		foreach ( $cart->get_cart() as $cart_item ) {
 			if ( is_array( $cart_item ) && (int) ( $cart_item[ CartPlanHooks::SELLING_PLAN_ID_KEY ] ?? 0 ) > 0 ) {
 				return true;
