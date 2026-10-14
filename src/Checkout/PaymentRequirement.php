@@ -72,7 +72,7 @@ final class PaymentRequirement {
 			return true;
 		}
 
-		return $cart instanceof WC_Cart && (float) $cart->get_total( 'edit' ) <= 0 && self::cart_recurring_total( $cart ) > 0;
+		return $cart instanceof WC_Cart && (float) $cart->get_total( 'edit' ) <= 0 && self::get_cart_recurring_total( $cart ) > 0;
 	}
 
 	/**
@@ -94,7 +94,7 @@ final class PaymentRequirement {
 			&& (float) $order->get_total() <= 0
 			&& RenewalOrderBuilder::CREATED_VIA !== $order->get_created_via()
 			&& $order->has_status( $valid_order_statuses )
-			&& self::order_recurring_total( $order ) > 0;
+			&& self::get_order_recurring_total( $order ) > 0;
 	}
 
 	/**
@@ -103,7 +103,7 @@ final class PaymentRequirement {
 	 *
 	 * @param WC_Order $order The order.
 	 */
-	private static function order_recurring_total( WC_Order $order ): float {
+	private static function get_order_recurring_total( WC_Order $order ): float {
 		$total    = 0.0;
 		$has_plan = false;
 		foreach ( $order->get_items() as $item ) {
@@ -122,7 +122,7 @@ final class PaymentRequirement {
 	 *
 	 * @param WC_Cart $cart The cart.
 	 */
-	private static function cart_recurring_total( WC_Cart $cart ): float {
+	private static function get_cart_recurring_total( WC_Cart $cart ): float {
 		$total    = 0.0;
 		$has_plan = false;
 		foreach ( $cart->get_cart() as $cart_item ) {
