@@ -72,6 +72,8 @@ final class PaymentRequirement {
 			return true;
 		}
 
+		// Only a free cart is Lite's case. Core already requires payment for a paid cart, so
+		// a false here means another extension turned it off on purpose; leave that alone.
 		return $cart instanceof WC_Cart && (float) $cart->get_total( 'edit' ) <= 0 && self::get_cart_recurring_total( $cart ) > 0;
 	}
 
@@ -90,6 +92,8 @@ final class PaymentRequirement {
 			return true;
 		}
 
+		// Only a free order is Lite's case; a false for a paid order is another extension's
+		// deliberate choice, as in is_cart_payment_required().
 		return $order instanceof WC_Order && is_array( $valid_order_statuses )
 			&& (float) $order->get_total() <= 0
 			&& RenewalOrderBuilder::CREATED_VIA !== $order->get_created_via()
