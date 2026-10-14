@@ -41,61 +41,60 @@ final class PaymentRequirement {
 	/**
 	 * Whether paying the order (or, with null, the current cart) must save a reusable payment method.
 	 *
-	 * @param mixed $requires The answer so far.
-	 * @param mixed $order    The order being paid, or null for the current cart.
-	 * @return mixed True when Lite will charge it later; else the answer so far.
+	 * The filter value is left untyped: another callback may have returned a non-bool.
+	 *
+	 * @param mixed $is_required Whether another extension already requires it.
+	 * @param mixed $order       The order being paid, or null for the current cart.
+	 * @return bool True when another extension requires it or Lite will charge the method later.
 	 */
-	public function is_saving_payment_method_required( $requires, $order = null ) {
-		if ( true === $requires ) {
-			return $requires;
+	public function is_saving_payment_method_required( $is_required, $order = null ): bool {
+		if ( (bool) $is_required ) {
+			return true;
 		}
 
 		if ( $order instanceof WC_Order ) {
-			return self::has_plan_line( $order ) || RenewalOrderBuilder::CREATED_VIA === $order->get_created_via() ? true : $requires;
+			return self::has_plan_line( $order ) || RenewalOrderBuilder::CREATED_VIA === $order->get_created_via();
 		}
 
-		if ( null === $order && function_exists( 'WC' ) && WC()->cart instanceof WC_Cart ) {
-			return self::cart_has_plan_item( WC()->cart ) ? true : $requires;
-		}
-
-		return $requires;
+		return null === $order && function_exists( 'WC' ) && WC()->cart instanceof WC_Cart && self::cart_has_plan_item( WC()->cart );
 	}
 
 	/**
 	 * Whether the cart needs payment: a free cart that starts a subscription charging later
 	 * still does, so the method is saved.
 	 *
-	 * @param mixed $needs_payment Whether the cart needs payment.
-	 * @param mixed $cart          The cart.
-	 * @return mixed
+	 * @param mixed $is_required Whether the cart needs payment so far.
+	 * @param mixed $cart        The cart.
+	 * @return bool
 	 */
-	public function is_cart_payment_required( $needs_payment, $cart ) {
-		if ( false !== $needs_payment || ! $cart instanceof WC_Cart || (float) $cart->get_total( 'edit' ) > 0 ) {
-			return $needs_payment;
+	public function is_cart_payment_required( $is_required, $cart ): bool {
+		if ( (bool) $is_required ) {
+			return true;
 		}
 
-		return self::cart_recurring_total( $cart ) > 0 ? true : $needs_payment;
+		return $cart instanceof WC_Cart && (float) $cart->get_total( 'edit' ) <= 0 && self::cart_recurring_total( $cart ) > 0;
 	}
 
 	/**
 	 * Whether the order needs payment: a free order that starts a subscription charging later
-	 * still does while it is in a payable status, so the method is saved. Never for Lite renewal orders: a free
-	 * renewal is completed by Lite.
+	 * still does while it is in a payable status, so the method is saved. Never for Lite
+	 * renewal orders: a free renewal is completed by Lite.
 	 *
-	 * @param mixed $needs_payment        Whether the order needs payment.
+	 * @param mixed $is_required          Whether the order needs payment so far.
 	 * @param mixed $order                The order.
 	 * @param mixed $valid_order_statuses Statuses in which the order can be paid.
-	 * @return mixed
+	 * @return bool
 	 */
-	public function is_order_payment_required( $needs_payment, $order, $valid_order_statuses = [] ) {
-		if ( false !== $needs_payment || ! $order instanceof WC_Order || ! is_array( $valid_order_statuses )
-			|| (float) $order->get_total() > 0
-			|| RenewalOrderBuilder::CREATED_VIA === $order->get_created_via()
-			|| ! $order->has_status( $valid_order_statuses ) ) {
-			return $needs_payment;
+	public function is_order_payment_required( $is_required, $order, $valid_order_statuses = [] ): bool {
+		if ( (bool) $is_required ) {
+			return true;
 		}
 
-		return self::order_recurring_total( $order ) > 0 ? true : $needs_payment;
+		return $order instanceof WC_Order && is_array( $valid_order_statuses )
+			&& (float) $order->get_total() <= 0
+			&& RenewalOrderBuilder::CREATED_VIA !== $order->get_created_via()
+			&& $order->has_status( $valid_order_statuses )
+			&& self::order_recurring_total( $order ) > 0;
 	}
 
 	/**
