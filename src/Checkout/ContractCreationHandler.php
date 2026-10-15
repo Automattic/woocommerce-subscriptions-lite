@@ -16,6 +16,10 @@
  * plan lines, recurring totals) and writes them through the engine's
  * contracts facade; the engine records what it is given and never reads the order.
  *
+ * A creation cut short leaves a draft. The next paid status change of the order, or the
+ * resume action scheduled before the draft is written ({@see self::RESUME_HOOK}), resumes
+ * it under its lock: cycle 1 if missing, then activation.
+ *
  * @package Automattic\WooCommerce\SubscriptionsLite\Checkout
  */
 
@@ -23,6 +27,7 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Checkout;
 
+use ActionScheduler_Store;
 use DateTimeImmutable;
 use DateTimeZone;
 use LogicException;
@@ -30,6 +35,7 @@ use Throwable;
 use WC_Order;
 use WC_Order_Item_Product;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\ContractLock;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\ContractLockedException;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\DuplicateContractException;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
@@ -95,6 +101,23 @@ final class ContractCreationHandler {
 	public const OPERATION = 'checkout';
 
 	/**
+	 * Action Scheduler hook that resumes an order's contract creation cut short. Its single
+	 * argument is the order id.
+	 */
+	public const RESUME_HOOK = 'woocommerce_subscriptions_lite_resume_checkout';
+
+	/**
+	 * Action Scheduler group of the resume action.
+	 */
+	public const RESUME_GROUP = 'woocommerce-subscriptions-lite';
+
+	/**
+	 * Seconds before a resume refused by a live lock is tried again; also added to the lock
+	 * TTL for the resume scheduled before a creation.
+	 */
+	private const RESUME_DELAY_SECONDS = 60;
+
+	/**
 	 * Logger source tag.
 	 */
 	private const LOG_SOURCE = 'woocommerce-subscriptions-lite';
@@ -113,7 +136,22 @@ final class ContractCreationHandler {
 	 * processing -> completed double-fire safe.
 	 */
 	public static function register(): void {
-		add_action( 'woocommerce_order_status_changed', [ new self(), 'create_contracts_for_order' ], 10, 1 );
+		$instance = new self();
+		add_action( 'woocommerce_order_status_changed', [ $instance, 'create_contracts_for_order' ], 10, 1 );
+		add_action( self::RESUME_HOOK, [ $instance, 'resume_checkout' ] );
+	}
+
+	/**
+	 * Action Scheduler entry point: run the order's creation again, which resumes a Lite draft
+	 * left by a creation cut short, creates a missing contract for a paid order, and does
+	 * nothing for an active contract or an unpaid order.
+	 *
+	 * @param mixed $order_id Order id.
+	 */
+	public function resume_checkout( $order_id ): void {
+		if ( is_numeric( $order_id ) ) {
+			$this->create_contracts_for_order( (int) $order_id );
+		}
 	}
 
 	/**
@@ -135,10 +173,15 @@ final class ContractCreationHandler {
 		}
 
 		// Idempotency fast path: a repeat paid-status transition (e.g. processing -> completed)
-		// must neither double-create a contract nor duplicate a deferral note. Two signals
-		// racing past it are told apart by the order's creation key.
-		if ( '' !== (string) $order->get_meta( self::CREATION_DEFERRED_META )
-			|| [] !== Contracts::find_by_origin_order( $order_id ) ) {
+		// must neither double-create a contract nor duplicate a deferral note; it resumes a draft
+		// left by a creation cut short. Two signals racing past it are told apart by the order's
+		// creation key.
+		if ( '' !== (string) $order->get_meta( self::CREATION_DEFERRED_META ) ) {
+			return;
+		}
+		$existing = Contracts::find_by_origin_order( $order_id );
+		if ( [] !== $existing ) {
+			$this->resume_drafts( $order, $existing, $outcome['plan'] );
 			return;
 		}
 
@@ -154,6 +197,10 @@ final class ContractCreationHandler {
 				sprintf( 'ContractCreationHandler: the contract for order %d was already created (contract %d).', $order_id, $e->get_existing_contract_id() ),
 				[ 'source' => self::LOG_SOURCE ]
 			);
+			$duplicate = Contracts::get( $e->get_existing_contract_id() );
+			if ( null !== $duplicate ) {
+				$this->resume_drafts( $order, [ $duplicate ], $outcome['plan'] );
+			}
 			return;
 		} catch ( Throwable $e ) {
 			$this->log_error( sprintf( 'failed to create a contract for order %d: %s', $order_id, $e->getMessage() ) );
@@ -182,6 +229,112 @@ final class ContractCreationHandler {
 				[ 'source' => self::LOG_SOURCE ]
 			);
 		}
+	}
+
+	/**
+	 * Resume each Lite draft of the order: a creation cut short. A draft whose lock is live (its
+	 * creation may still be running) is left alone and the resume action tried again later.
+	 *
+	 * @param WC_Order                 $order     The paid order.
+	 * @param array<int, ContractView> $contracts The order's contracts.
+	 * @param PlanView|null            $plan      The order's selling plan.
+	 */
+	private function resume_drafts( WC_Order $order, array $contracts, ?PlanView $plan ): void {
+		foreach ( $contracts as $contract ) {
+			if ( Package::EXTENSION_SLUG !== $contract->get_extension_slug() || ContractStatus::DRAFT !== $contract->get_status() ) {
+				continue;
+			}
+			if ( ! $plan instanceof PlanView ) {
+				$this->log_error( sprintf( 'draft contract %d of order %d cannot be resumed: the order no longer resolves to one plan.', $contract->get_id(), $order->get_id() ) );
+				continue;
+			}
+
+			try {
+				$this->resume_draft( $order, $contract->get_id(), $plan );
+			} catch ( ContractLockedException $e ) {
+				wc_get_logger()->info(
+					sprintf( 'ContractCreationHandler: draft contract %d of order %d is locked by %s; its creation is resumed later.', $contract->get_id(), $order->get_id(), (string) $e->get_operation() ),
+					[ 'source' => self::LOG_SOURCE ]
+				);
+				self::schedule_resume( $order->get_id(), self::RESUME_DELAY_SECONDS );
+			} catch ( Throwable $e ) {
+				$this->log_error( sprintf( 'failed to resume draft contract %d of order %d: %s', $contract->get_id(), $order->get_id(), $e->getMessage() ) );
+			}
+		}
+	}
+
+	/**
+	 * Resume a draft under its lock: re-read it, and when it is still a draft add cycle 1 if
+	 * missing and activate it, as {@see self::create_contract()} would have. Notes the order.
+	 *
+	 * @param WC_Order $order       The paid order.
+	 * @param int      $contract_id The draft.
+	 * @param PlanView $plan        The order's selling plan.
+	 * @throws ContractLockedException If its lock is live.
+	 */
+	private function resume_draft( WC_Order $order, int $contract_id, PlanView $plan ): void {
+		[ $start, $next ] = self::first_period( $order, $plan );
+
+		$activated = HeldLocks::run(
+			$contract_id,
+			self::OPERATION,
+			static function ( ContractLock $lock ) use ( $contract_id, $order, $start, $next ): ?ContractView {
+				$draft = Contracts::get( $contract_id );
+				if ( null === $draft || ContractStatus::DRAFT !== $draft->get_status() ) {
+					return null;
+				}
+
+				return self::activate( $lock, $order, $start, $next, (string) $draft->get_billing_total() );
+			}
+		);
+		if ( null === $activated ) {
+			return;
+		}
+
+		self::unschedule_resume( $order->get_id() );
+		$order->add_order_note(
+			sprintf(
+				/* translators: %d: subscription (contract) id. */
+				__( 'Subscription #%d was activated after its creation was interrupted.', 'woocommerce-subscriptions-lite' ),
+				$contract_id
+			)
+		);
+	}
+
+	/**
+	 * Schedule the order's resume action unless one is pending to run by then. Only pending
+	 * actions count: a running resume refused again schedules the next one.
+	 *
+	 * @param int $order_id      Order id.
+	 * @param int $delay_seconds Seconds from now.
+	 */
+	private static function schedule_resume( int $order_id, int $delay_seconds ): void {
+		$args    = [ 'order_id' => $order_id ];
+		$run_at  = time() + $delay_seconds;
+		$pending = as_get_scheduled_actions(
+			[
+				'hook'         => self::RESUME_HOOK,
+				'args'         => $args,
+				'group'        => self::RESUME_GROUP,
+				'status'       => ActionScheduler_Store::STATUS_PENDING,
+				'date'         => as_get_datetime_object( $run_at ),
+				'date_compare' => '<=',
+				'per_page'     => 1,
+			],
+			'ids'
+		);
+		if ( [] === $pending ) {
+			as_schedule_single_action( $run_at, self::RESUME_HOOK, $args, self::RESUME_GROUP );
+		}
+	}
+
+	/**
+	 * Drop the order's pending resume actions once its contract is active.
+	 *
+	 * @param int $order_id Order id.
+	 */
+	private static function unschedule_resume( int $order_id ): void {
+		as_unschedule_all_actions( self::RESUME_HOOK, [ 'order_id' => $order_id ], self::RESUME_GROUP );
 	}
 
 	/**
@@ -223,7 +376,9 @@ final class ContractCreationHandler {
 	 * from birth under the order's creation key (`order:{id}`), then cycle 1 (billed by the
 	 * order), then activation with the first renewal date, all with that lock. Activation
 	 * comes last, so a failure part-way leaves a draft that is never due; the lock is released
-	 * on every path, so a stuck draft is not locked.
+	 * on every path, so a stuck draft is not locked. A resume action scheduled before the draft
+	 * is written (past the lock's expiry, dropped on success) resumes a draft the request
+	 * leaves behind.
 	 *
 	 * The first renewal date comes from {@see BillingTerms::get_first_renewal_from()}, the
 	 * same parse that decides whether a plan is billable.
@@ -245,14 +400,11 @@ final class ContractCreationHandler {
 			}
 		}
 
-		$paid  = $order->get_date_paid();
-		$start = null !== $paid
-			? new DateTimeImmutable( '@' . $paid->getTimestamp() )
-			: new DateTimeImmutable( 'now', new DateTimeZone( 'UTC' ) );
-		$next  = BillingTerms::get_first_renewal_from( $plan, $start );
+		[ $start, $next ] = self::first_period( $order, $plan );
 
 		$totals = $this->get_recurring_totals( $order, $plan_lines );
 
+		self::schedule_resume( $order->get_id(), ContractLock::TTL_SECONDS + self::RESUME_DELAY_SECONDS );
 		$lock = Contracts::create_locked(
 			[
 				'extension_slug'       => Package::EXTENSION_SLUG,
@@ -290,8 +442,30 @@ final class ContractCreationHandler {
 			HeldLocks::release( $lock );
 		}
 
+		if ( null === $activated ) {
+			return null;
+		}
+
+		self::unschedule_resume( $order->get_id() );
+
 		// Read after the release, so the view does not report the checkout lock.
-		return null === $activated ? null : Contracts::get( $lock->get_contract_id() );
+		return Contracts::get( $lock->get_contract_id() );
+	}
+
+	/**
+	 * The contract start (the order's payment, else now) and the first renewal date.
+	 *
+	 * @param WC_Order $order The paid order.
+	 * @param PlanView $plan  The order's selling plan.
+	 * @return array{0: DateTimeImmutable, 1: DateTimeImmutable}
+	 */
+	private static function first_period( WC_Order $order, PlanView $plan ): array {
+		$paid  = $order->get_date_paid();
+		$start = null !== $paid
+			? new DateTimeImmutable( '@' . $paid->getTimestamp() )
+			: new DateTimeImmutable( 'now', new DateTimeZone( 'UTC' ) );
+
+		return [ $start, BillingTerms::get_first_renewal_from( $plan, $start ) ];
 	}
 
 	/**
@@ -304,33 +478,35 @@ final class ContractCreationHandler {
 	}
 
 	/**
-	 * Cycle 1 and activation of a just-created draft, under its lock.
+	 * Cycle 1 (unless the draft already has it) and activation of a draft, under its lock.
 	 *
 	 * @param ContractLock      $lock          The new contract's lock.
 	 * @param WC_Order          $order         The paid order.
 	 * @param DateTimeImmutable $start         Contract start.
 	 * @param DateTimeImmutable $next          First renewal date.
 	 * @param string            $billing_total Recurring total.
-	 * @throws LogicException When cycle 1 of the new contract already exists.
+	 * @throws LogicException When cycle 1 cannot be appended.
 	 */
 	private static function activate( ContractLock $lock, WC_Order $order, DateTimeImmutable $start, DateTimeImmutable $next, string $billing_total ): ?ContractView {
 		$contract_id = $lock->get_contract_id();
-		$first_cycle = Contracts::add_cycle(
-			$contract_id,
-			[
-				'status'         => CycleStatus::BILLED,
-				'count'          => 1,
-				'order_id'       => $order->get_id(),
-				'starts_at_gmt'  => $start,
-				'ends_at_gmt'    => $next,
-				'expected_total' => $billing_total,
-				'currency'       => $order->get_currency(),
-			],
-			$lock
-		);
-		if ( null === $first_cycle ) {
-			// The draft is new, so its first position cannot be taken: fail like any other write.
-			throw new LogicException( 'Contract creation: cycle 1 of the new contract already exists.' );
+		if ( [] === Contracts::get_cycles( $contract_id, 1 ) ) {
+			$first_cycle = Contracts::add_cycle(
+				$contract_id,
+				[
+					'status'         => CycleStatus::BILLED,
+					'count'          => 1,
+					'order_id'       => $order->get_id(),
+					'starts_at_gmt'  => $start,
+					'ends_at_gmt'    => $next,
+					'expected_total' => $billing_total,
+					'currency'       => $order->get_currency(),
+				],
+				$lock
+			);
+			if ( null === $first_cycle ) {
+				// The chain was empty under the lock, so the position cannot be taken: fail like any other write.
+				throw new LogicException( 'Contract creation: cycle 1 of the contract already exists.' );
+			}
 		}
 
 		return Contracts::update(
