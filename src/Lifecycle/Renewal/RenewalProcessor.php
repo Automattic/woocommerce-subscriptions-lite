@@ -6,7 +6,8 @@
  * appended claimed (append-if-absent with a claim), an interrupted cycle is resumed only
  * by the run that takes its expired claim, and settlement moves cycles by
  * compare-and-set. A due contract several periods behind bills the one period containing
- * now ({@see BillingTerms::get_period_to_bill()}). Gateways that accept engine charges are charged through the
+ * now ({@see BillingTerms::get_period_to_bill()}). A gateway that declares both the engine's
+ * `subscriptions_engine` feature and the `subscriptions` feature is charged through the
  * engine; any other gateway gets a manual renewal order the customer pays, with the
  * contract on hold until then.
  *

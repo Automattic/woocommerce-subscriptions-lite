@@ -219,14 +219,14 @@ final class BillingTerms {
 	}
 
 	/**
-	 * Log a roll that ran out of the cap.
+	 * Log a roll that ran out of the cap; the caller restarts the cadence from now.
 	 *
 	 * @param string            $method The method that hit the cap.
 	 * @param DateTimeImmutable $from   The moment it rolled from.
 	 */
 	private static function log_cap( string $method, DateTimeImmutable $from ): void {
 		wc_get_logger()->warning(
-			sprintf( 'BillingTerms::%s(): rolling forward from %s exhausted the roll cap; floored at now.', $method, $from->format( 'Y-m-d H:i:s' ) ),
+			sprintf( 'BillingTerms::%s(): rolling forward from %s exhausted the roll cap; restarted from now, one cadence ahead.', $method, $from->format( 'Y-m-d H:i:s' ) ),
 			[ 'source' => Package::EXTENSION_SLUG ]
 		);
 	}

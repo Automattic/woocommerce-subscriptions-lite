@@ -20,7 +20,7 @@ use DateTimeZone;
 /**
  * @covers \Automattic\WooCommerce\SubscriptionsLite\Lifecycle\ContractDueHandler
  */
-final class DueHandlerTest extends LiteIntegrationTestCase {
+final class ContractDueHandlerTest extends LiteIntegrationTestCase {
 
 	/**
 	 * The dispatch context for a due moment.
