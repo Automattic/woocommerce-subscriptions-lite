@@ -2,10 +2,10 @@
 /**
  * RenewalProcessor - renews a Lite contract: one cycle, one order, one charge.
  *
- * Runs under the contract lock (the dispatcher's, or Renew now's own), held through the
- * charge; the next lock holder resumes a cycle an interrupted run left pending. A gateway that
- * declares the engine's feature and `subscriptions` is charged through the engine; any other
- * gets a manual renewal order, with the contract on hold until it is paid.
+ * Runs under the contract lock (the dispatcher's, or Renew now's own) held through the charge;
+ * the next lock holder resumes a cycle an interrupted run left pending. A gateway declaring the
+ * engine's feature and `subscriptions` is charged through the engine; any other gets a manual
+ * renewal order, with the contract on hold until it is paid.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal
  */
@@ -155,12 +155,10 @@ final class RenewalProcessor {
 	}
 
 	/**
-	 * Take the cycle this run renews: resume the head when it is an interrupted (pending) or
-	 * (manual) failed renewal, else append the next one. Null when the head waits on a charge
-	 * confirmation, or the head already settled and only the contract write that
-	 * should have followed was lost (re-applied here: a billed head that covers the period
-	 * re-arms the next due moment, a failed head holds the contract), so a settlement cut
-	 * short never bills the same period twice.
+	 * Take the cycle this run renews: resume a pending or (manual) failed head, else append the
+	 * next one. Null when the head waits on a charge confirmation, or already settled and only
+	 * its contract write was lost: that write is re-applied here (re-arm or hold), so a
+	 * settlement cut short never bills the same period twice.
 	 *
 	 * @param ContractView      $contract The contract.
 	 * @param CycleView         $head     The newest cycle.
@@ -310,10 +308,10 @@ final class RenewalProcessor {
 	}
 
 	/**
-	 * Collect the order's payment: settle a paid order or one whose asynchronous charge is in
-	 * flight, complete a free one, charge through the engine when the gateway supports it, else
-	 * leave the order for the customer. A charge the gateway left pending is left for payment
-	 * too; every charge is guarded by a settlement past the lock's expiry ({@see Settlement::guard_charge()}).
+	 * Collect the order's payment: settle a paid order or an asynchronous charge in flight,
+	 * complete a free one, charge through the engine when the gateway supports it, else leave
+	 * the order (or a charge the gateway left pending) for the customer. Every charge first
+	 * schedules its settlement ({@see Settlement::schedule_charge_settlement()}).
 	 *
 	 * @param ContractView      $contract The contract.
 	 * @param CycleView         $cycle    The cycle being billed.
@@ -332,7 +330,7 @@ final class RenewalProcessor {
 		}
 
 		if ( (float) $order->get_total() <= 0 ) {
-			Settlement::guard_charge( $order->get_id() );
+			Settlement::schedule_charge_settlement( $order->get_id() );
 			$order->payment_complete();
 			$settlement->settle( $order, $now );
 			return;
@@ -349,7 +347,7 @@ final class RenewalProcessor {
 			return;
 		}
 
-		Settlement::guard_charge( $order->get_id() );
+		Settlement::schedule_charge_settlement( $order->get_id() );
 		$handed_over = Payments::process_scheduled_payment( $order );
 		$charged     = wc_get_order( $order->get_id() );
 		if ( $charged instanceof WC_Order && $charged->has_status( OrderStatus::PENDING ) ) {

@@ -659,7 +659,7 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 			],
 			'ids'
 		);
-		$this->assertSame( [], $retries, 'No settlement retry: only the charge guard is pending.' );
+		$this->assertSame( [], $retries, 'No settlement retry: only the charge settlement is pending.' );
 		$this->assertFalse( $this->has_logged( 'Settlement: settling renewal order' ) );
 		$this->assertNull( $this->get_contract( $contract_id )->get_lock_state() );
 	}

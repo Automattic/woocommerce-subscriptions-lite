@@ -81,7 +81,7 @@ final class StatusLabels {
 	 *
 	 * @param string $operation Lock operation label.
 	 */
-	public static function lock_operation_label( string $operation ): string {
+	public static function get_lock_operation_label( string $operation ): string {
 		switch ( $operation ) {
 			case RenewalProcessor::OPERATION:
 				return __( 'renewal', 'woocommerce-subscriptions-lite' );
@@ -117,7 +117,7 @@ final class StatusLabels {
 			/* translators: 1: subscription number, 2: operation label (e.g. "renewal"). */
 			__( 'Another change to subscription #%1$d is in progress (%2$s).', 'woocommerce-subscriptions-lite' ),
 			$contract_id,
-			self::lock_operation_label( $operation )
+			self::get_lock_operation_label( $operation )
 		);
 	}
 

@@ -2,13 +2,10 @@
 /**
  * ContractDueHandler - Lite's answer when the engine reports one of its contracts due.
  *
- * Registered as Lite's `contract_due_handler` on the engine's consumer registry, it picks the
- * lifecycle flow a due contract needs. It runs under the dispatcher's contract lock (the
- * view was read under it), registered in {@see HeldLocks} for the flows it reaches. Only an
- * active contract renews; any other status with a due moment has it cleared, since Lite's
- * hold and cancel flows never leave one behind. A failure is logged and rethrown: the
- * dispatcher then keeps the lock until it expires, so the contract is not notified again
- * while its state is unknown, and the kept due moment redispatches it after that.
+ * Runs under the dispatcher's contract lock (registered in {@see HeldLocks}): an active contract
+ * renews; any other status has its due moment cleared (Lite's hold and cancel never leave one).
+ * A failure is logged and rethrown, so the dispatcher keeps the lock until it expires and the
+ * kept due moment redispatches the contract then.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Lifecycle
  */

@@ -28,6 +28,12 @@ final class ScheduledActions {
 	public const GROUP = 'woocommerce-subscriptions-lite';
 
 	/**
+	 * Seconds a recovery action waits past a lock: the retry delay after a refusal, and the
+	 * margin added to a lock's TTL for an action that must run once the lock has expired.
+	 */
+	public const LOCK_RETRY_DELAY_SECONDS = 60;
+
+	/**
 	 * Schedule `$hook` with `$args` in `$delay_seconds`, unless one is pending to run by then.
 	 *
 	 * @param string               $hook          Action hook.

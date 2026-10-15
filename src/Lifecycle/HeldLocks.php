@@ -3,10 +3,9 @@
  * HeldLocks - the engine contract locks Lite holds in this request, by contract id.
  *
  * A Lite flow that changes a contract uses the lock this request already holds on it, or
- * acquires one, registers it here and releases it when done; a lost acquire is a `WP_Error`
- * outcome ({@see self::get_conflict()}), not an exception. Code it reaches in the same
- * request (settlement inside a gateway charge, a lifecycle action listener) finds the held
- * lock here instead of conflicting with its own operation. Locks never cross requests.
+ * acquires, registers and releases one; a lost acquire is a `WP_Error` outcome
+ * ({@see self::get_conflict()}). Code reached in the same request (settlement inside a charge, a
+ * lifecycle action listener) reuses the held lock. Locks never cross requests.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Lifecycle
  */

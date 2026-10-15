@@ -2,29 +2,10 @@
 /**
  * Settlement - records the outcome of Lite renewal orders on their cycles and contracts.
  *
- * Listens to the order status of Lite's own renewal orders (`created_via`
- * {@see RenewalOrderBuilder::CREATED_VIA}) and moves the billed cycle with the engine's
- * compare-and-set tool, so a repeated or concurrent signal settles once:
- * - paid: cycle billed; an active contract, or one held for a failed or manual renewal,
- *   becomes active with its next due moment armed past now; a customer hold (a hold anchor
- *   is present) stays on hold and its anchor moves to the next due moment; a winding-down
- *   or cancelled contract only records the payment;
- * - failed: cycle failed; an active or held contract (a customer hold included) goes on
- *   the system hold ({@see Hold::system_hold()}: no due moment, no customer hold anchor), and the
- *   customer pays the failed order to resume;
- * - on-hold (an asynchronous charge awaits confirmation): cycle processing and no due
- *   moment, so it is not charged again;
- * - cancelled, trashed or deleted while unpaid: cycle failed (`order-cancelled`); an active
- *   or held contract goes on the system hold, as for a failed payment, so a dead order
- *   never renews for free. The merchant can restore the order or use Renew now, which
- *   builds a new one.
- *
- * Every settlement runs under the contract lock: the one this request already holds (a
- * gateway status change inside a renewal charge) or its own. The contract and cycle are
- * re-read after acquiring. When another operation holds the lock, the settlement is retried
- * through Action Scheduler (`woocommerce_subscriptions_lite_settle_order`), so a paid order is never left
- * unrecorded; the same action guards every renewal charge ({@see self::guard_charge()}). A
- * paid order that ends linked to no payable cycle is flagged for a refund.
+ * Moves the cycle of a Lite renewal order by compare-and-set under the contract lock when the
+ * order's status changes: paid bills it, failed or dead (cancelled, trashed or deleted unpaid)
+ * fails it and puts the contract on the system hold, on-hold awaits the charge. A settlement
+ * refused by another lock is retried (`woocommerce_subscriptions_lite_settle_order`).
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal
  */
@@ -65,11 +46,6 @@ final class Settlement {
 	 * Operation label of a settlement's own contract lock.
 	 */
 	public const OPERATION = 'settlement';
-
-	/**
-	 * Seconds before a refused settlement is retried.
-	 */
-	public const RETRY_DELAY_SECONDS = 60;
 
 	/**
 	 * Failure reason recorded on a cycle whose renewal order failed.
@@ -127,7 +103,7 @@ final class Settlement {
 		add_action( 'wp_trash_post', [ $instance, 'handle_removed_post' ] );
 		add_action( 'before_delete_post', [ $instance, 'handle_removed_post' ] );
 		add_filter( 'woocommerce_valid_order_statuses_for_cancel', [ $instance, 'statuses_for_customer_cancel' ], 10, 2 );
-		// Retries a settlement refused by another operation's lock, and guards every charge.
+		// Retries a settlement refused by another operation's lock, and settles a charge cut short.
 		add_action( 'woocommerce_subscriptions_lite_settle_order', [ $instance, 'retry' ], 10, 2 );
 	}
 
@@ -201,26 +177,25 @@ final class Settlement {
 				'order_id' => $order_id,
 				'paid'     => $paid,
 			],
-			self::RETRY_DELAY_SECONDS
+			ScheduledActions::LOCK_RETRY_DELAY_SECONDS
 		);
 	}
 
 	/**
-	 * Guard a renewal charge: schedule the order's settlement for after the charging run's lock
-	 * expires. Should the request die between the charge and its settlement, the action records
-	 * the outcome, also on a held contract that has no due moment; on a settled order it writes
-	 * nothing, so it is never unscheduled.
+	 * Schedule the settlement of a renewal order about to be charged, for after the charging
+	 * run's lock expires: it records a charge whose request died before settling (also on a
+	 * held contract with no due moment), and writes nothing on a settled order.
 	 *
 	 * @param int $order_id The renewal order about to be charged.
 	 */
-	public static function guard_charge( int $order_id ): void {
+	public static function schedule_charge_settlement( int $order_id ): void {
 		ScheduledActions::schedule_once(
 			'woocommerce_subscriptions_lite_settle_order',
 			[
 				'order_id' => $order_id,
 				'paid'     => false,
 			],
-			ContractLock::TTL_SECONDS + self::RETRY_DELAY_SECONDS
+			ContractLock::TTL_SECONDS + ScheduledActions::LOCK_RETRY_DELAY_SECONDS
 		);
 	}
 
@@ -420,12 +395,9 @@ final class Settlement {
 
 	/**
 	 * The paid order bills its cycle; the contract resumes or records the payment. A repeat
-	 * paid signal for the newest cycle, already billed by this order, completes a contract
-	 * write that was cut short (a held, manual or async renewal has no due moment, so the due
-	 * scan never would) and then fires the paid action, which the cut-short attempt never
-	 * reached. The action is therefore delivered at least once: concurrent duplicate signals
-	 * that both see the write missing can both fire it. A paid order whose cycle can no longer
-	 * be billed (cancelled) is flagged for a refund.
+	 * signal for a newest cycle this order already billed completes a contract write cut short
+	 * (the due scan never would: no due moment) and fires the paid action, so that action is
+	 * at-least-once. A paid order whose cycle can no longer be billed is flagged for a refund.
 	 *
 	 * @param WC_Order          $order    The paid order.
 	 * @param ContractView      $contract The contract.

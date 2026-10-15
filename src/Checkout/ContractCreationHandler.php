@@ -2,23 +2,10 @@
 /**
  * ContractCreationHandler - turns a paid checkout order into a subscription contract.
  *
- * Fires when an order reaches a paid status (`woocommerce_order_status_changed`,
- * gated by `is_paid()`) - covering immediate, $0, and offline (BACS/cheque)
- * payments alike - and groups the order's plan-carrying line items by selling
- * plan. A single clean group becomes one active contract, due at its first
- * renewal; Lite's own renewal orders never become contracts. Anything that cannot
- * be one contract - two different plans (Premium's multiple-contracts case) or a
- * mix of plan and one-time lines (mixed carts are not supported yet) - is left
- * uncreated with an order note, a log line, and a flag the order-received page
- * reads. The handler never throws out of the hook and never blocks checkout.
- *
- * Lite maps the order to explicit contract fields (customer, payment, addresses,
- * plan lines, recurring totals) and writes them through the engine's
- * contracts facade; the engine records what it is given and never reads the order.
- *
- * A creation cut short leaves a draft. The next paid status change of the order, or the
- * resume action scheduled before the draft is written (`woocommerce_subscriptions_lite_resume_checkout`), resumes
- * it under its lock: cycle 1 if missing, then activation.
+ * On a paid status change (`is_paid()`, so offline payments count too), one clean plan group
+ * becomes one active contract written through the engine facade; divergent plans or a mixed
+ * cart are left uncreated with a note and a flag, and checkout is never blocked. A creation cut
+ * short leaves a draft that the next paid change or the resume action finishes.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Checkout
  */
@@ -98,12 +85,6 @@ final class ContractCreationHandler {
 	 * Operation label of the new contract's lock while checkout builds it.
 	 */
 	public const OPERATION = 'checkout';
-
-	/**
-	 * Seconds before a resume refused by a live lock is tried again; also added to the lock
-	 * TTL for the resume scheduled before a creation.
-	 */
-	private const RESUME_DELAY_SECONDS = 60;
 
 	/**
 	 * Order meta counting failed runs of the resume action; cleared on activation.
@@ -286,7 +267,7 @@ final class ContractCreationHandler {
 			} catch ( Throwable $e ) {
 				$resumed = false;
 				$this->log_error( sprintf( 'failed to resume draft contract %d of order %d: %s', $contract->get_id(), $order->get_id(), $e->getMessage() ) );
-				self::schedule_resume( $order->get_id(), ContractLock::TTL_SECONDS + self::RESUME_DELAY_SECONDS );
+				self::schedule_resume( $order->get_id(), ContractLock::TTL_SECONDS + ScheduledActions::LOCK_RETRY_DELAY_SECONDS );
 				continue;
 			}
 
@@ -295,7 +276,7 @@ final class ContractCreationHandler {
 					sprintf( 'ContractCreationHandler: draft contract %d of order %d is locked by another operation; its creation is resumed later.', $contract->get_id(), $order->get_id() ),
 					[ 'source' => self::LOG_SOURCE ]
 				);
-				self::schedule_resume( $order->get_id(), self::RESUME_DELAY_SECONDS );
+				self::schedule_resume( $order->get_id(), ScheduledActions::LOCK_RETRY_DELAY_SECONDS );
 			}
 		}
 
@@ -444,7 +425,7 @@ final class ContractCreationHandler {
 
 		$totals = $this->get_recurring_totals( $order, $plan_lines );
 
-		self::schedule_resume( $order->get_id(), ContractLock::TTL_SECONDS + self::RESUME_DELAY_SECONDS );
+		self::schedule_resume( $order->get_id(), ContractLock::TTL_SECONDS + ScheduledActions::LOCK_RETRY_DELAY_SECONDS );
 		$created = Contracts::create_locked(
 			[
 				'extension_slug'       => Package::EXTENSION_SLUG,

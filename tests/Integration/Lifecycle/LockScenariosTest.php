@@ -364,7 +364,7 @@ final class LockScenariosTest extends LiteIntegrationTestCase {
 	}
 
 	/**
-	 * The scheduled moments of the pending charge guards (unpaid settlement actions) for an order.
+	 * The scheduled moments of the pending charge settlements (unpaid settlement actions) for an order.
 	 *
 	 * @param int $order_id Order id.
 	 * @return array<int, int> Unix timestamps.
@@ -394,9 +394,9 @@ final class LockScenariosTest extends LiteIntegrationTestCase {
 
 	/**
 	 * A Renew now charge on a held contract (no due moment) whose request dies after the
-	 * gateway marked the order paid is settled by the guard scheduled before the charge.
+	 * gateway marked the order paid is settled by the settlement scheduled before the charge.
 	 */
-	public function test_a_charge_cut_short_on_a_held_contract_is_settled_by_its_guard(): void {
+	public function test_a_charge_cut_short_on_a_held_contract_is_settled_by_its_scheduled_settlement(): void {
 		$this->support_engine_charges( 'cod', 'none' );
 		$contract_id = $this->make_due_contract( $this->create_customer() );
 		$this->assertSame( 1, $this->run_due_dispatch( $this->now() ) );
@@ -423,9 +423,9 @@ final class LockScenariosTest extends LiteIntegrationTestCase {
 		$contract = $this->get_contract( $contract_id );
 		$this->assertSame( ContractStatus::ON_HOLD, $contract->get_status() );
 		$this->assertNull( $contract->get_next_payment_gmt(), 'No due moment: the due scan never repairs it.' );
-		$guards = $this->pending_settlements( $order->get_id() );
-		$this->assertCount( 1, $guards );
-		$this->assertGreaterThanOrEqual( time() + ContractLock::TTL_SECONDS - 60, $guards[0], 'Scheduled past the lock expiry.' );
+		$scheduled = $this->pending_settlements( $order->get_id() );
+		$this->assertCount( 1, $scheduled );
+		$this->assertGreaterThanOrEqual( time() + ContractLock::TTL_SECONDS - 60, $scheduled[0], 'Scheduled past the lock expiry.' );
 		$charges = $this->charge_count();
 
 		$this->expire_held_locks();
@@ -435,13 +435,13 @@ final class LockScenariosTest extends LiteIntegrationTestCase {
 		$contract = $this->get_contract( $contract_id );
 		$this->assertSame( ContractStatus::ACTIVE, $contract->get_status() );
 		$this->assertNotNull( $contract->get_next_payment_gmt(), 'Re-armed.' );
-		$this->assertSame( $charges, $this->charge_count(), 'The guard never charges.' );
+		$this->assertSame( $charges, $this->charge_count(), 'The scheduled settlement never charges.' );
 	}
 
 	/**
-	 * The guard of a charge that settled normally writes nothing when it runs.
+	 * The settlement scheduled for a charge that settled normally writes nothing when it runs.
 	 */
-	public function test_a_charge_guard_on_a_settled_renewal_writes_nothing(): void {
+	public function test_a_charge_settlement_on_a_settled_renewal_writes_nothing(): void {
 		$this->support_engine_charges( 'cod' );
 		$contract_id = $this->make_due_contract( $this->create_customer() );
 		$this->assertSame( 1, $this->run_due_dispatch( $this->now() ) );
@@ -449,7 +449,7 @@ final class LockScenariosTest extends LiteIntegrationTestCase {
 		$before = $this->get_contract( $contract_id );
 		$head   = $this->head( $contract_id );
 		$this->assertSame( CycleStatus::BILLED, $head->get_status() );
-		$this->assertCount( 1, $this->pending_settlements( $order->get_id() ), 'The guard stays scheduled.' );
+		$this->assertCount( 1, $this->pending_settlements( $order->get_id() ), 'The charge settlement stays scheduled.' );
 		$paid = did_action( 'woocommerce_subscriptions_lite_renewal_paid' );
 
 		$this->expire_held_locks();

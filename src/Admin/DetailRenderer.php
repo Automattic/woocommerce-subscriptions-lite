@@ -218,7 +218,7 @@ final class DetailRenderer {
 			return;
 		}
 
-		$format = get_option( 'date_format', 'Y-m-d' ) . ' ' . get_option( 'time_format', 'H:i' );
+		$format = wc_date_format() . ' ' . wc_time_format();
 		printf(
 			'<div class="notice notice-warning inline wc-subs-lite-lock-notice"><p>%s</p></div>',
 			esc_html(
