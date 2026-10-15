@@ -16,6 +16,7 @@ use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\SchemaInstaller;
+use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\HeldLocks;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Hold;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\HoldAnchor;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\LifecycleNotAllowedException;
@@ -254,5 +255,21 @@ final class HoldTest extends LiteIntegrationTestCase {
 		$this->assertNull( $stored->get_next_payment_gmt() );
 		$this->assertSame( '2026-02-15 00:00:00', $stored->get_last_attempt_gmt() );
 		$this->assertSame( '', $this->get_stored_anchor( $contract_id ), 'The customer anchor is dropped.' );
+	}
+
+	public function test_a_held_action_listener_writes_with_the_held_lock(): void {
+		$contract_id = $this->seed_contract();
+		add_action(
+			'woocommerce_subscriptions_lite_contract_held',
+			static function ( ContractView $contract ): void {
+				Contracts::update_meta( $contract->get_id(), '_listener_note', 'held', null, HeldLocks::get( $contract->get_id() ) );
+			}
+		);
+
+		$held = ( new Hold() )->hold( $contract_id );
+
+		$this->assertSame( ContractStatus::ON_HOLD, $held->get_status() );
+		$this->assertSame( 'held', Contracts::get_meta( $contract_id, '_listener_note', true ) );
+		$this->assertNull( $this->get_contract( $contract_id )->get_lock_state() );
 	}
 }

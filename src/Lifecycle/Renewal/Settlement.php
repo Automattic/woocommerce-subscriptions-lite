@@ -465,7 +465,8 @@ final class Settlement {
 		/**
 		 * Fires after a Lite renewal order was paid and its cycle billed. Delivered at least
 		 * once: completing a cut-short settlement fires it, and concurrent duplicate signals
-		 * can both do so. Runs under the contract lock.
+		 * can both do so. Runs under the contract lock: a callback writes the contract with
+		 * `HeldLocks::get( $id )`, since an unlocked write is refused.
 		 *
 		 * @param ContractView $contract The contract after the payment was recorded.
 		 * @param CycleView    $cycle    The billed cycle.
@@ -589,7 +590,8 @@ final class Settlement {
 
 		/**
 		 * Fires after a Lite renewal order failed and its cycle was marked failed. Runs under
-		 * the contract lock.
+		 * the contract lock: a callback writes the contract with `HeldLocks::get( $id )`, since
+		 * an unlocked write is refused.
 		 *
 		 * @param ContractView $contract The contract after the failure was recorded.
 		 * @param CycleView    $cycle    The failed cycle.

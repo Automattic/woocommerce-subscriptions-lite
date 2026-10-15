@@ -116,13 +116,6 @@ final class ContractCreationHandler {
 	public const MAX_RESUME_ATTEMPTS = 3;
 
 	/**
-	 * Whether the current run failed (a creation or resume error, not a lock refusal).
-	 *
-	 * @var bool
-	 */
-	private $run_failed = false;
-
-	/**
 	 * Logger source tag.
 	 */
 	private const LOG_SOURCE = 'woocommerce-subscriptions-lite';
@@ -150,8 +143,8 @@ final class ContractCreationHandler {
 	/**
 	 * Action Scheduler entry point: run the order's creation again, which resumes a Lite draft
 	 * left by a creation cut short, creates a missing contract for a paid order, and does
-	 * nothing for an active contract or an unpaid order. After {@see self::MAX_RESUME_ATTEMPTS}
-	 * failed runs it stops rescheduling and asks the merchant to check the order.
+	 * nothing for an active contract or an unpaid order. A failed run counts against
+	 * {@see self::MAX_RESUME_ATTEMPTS}; at the cap the resume is dropped and the order noted.
 	 *
 	 * @param mixed $order_id Order id.
 	 */
@@ -159,10 +152,8 @@ final class ContractCreationHandler {
 		if ( ! is_numeric( $order_id ) ) {
 			return;
 		}
-		$order_id         = (int) $order_id;
-		$this->run_failed = false;
-		$this->create_contracts_for_order( $order_id );
-		if ( ! $this->run_failed ) {
+		$order_id = (int) $order_id;
+		if ( $this->create_for_order( $order_id ) ) {
 			return;
 		}
 
@@ -189,21 +180,30 @@ final class ContractCreationHandler {
 	}
 
 	/**
-	 * Create the contract for a paid order, or record a deferral when the order
-	 * cannot be represented as a single contract. A no-op unless the order is paid.
-	 * Never throws out of the hook.
+	 * Hook entry point: create the contract for a paid order, or record a deferral when the
+	 * order cannot be represented as a single contract. Never throws out of the hook.
 	 *
 	 * @param int $order_id The id of the order whose status changed.
 	 */
 	public function create_contracts_for_order( int $order_id ): void {
+		$this->create_for_order( $order_id );
+	}
+
+	/**
+	 * Create the order's contract, or resume a Lite draft of it; a no-op unless the order is paid.
+	 *
+	 * @param int $order_id Order id.
+	 * @return bool False when a creation or resume failed (a lock refusal is not a failure).
+	 */
+	private function create_for_order( int $order_id ): bool {
 		$order = wc_get_order( $order_id );
 		if ( ! $order instanceof WC_Order || ! $order->is_paid() || RenewalOrderBuilder::CREATED_VIA === $order->get_created_via() ) {
-			return;
+			return true;
 		}
 
 		$outcome = $this->classify_order( $order );
 		if ( null === $outcome['reason'] && ! $outcome['plan'] instanceof PlanView ) {
-			return; // No subscription line on the order.
+			return true; // No subscription line on the order.
 		}
 
 		// Idempotency fast path: a repeat paid-status transition (e.g. processing -> completed)
@@ -211,23 +211,21 @@ final class ContractCreationHandler {
 		// left by a creation cut short. Two signals racing past it are told apart by the order's
 		// creation key.
 		if ( '' !== (string) $order->get_meta( self::CREATION_DEFERRED_META ) ) {
-			return;
+			return true;
 		}
 		$existing = Contracts::find_by_origin_order( $order_id );
 		if ( [] !== $existing ) {
-			$this->resume_drafts( $order, $existing, $outcome['plan'] );
-			return;
+			return $this->resume_drafts( $order, $existing, $outcome['plan'] );
 		}
 
 		if ( null !== $outcome['reason'] ) {
 			$this->record_deferral( $order, $outcome['reason'] );
-			return;
+			return true;
 		}
 
 		try {
 			$contract = $this->create_contract( $order, $outcome['plan'] );
 		} catch ( Throwable $e ) {
-			$this->run_failed = true;
 			$this->log_error( sprintf( 'failed to create a contract for order %d: %s', $order_id, $e->getMessage() ) );
 			try {
 				// A draft blocks retries through the idempotency check. Without one, a refused
@@ -245,7 +243,7 @@ final class ContractCreationHandler {
 			} catch ( Throwable $note_error ) {
 				$this->log_error( sprintf( 'failed to record the failed creation on order %d: %s', $order_id, $note_error->getMessage() ) );
 			}
-			return;
+			return false;
 		}
 
 		if ( null === $contract ) {
@@ -254,19 +252,24 @@ final class ContractCreationHandler {
 				sprintf( 'ContractCreationHandler: the contract for order %d was already created.', $order_id ),
 				[ 'source' => self::LOG_SOURCE ]
 			);
-			$this->resume_drafts( $order, Contracts::find_by_origin_order( $order_id ), $outcome['plan'] );
+			return $this->resume_drafts( $order, Contracts::find_by_origin_order( $order_id ), $outcome['plan'] );
 		}
+
+		return true;
 	}
 
 	/**
 	 * Resume each Lite draft of the order: a creation cut short. A draft whose lock is live (its
-	 * creation may still be running) is left alone and the resume action tried again later.
+	 * creation may still be running) is resumed later; a failed resume is resumed again past the
+	 * lock's expiry, within the attempt cap.
 	 *
 	 * @param WC_Order                 $order     The paid order.
 	 * @param array<int, ContractView> $contracts The order's contracts.
 	 * @param PlanView|null            $plan      The order's selling plan.
+	 * @return bool False when a resume failed.
 	 */
-	private function resume_drafts( WC_Order $order, array $contracts, ?PlanView $plan ): void {
+	private function resume_drafts( WC_Order $order, array $contracts, ?PlanView $plan ): bool {
+		$resumed = true;
 		foreach ( $contracts as $contract ) {
 			if ( Package::EXTENSION_SLUG !== $contract->get_extension_slug() || ContractStatus::DRAFT !== $contract->get_status() ) {
 				continue;
@@ -285,10 +288,13 @@ final class ContractCreationHandler {
 				);
 				self::schedule_resume( $order->get_id(), self::RESUME_DELAY_SECONDS );
 			} catch ( Throwable $e ) {
-				$this->run_failed = true;
+				$resumed = false;
 				$this->log_error( sprintf( 'failed to resume draft contract %d of order %d: %s', $contract->get_id(), $order->get_id(), $e->getMessage() ) );
+				self::schedule_resume( $order->get_id(), ContractLock::TTL_SECONDS + self::RESUME_DELAY_SECONDS );
 			}
 		}
+
+		return $resumed;
 	}
 
 	/**

@@ -254,8 +254,11 @@ final class LockScenariosTest extends LiteIntegrationTestCase {
 		$plan        = $this->make_plan();
 		$order       = $this->create_subscription_order( $customer_id );
 		$this->stamp_plan( $order, $plan );
-		$hide = static function ( string $query ): string {
-			return str_replace( 'WHERE origin_order_id = ', 'WHERE 1 = 0 AND origin_order_id = ', $query );
+		$rewrites = 0;
+		$hide     = static function ( string $query ) use ( &$rewrites ): string {
+			$hidden    = str_replace( 'WHERE origin_order_id = ', 'WHERE 1 = 0 AND origin_order_id = ', $query, $count );
+			$rewrites += $count;
+			return $hidden;
 		};
 
 		$order->update_status( 'processing' );
@@ -266,8 +269,11 @@ final class LockScenariosTest extends LiteIntegrationTestCase {
 			remove_filter( 'query', $hide );
 		}
 
+		$this->assertGreaterThanOrEqual( 1, $rewrites, 'The second signal passed the fast path.' );
 		$this->assertCount( 1, Contracts::list_for_customer( $customer_id ) );
 		$this->assertSame( '', (string) wc_get_order( $order->get_id() )->get_meta( ContractCreationHandler::CREATION_DEFERRED_META ) );
+		$notes = wp_list_pluck( wc_get_order_notes( [ 'order_id' => $order->get_id() ] ), 'content' );
+		$this->assertSame( [], preg_grep( '/subscription/i', $notes ), 'No subscription note.' );
 	}
 
 	/**
