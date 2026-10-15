@@ -318,7 +318,8 @@ final class RenewalProcessor {
 	}
 
 	/**
-	 * Collect the order's payment: settle an already paid order, complete a free one, charge
+	 * Collect the order's payment: settle an already paid order or one whose asynchronous
+	 * charge is in flight, complete a free one, charge
 	 * through the engine when the gateway supports the engine and automatic renewal payments
 	 * ({@see self::GATEWAY_RENEWAL_FEATURE}), else leave a manual renewal order for the
 	 * customer and hold the contract.
@@ -339,7 +340,9 @@ final class RenewalProcessor {
 	private function collect_payment( ContractView $contract, CycleView $cycle, WC_Order $order, DateTimeImmutable $now, ContractLock $lock ): void {
 		$settlement = new Settlement();
 
-		if ( $order->is_paid() ) {
+		// Paid, or an asynchronous charge in flight (a resumed run whose settlement was cut
+		// short): settle what the order says instead of charging it again.
+		if ( $order->is_paid() || $order->has_status( OrderStatus::ON_HOLD ) ) {
 			$settlement->settle( $order, $now );
 			return;
 		}

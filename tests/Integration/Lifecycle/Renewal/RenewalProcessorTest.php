@@ -691,6 +691,39 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 	}
 
 	/**
+	 * A run whose asynchronous charge was handed over died before settlement moved the cycle
+	 * to processing: the next lock holder settles the in-flight order instead of charging it.
+	 */
+	public function test_a_resumed_pending_head_with_a_charge_in_flight_is_not_charged_again(): void {
+		$this->support_engine_charges( 'cod' );
+		$customer_id = $this->create_customer();
+		$contract_id = $this->create_contract(
+			$customer_id,
+			[
+				'payment_method' => 'cod',
+				'date_paid'      => $this->paid_at,
+			]
+		);
+		$this->unhook_settlement();
+		$in_flight = $this->create_renewal_order(
+			$contract_id,
+			$customer_id,
+			[
+				'status'       => 'on-hold',
+				'cycle_status' => CycleStatus::PENDING,
+			]
+		);
+
+		$order = $this->renew( $contract_id );
+
+		$this->assertInstanceOf( WC_Order::class, $order );
+		$this->assertSame( $in_flight->get_id(), $order->get_id() );
+		$this->assertSame( 0, $this->charge_count() );
+		$this->assertSame( CycleStatus::PROCESSING, $this->head( $contract_id )->get_status() );
+		$this->assertNull( $this->get_contract( $contract_id )->get_next_payment_gmt(), 'Off the due scan until the charge reports.' );
+	}
+
+	/**
 	 * Under the lock the cycle cannot move, so a lost compare-and-set in leave_for_payment()
 	 * is an anomaly: logged, and the contract is not held.
 	 */
