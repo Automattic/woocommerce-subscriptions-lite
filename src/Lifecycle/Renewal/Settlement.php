@@ -677,6 +677,13 @@ final class Settlement {
 			|| ( $replacement instanceof WC_Order && $replacement->has_status( OrderStatus::ON_HOLD ) );
 
 		if ( in_array( $cycle->get_status(), self::PAYABLE_CYCLE_STATUSES, true ) && ! $in_flight ) {
+			$cancel_replacement = $replacement instanceof WC_Order && ! $replacement->is_paid() && ! self::is_dead( $replacement );
+			if ( $cancel_replacement ) {
+				// Stamped before the relink, so should the replacement be paid after the relink
+				// (before it is cancelled, or after all), that payment is flagged for a refund.
+				self::mark_replaced( $replacement, $contract_id, $cycle_id );
+			}
+
 			$relinked = Contracts::transition_cycle(
 				$cycle_id,
 				[
@@ -696,10 +703,7 @@ final class Settlement {
 				return;
 			}
 
-			if ( $replacement instanceof WC_Order && ! $replacement->is_paid() && ! self::is_dead( $replacement ) ) {
-				// Stamped first, so should the cancelled replacement still be paid, its payment
-				// is flagged for a refund like this one would have been.
-				self::mark_replaced( $replacement, $contract_id, $cycle_id );
+			if ( $cancel_replacement ) {
 				/* translators: %d: order number. */
 				$replacement->update_status( OrderStatus::CANCELLED, sprintf( __( 'Order #%d paid this renewal after this order replaced it.', 'woocommerce-subscriptions-lite' ), $order->get_id() ) );
 			}
