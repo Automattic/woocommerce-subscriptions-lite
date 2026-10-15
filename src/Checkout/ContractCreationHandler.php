@@ -118,6 +118,23 @@ final class ContractCreationHandler {
 	private const RESUME_DELAY_SECONDS = 60;
 
 	/**
+	 * Order meta counting failed runs of the resume action; cleared on activation.
+	 */
+	public const RESUME_ATTEMPTS_META = '_wcsl_resume_attempts';
+
+	/**
+	 * Failed resume runs after which the resume action is no longer rescheduled.
+	 */
+	public const MAX_RESUME_ATTEMPTS = 3;
+
+	/**
+	 * Whether the current run failed (a creation or resume error, not a lock refusal).
+	 *
+	 * @var bool
+	 */
+	private $run_failed = false;
+
+	/**
 	 * Logger source tag.
 	 */
 	private const LOG_SOURCE = 'woocommerce-subscriptions-lite';
@@ -144,13 +161,41 @@ final class ContractCreationHandler {
 	/**
 	 * Action Scheduler entry point: run the order's creation again, which resumes a Lite draft
 	 * left by a creation cut short, creates a missing contract for a paid order, and does
-	 * nothing for an active contract or an unpaid order.
+	 * nothing for an active contract or an unpaid order. After {@see self::MAX_RESUME_ATTEMPTS}
+	 * failed runs it stops rescheduling and asks the merchant to check the order.
 	 *
 	 * @param mixed $order_id Order id.
 	 */
 	public function resume_checkout( $order_id ): void {
-		if ( is_numeric( $order_id ) ) {
-			$this->create_contracts_for_order( (int) $order_id );
+		if ( ! is_numeric( $order_id ) ) {
+			return;
+		}
+		$order_id         = (int) $order_id;
+		$this->run_failed = false;
+		$this->create_contracts_for_order( $order_id );
+		if ( ! $this->run_failed ) {
+			return;
+		}
+
+		try {
+			$order = wc_get_order( $order_id );
+			if ( ! $order instanceof WC_Order ) {
+				return;
+			}
+			$attempts = (int) $order->get_meta( self::RESUME_ATTEMPTS_META ) + 1;
+			$order->update_meta_data( self::RESUME_ATTEMPTS_META, (string) $attempts );
+			$order->save();
+			if ( $attempts < self::MAX_RESUME_ATTEMPTS ) {
+				return;
+			}
+
+			self::unschedule_resume( $order_id );
+			if ( self::MAX_RESUME_ATTEMPTS === $attempts ) {
+				$this->log_error( sprintf( 'gave up resuming the subscription of order %d after %d failed attempts.', $order_id, $attempts ) );
+				$order->add_order_note( __( 'The subscription for this order still could not be created after several automatic attempts, so they have stopped. Please check this order.', 'woocommerce-subscriptions-lite' ) );
+			}
+		} catch ( Throwable $e ) {
+			$this->log_error( sprintf( 'failed to record a failed resume on order %d: %s', $order_id, $e->getMessage() ) );
 		}
 	}
 
@@ -203,6 +248,7 @@ final class ContractCreationHandler {
 			}
 			return;
 		} catch ( Throwable $e ) {
+			$this->run_failed = true;
 			$this->log_error( sprintf( 'failed to create a contract for order %d: %s', $order_id, $e->getMessage() ) );
 			try {
 				// A draft blocks retries through the idempotency check. Without one, a refused
@@ -258,6 +304,7 @@ final class ContractCreationHandler {
 				);
 				self::schedule_resume( $order->get_id(), self::RESUME_DELAY_SECONDS );
 			} catch ( Throwable $e ) {
+				$this->run_failed = true;
 				$this->log_error( sprintf( 'failed to resume draft contract %d of order %d: %s', $contract->get_id(), $order->get_id(), $e->getMessage() ) );
 			}
 		}
@@ -291,7 +338,7 @@ final class ContractCreationHandler {
 			return;
 		}
 
-		self::unschedule_resume( $order->get_id() );
+		self::finish_resume( $order );
 		$order->add_order_note(
 			sprintf(
 				/* translators: %d: subscription (contract) id. */
@@ -335,6 +382,19 @@ final class ContractCreationHandler {
 	 */
 	private static function unschedule_resume( int $order_id ): void {
 		as_unschedule_all_actions( self::RESUME_HOOK, [ 'order_id' => $order_id ], self::RESUME_GROUP );
+	}
+
+	/**
+	 * Once the order's contract is active: drop its resume actions and its failed-attempt count.
+	 *
+	 * @param WC_Order $order The order.
+	 */
+	private static function finish_resume( WC_Order $order ): void {
+		self::unschedule_resume( $order->get_id() );
+		if ( '' !== (string) $order->get_meta( self::RESUME_ATTEMPTS_META ) ) {
+			$order->delete_meta_data( self::RESUME_ATTEMPTS_META );
+			$order->save();
+		}
 	}
 
 	/**
@@ -446,7 +506,7 @@ final class ContractCreationHandler {
 			return null;
 		}
 
-		self::unschedule_resume( $order->get_id() );
+		self::finish_resume( $order );
 
 		// Read after the release, so the view does not report the checkout lock.
 		return Contracts::get( $lock->get_contract_id() );

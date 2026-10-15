@@ -667,4 +667,78 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 		$this->assertCount( 1, Contracts::find_by_origin_order( $order->get_id() ) );
 		$this->assertSame( [], $this->notes_with( $order, 'activated after its creation was interrupted' ) );
 	}
+
+	/**
+	 * A creation that keeps failing before the draft is written is resumed at most
+	 * MAX_RESUME_ATTEMPTS times, then the chain stops with one final note; a later paid status
+	 * change still creates the contract and clears the count.
+	 */
+	public function test_a_persistently_failing_resume_stops_after_the_cap_and_a_later_success_still_works(): void {
+		$customer_id = $this->create_customer();
+		$plan        = $this->make_plan();
+		$order       = $this->create_subscription_order( $customer_id );
+		$this->apply_and_stamp( $order, $plan );
+
+		$contracts = SchemaInstaller::get_table_name( SchemaInstaller::TABLE_CONTRACTS );
+		$fail      = static function ( string $query ) use ( $contracts ): string {
+			return 0 === strpos( $query, "INSERT INTO `{$contracts}`" ) ? '' : $query;
+		};
+		$final     = 'still could not be created after several automatic attempts';
+		add_filter( 'query', $fail );
+		try {
+			$order->update_status( 'processing' );
+			$this->assertCount( 1, $this->pending_resumes( $order->get_id() ) );
+
+			for ( $run = 1; $run < ContractCreationHandler::MAX_RESUME_ATTEMPTS; $run++ ) {
+				do_action( ContractCreationHandler::RESUME_HOOK, $order->get_id() );
+				$this->assertCount( 1, $this->pending_resumes( $order->get_id() ), "Rescheduled after failed run {$run}." );
+			}
+			do_action( ContractCreationHandler::RESUME_HOOK, $order->get_id() );
+			$this->assertSame( [], $this->pending_resumes( $order->get_id() ), 'Not rescheduled past the cap.' );
+			$this->assertCount( 1, $this->notes_with( $order, $final ) );
+
+			do_action( ContractCreationHandler::RESUME_HOOK, $order->get_id() ); // A stray run past the cap.
+			$this->assertSame( [], $this->pending_resumes( $order->get_id() ) );
+			$this->assertCount( 1, $this->notes_with( $order, $final ), 'One final note only.' );
+		} finally {
+			remove_filter( 'query', $fail );
+		}
+		$this->assertSame( [], Contracts::find_by_origin_order( $order->get_id() ) );
+
+		$order->update_status( 'completed' );
+
+		$created = Contracts::find_by_origin_order( $order->get_id() );
+		$this->assertCount( 1, $created );
+		$this->assertSame( ContractStatus::ACTIVE, $created[0]->get_status() );
+		$this->assertSame( '', (string) wc_get_order( $order->get_id() )->get_meta( ContractCreationHandler::RESUME_ATTEMPTS_META ), 'A success clears the count.' );
+		$this->assertSame( [], $this->pending_resumes( $order->get_id() ) );
+	}
+
+	public function test_a_failed_resume_run_followed_by_a_successful_one_clears_the_count(): void {
+		$customer_id = $this->create_customer();
+		$plan        = $this->make_plan();
+		$order       = $this->create_subscription_order( $customer_id );
+		$this->apply_and_stamp( $order, $plan );
+
+		$contracts = SchemaInstaller::get_table_name( SchemaInstaller::TABLE_CONTRACTS );
+		$fail      = static function ( string $query ) use ( $contracts ): string {
+			return 0 === strpos( $query, "INSERT INTO `{$contracts}`" ) ? '' : $query;
+		};
+		add_filter( 'query', $fail );
+		try {
+			$order->update_status( 'processing' );
+			do_action( ContractCreationHandler::RESUME_HOOK, $order->get_id() );
+		} finally {
+			remove_filter( 'query', $fail );
+		}
+		$this->assertSame( '1', (string) wc_get_order( $order->get_id() )->get_meta( ContractCreationHandler::RESUME_ATTEMPTS_META ) );
+
+		do_action( ContractCreationHandler::RESUME_HOOK, $order->get_id() );
+
+		$created = Contracts::find_by_origin_order( $order->get_id() );
+		$this->assertCount( 1, $created );
+		$this->assertSame( ContractStatus::ACTIVE, $created[0]->get_status() );
+		$this->assertSame( '', (string) wc_get_order( $order->get_id() )->get_meta( ContractCreationHandler::RESUME_ATTEMPTS_META ) );
+		$this->assertSame( [], $this->pending_resumes( $order->get_id() ) );
+	}
 }
