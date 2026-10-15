@@ -226,7 +226,7 @@ final class ReactivationTest extends LiteIntegrationTestCase {
 		);
 		$meta_table = SchemaInstaller::get_table_name( SchemaInstaller::TABLE_CONTRACT_META );
 		$break      = static function ( string $query ) use ( $meta_table ): string {
-			return 0 === strpos( $query, "DELETE FROM `{$meta_table}`" ) ? 'SELECT broken syntax (' : $query;
+			return 1 === preg_match( "/^DELETE m FROM `?{$meta_table}`? /", $query ) ? 'SELECT broken syntax (' : $query;
 		};
 		add_filter( 'query', $break );
 
@@ -241,6 +241,7 @@ final class ReactivationTest extends LiteIntegrationTestCase {
 		$stored = $this->get_contract( $contract_id );
 		$this->assertSame( ContractStatus::ACTIVE, $stored->get_status() );
 		$this->assertSame( '2099-01-01 00:00:00', $stored->get_next_payment_gmt() );
+		$this->assertSame( '2099-01-01 00:00:00', $this->get_stored_anchor( $contract_id ), 'The anchor is left behind.' );
 	}
 
 	/**

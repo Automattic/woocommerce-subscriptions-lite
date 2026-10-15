@@ -10,6 +10,7 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Lifecycle;
 
+use Automattic\WooCommerce\SubscriptionsEngine\Api\ContractLockedException;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
@@ -290,7 +291,7 @@ final class CancellationTest extends LiteIntegrationTestCase {
 		$received   = $this->capture_action( $action );
 		$meta_table = SchemaInstaller::get_table_name( SchemaInstaller::TABLE_CONTRACT_META );
 		$break      = static function ( string $query ) use ( $meta_table ): string {
-			return 0 === strpos( $query, "DELETE FROM `{$meta_table}`" ) ? 'SELECT broken syntax (' : $query;
+			return 1 === preg_match( "/^DELETE m FROM `?{$meta_table}`? /", $query ) ? 'SELECT broken syntax (' : $query;
 		};
 		add_filter( 'query', $break );
 
@@ -363,5 +364,44 @@ final class CancellationTest extends LiteIntegrationTestCase {
 		$this->assertTrue( Cancellation::can_cancel( ContractStatus::DRAFT ), 'A stuck draft can be cancelled.' );
 		$this->assertFalse( Cancellation::can_cancel( ContractStatus::CANCELLED ) );
 		$this->assertFalse( Cancellation::can_cancel( ContractStatus::EXPIRED ) );
+	}
+
+	/**
+	 * @dataProvider provide_cancel_modes
+	 *
+	 * @param string $method Cancellation method under test.
+	 * @param string $action Action the method fires.
+	 */
+	public function test_cancel_while_another_operation_holds_the_lock_writes_nothing( string $method, string $action ): void {
+		$contract_id = $this->seed_contract();
+		( new Hold() )->hold( $contract_id );
+		$received = $this->capture_action( $action );
+		$this->hold_lock( $contract_id, 'renewal' );
+
+		try {
+			( new Cancellation() )->$method( $contract_id );
+			$this->fail( 'Expected ContractLockedException.' );
+		} catch ( ContractLockedException $e ) {
+			$this->assertSame( 'renewal', $e->get_operation() );
+		}
+
+		$stored = $this->get_contract( $contract_id );
+		$this->assertSame( ContractStatus::ON_HOLD, $stored->get_status() );
+		$this->assertNull( $stored->get_end_gmt() );
+		$this->assertSame( '2099-01-01 00:00:00', $this->get_stored_anchor( $contract_id ) );
+		$this->assertCount( 0, $received );
+	}
+
+	/**
+	 * @dataProvider provide_cancel_modes
+	 *
+	 * @param string $method Cancellation method under test.
+	 */
+	public function test_cancel_leaves_the_contract_unlocked( string $method ): void {
+		$contract_id = $this->seed_contract();
+
+		( new Cancellation() )->$method( $contract_id );
+
+		$this->assertNull( $this->get_contract( $contract_id )->get_lock_state() );
 	}
 }

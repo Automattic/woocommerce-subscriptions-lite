@@ -3,7 +3,8 @@
  * Cancellation - cancel a subscription now or at the end of the current period.
  *
  * Both modes clear the contract's next-due moment, which is what stops renewals, and its
- * {@see HoldAnchor}. An in-flight charge cycle is left to the renewal path.
+ * {@see HoldAnchor}. An in-flight charge cycle is left to the renewal path. Both run under
+ * the engine's contract lock ({@see HeldLocks}).
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Lifecycle
  */
@@ -12,10 +13,11 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Lifecycle;
 
+use Automattic\WooCommerce\SubscriptionsEngine\Api\ContractLock;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\ContractLockedException;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
-use Automattic\WooCommerce\SubscriptionsLite\Package;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -23,6 +25,11 @@ defined( 'ABSPATH' ) || exit;
  * Cancel a contract.
  */
 final class Cancellation {
+
+	/**
+	 * Operation label of a cancellation's contract lock.
+	 */
+	public const OPERATION = 'cancel';
 
 	/**
 	 * Statuses {@see self::cancel()} moves to cancelled.
@@ -39,16 +46,39 @@ final class Cancellation {
 	}
 
 	/**
-	 * Cancel a draft, active, on-hold or pending-cancellation contract now. Cancelling a
-	 * cancelled contract writes nothing and still succeeds.
+	 * Cancel a draft, active, on-hold or pending-cancellation contract now, under its lock.
+	 * Cancelling a cancelled contract writes nothing and still succeeds.
 	 *
 	 * @param int $contract_id Contract id.
 	 * @return ContractView|null The cancelled contract, or null when it does not exist or is not Lite's.
 	 * @throws LifecycleNotAllowedException If the contract's status cannot be cancelled.
+	 * @throws ContractLockedException If another operation holds the contract's lock.
 	 */
 	public function cancel( int $contract_id ): ?ContractView {
+		if ( ! Hold::is_lite_contract( $contract_id ) ) {
+			return null;
+		}
+
+		return HeldLocks::run(
+			$contract_id,
+			self::OPERATION,
+			static function ( ContractLock $lock ) use ( $contract_id ): ?ContractView {
+				return self::cancel_locked( $contract_id, $lock );
+			}
+		);
+	}
+
+	/**
+	 * The locked section of {@see self::cancel()}: read and decide, the status write, then
+	 * the anchor clear.
+	 *
+	 * @param int          $contract_id Contract id.
+	 * @param ContractLock $lock        The held lock.
+	 * @throws LifecycleNotAllowedException If the contract's status cannot be cancelled.
+	 */
+	private static function cancel_locked( int $contract_id, ContractLock $lock ): ?ContractView {
 		$contract = Contracts::get( $contract_id );
-		if ( null === $contract || Package::EXTENSION_SLUG !== $contract->get_extension_slug() ) {
+		if ( null === $contract ) {
 			return null;
 		}
 
@@ -64,17 +94,19 @@ final class Cancellation {
 				[
 					'status'           => ContractStatus::CANCELLED,
 					'next_payment_gmt' => null,
-				]
+				],
+				$lock
 			);
 			if ( null === $cancelled_contract ) {
 				return null;
 			}
 
-			HoldAnchor::clear( $contract_id );
+			HoldAnchor::clear( $contract_id, $lock );
 		}
 
 		/**
-		 * Fires after a contract is cancelled, also for a repeated cancel.
+		 * Fires after a contract is cancelled, also for a repeated cancel. Runs under the
+		 * contract lock.
 		 *
 		 * @param ContractView $cancelled_contract The cancelled contract.
 		 */
@@ -84,18 +116,40 @@ final class Cancellation {
 	}
 
 	/**
-	 * Wind an active or on-hold contract down at the end of the current period: it moves
-	 * to pending-cancellation and, when it has no end date yet, ends at its next-due moment
-	 * (the hold anchor for a held contract). Repeating it on a pending-cancellation
-	 * contract writes nothing and still succeeds.
+	 * Wind an active or on-hold contract down at the end of the current period, under its
+	 * lock: it moves to pending-cancellation and, when it has no end date yet, ends at its
+	 * next-due moment (the hold anchor for a held contract). Repeating it on a
+	 * pending-cancellation contract writes nothing and still succeeds.
 	 *
 	 * @param int $contract_id Contract id.
 	 * @return ContractView|null The pending-cancellation contract, or null when it does not exist or is not Lite's.
 	 * @throws LifecycleNotAllowedException If the contract is not active, on hold or pending cancellation.
+	 * @throws ContractLockedException If another operation holds the contract's lock.
 	 */
 	public function cancel_at_period_end( int $contract_id ): ?ContractView {
+		if ( ! Hold::is_lite_contract( $contract_id ) ) {
+			return null;
+		}
+
+		return HeldLocks::run(
+			$contract_id,
+			self::OPERATION,
+			function ( ContractLock $lock ) use ( $contract_id ): ?ContractView {
+				return $this->cancel_at_period_end_locked( $contract_id, $lock );
+			}
+		);
+	}
+
+	/**
+	 * The locked section of {@see self::cancel_at_period_end()}.
+	 *
+	 * @param int          $contract_id Contract id.
+	 * @param ContractLock $lock        The held lock.
+	 * @throws LifecycleNotAllowedException If the contract is not active, on hold or pending cancellation.
+	 */
+	private function cancel_at_period_end_locked( int $contract_id, ContractLock $lock ): ?ContractView {
 		$contract = Contracts::get( $contract_id );
-		if ( null === $contract || Package::EXTENSION_SLUG !== $contract->get_extension_slug() ) {
+		if ( null === $contract ) {
 			return null;
 		}
 
@@ -106,16 +160,17 @@ final class Cancellation {
 
 		$pending_contract = $contract;
 		if ( ContractStatus::PENDING_CANCELLATION !== $status ) {
-			$pending_contract = Contracts::update( $contract_id, $this->get_period_end_fields( $contract ) );
+			$pending_contract = Contracts::update( $contract_id, $this->get_period_end_fields( $contract ), $lock );
 			if ( null === $pending_contract ) {
 				return null;
 			}
 
-			HoldAnchor::clear( $contract_id );
+			HoldAnchor::clear( $contract_id, $lock );
 		}
 
 		/**
 		 * Fires after a contract is set to end with its current period, also for a repeat.
+		 * Runs under the contract lock.
 		 *
 		 * @param ContractView $pending_contract The pending-cancellation contract.
 		 */
