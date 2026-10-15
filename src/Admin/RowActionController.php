@@ -5,19 +5,20 @@
  *
  * Each action POSTs to `admin-post.php`; the request entry point authenticates
  * the request (capability and a POST nonce verified with `check_admin_referer()`),
- * runs the renewal through the engine's
- * {@see \Automattic\WooCommerce\SubscriptionsEngine\Api\Subscriptions} facade or the
- * cancel through Lite's {@see Cancellation}, queues a flash notice, and redirects back to the page the action was triggered
- * from (the detail page or the list), not a fixed destination.
+ * runs Lite's renewal ({@see RenewalProcessor::renew_now()}) or cancel
+ * ({@see Cancellation}), queues a flash notice, and redirects back to the page the
+ * action was triggered from (the detail page or the list), not a fixed destination.
  *
  * The decision logic ({@see self::handle_renew_now()}, {@see self::handle_cancel()})
  * is separated from the request plumbing ({@see self::renew_now_request()},
- * {@see self::cancel_request()}) so its branches are unit-testable without a
- * booted WordPress: the `handle_*` methods take a plain params array plus injected
- * seams and return a {@see RowActionResult}; the `*_request` methods read `$_POST`,
- * verify the nonce, run the decision, flash, and redirect. The nonce is enforced
- * at the request boundary (a hard `check_admin_referer()` gate) rather than in the
- * decision method, so it never rides in a URL.
+ * {@see self::cancel_request()}) so its branches are testable without a request:
+ * the `handle_*` methods take a plain params array and return a
+ * {@see RowActionResult}; the `*_request` methods read `$_POST`,
+ * verify the nonce, run the decision, flash, and redirect. Cancel's collaborators
+ * can be injected; Renew now always runs Lite's renewal, so its branches need real
+ * contracts and orders. The nonce is enforced at the request boundary (a hard
+ * `check_admin_referer()` gate) rather than in the decision method, so it never
+ * rides in a URL.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Admin
  */
@@ -28,26 +29,23 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Admin;
 
 use Throwable;
 use WC_Order;
-use Automattic\WooCommerce\SubscriptionsEngine\Api\Subscriptions;
+use Automattic\WooCommerce\Enums\OrderStatus;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
+use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\CycleStatus;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Cancellation;
+use Automattic\WooCommerce\SubscriptionsLite\Package;
+use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\RenewalProcessor;
 
 defined( 'ABSPATH' ) || exit;
 
 /**
  * Admin-post handlers for the state-mutating subscription actions.
  *
- * Construct via the no-arg constructor in production (the renewal facade, Lite's
- * cancel, the capability helper, and the WooCommerce logger); tests inject fake renew /
- * cancel / capability / logger seams to drive every decision branch.
+ * Construct via the no-arg constructor in production (Lite's cancel, the capability
+ * helper, and the WooCommerce logger); tests inject fake cancel / capability / logger
+ * seams to drive the decision branches. Renew now always runs Lite's renewal.
  */
 final class RowActionController {
-
-	/**
-	 * Renewal runner. Production: `Subscriptions::renew_now()`.
-	 *
-	 * @var callable(int): ?WC_Order
-	 */
-	private $renew;
 
 	/**
 	 * Canceller; false when the contract does not exist. Production: `Cancellation::cancel()`.
@@ -74,20 +72,15 @@ final class RowActionController {
 	/**
 	 * Construct the controller.
 	 *
-	 * @param (callable(int): ?WC_Order)|null                     $renew     Renewal runner; defaults to `Subscriptions::renew_now()`.
 	 * @param (callable(int): bool)|null                          $cancel    Canceller; defaults to `Cancellation::cancel()`.
 	 * @param (callable(): bool)|null                             $can       Capability check; defaults to `current_user_can()`.
 	 * @param (callable(string, array<string, mixed>): void)|null $log_error Error logger; defaults to `wc_get_logger()->error()`.
 	 */
 	public function __construct(
-		?callable $renew = null,
 		?callable $cancel = null,
 		?callable $can = null,
 		?callable $log_error = null
 	) {
-		$this->renew     = $renew ?? static function ( int $id ): ?WC_Order {
-			return Subscriptions::renew_now( $id );
-		};
 		$this->cancel    = $cancel ?? static function ( int $id ): bool {
 			return null !== ( new Cancellation() )->cancel( $id );
 		};
@@ -155,11 +148,11 @@ final class RowActionController {
 	/**
 	 * Decide and perform a "Renew now".
 	 *
-	 * Guard order: capability, then a valid contract id, then the facade renewal.
-	 * A null facade return means the renewal was not processable - the contract is
-	 * awaiting a payment confirmation, inactive, or has no billing chain - surfaced
-	 * as an info outcome, not an error. An engine throwable is logged in full and
-	 * surfaced as a generic error outcome rather than a fatal or a leaked internal message.
+	 * Guard order: capability, then a valid contract id, then Lite's renewal. A null
+	 * return means the renewal was not processable - the contract is awaiting a payment
+	 * confirmation, inactive, or has no billing chain - surfaced as an info outcome, not
+	 * an error. A throwable is logged in full and surfaced as a generic error outcome
+	 * rather than a fatal or a leaked internal message.
 	 *
 	 * @param array<string, mixed> $params Request params: `contract_id`.
 	 * @return RowActionResult The outcome.
@@ -173,11 +166,21 @@ final class RowActionController {
 		}
 
 		try {
-			$order = ( $this->renew )( $contract_id );
+			$order = ( new RenewalProcessor() )->renew_now( $contract_id );
 		} catch ( Throwable $e ) {
 			$this->log_failure( 'renew', $contract_id, $e );
 			return RowActionResult::failed(
 				__( 'Renewal could not be processed. Check the WooCommerce logs for details.', 'woocommerce-subscriptions-lite' )
+			);
+		}
+
+		if ( null === $order && self::renewal_order_build_failed( $contract_id ) ) {
+			return RowActionResult::failed(
+				sprintf(
+					/* translators: %d: subscription number. */
+					__( 'The renewal order for subscription #%d could not be built. The subscription is on hold; check the WooCommerce logs, fix the cause and renew it again.', 'woocommerce-subscriptions-lite' ),
+					$contract_id
+				)
 			);
 		}
 
@@ -191,13 +194,55 @@ final class RowActionController {
 			);
 		}
 
-		return RowActionResult::success(
-			sprintf(
+		return $this->renewal_outcome( $order, $contract_id );
+	}
+
+	/**
+	 * Whether the contract's newest renewal failed because its order could not be built.
+	 *
+	 * @param int $contract_id Contract id.
+	 */
+	private static function renewal_order_build_failed( int $contract_id ): bool {
+		$head = Contracts::get_cycles( $contract_id, 1 )[0] ?? null;
+
+		return null !== $head && CycleStatus::FAILED === $head->get_status() && RenewalProcessor::REASON_ORDER_BUILD_FAILED === $head->get_reason();
+	}
+
+	/**
+	 * Report what a Renew now actually did, read off the renewal order's status.
+	 *
+	 * @param WC_Order $order       The renewal order.
+	 * @param int      $contract_id Subscription number.
+	 */
+	private function renewal_outcome( WC_Order $order, int $contract_id ): RowActionResult {
+		$fresh    = wc_get_order( $order->get_id() );
+		$order    = $fresh instanceof WC_Order ? $fresh : $order;
+		$order_id = (int) $order->get_id();
+
+		if ( $order->is_paid() ) {
+			return RowActionResult::success(
 				/* translators: 1: renewal order number, 2: subscription number. */
-				__( 'Renewal order #%1$d created for subscription #%2$d.', 'woocommerce-subscriptions-lite' ),
-				(int) $order->get_id(),
-				$contract_id
-			)
+				sprintf( __( 'Renewal order #%1$d for subscription #%2$d was paid.', 'woocommerce-subscriptions-lite' ), $order_id, $contract_id )
+			);
+		}
+
+		if ( $order->has_status( OrderStatus::FAILED ) ) {
+			return RowActionResult::failed(
+				/* translators: 1: renewal order number, 2: subscription number. */
+				sprintf( __( 'Renewal order #%1$d for subscription #%2$d could not be charged. The subscription is on hold until the order is paid.', 'woocommerce-subscriptions-lite' ), $order_id, $contract_id )
+			);
+		}
+
+		if ( $order->has_status( OrderStatus::ON_HOLD ) ) {
+			return RowActionResult::info(
+				/* translators: 1: renewal order number, 2: subscription number. */
+				sprintf( __( 'Renewal order #%1$d for subscription #%2$d awaits the payment gateway\'s confirmation.', 'woocommerce-subscriptions-lite' ), $order_id, $contract_id )
+			);
+		}
+
+		return RowActionResult::info(
+			/* translators: 1: renewal order number, 2: subscription number. */
+			sprintf( __( 'Renewal order #%1$d for subscription #%2$d awaits the customer\'s payment.', 'woocommerce-subscriptions-lite' ), $order_id, $contract_id )
 		);
 	}
 
@@ -273,7 +318,7 @@ final class RowActionController {
 		( $this->log_error )(
 			sprintf( 'Admin subscription %1$s failed for #%2$d: %3$s', $action, $contract_id, $e->getMessage() ),
 			[
-				'source'      => 'woocommerce-subscriptions-lite',
+				'source'      => Package::EXTENSION_SLUG,
 				'contract_id' => $contract_id,
 				'exception'   => $e,
 			]

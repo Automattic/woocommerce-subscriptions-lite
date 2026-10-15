@@ -116,15 +116,8 @@ register_activation_hook(
 register_deactivation_hook(
 	__FILE__,
 	static function (): void {
-		// Deregister as an engine consumer and let the dispatcher re-evaluate its gates:
-		// with no consumer left it removes its recurring scan action. This must happen
-		// here because the engine only loads through its consumers - once Lite is
-		// inactive, no engine code runs to clean up after it. If another consumer is
-		// still registered, the dispatcher keeps the scan.
-		if ( class_exists( \Automattic\WooCommerce\SubscriptionsEngine\Integration\Ownership\ConsumerRegistry::class ) ) {
-			\Automattic\WooCommerce\SubscriptionsEngine\Integration\Ownership\ConsumerRegistry::unregister( 'woocommerce-subscriptions-lite' );
-			\Automattic\WooCommerce\SubscriptionsEngine\Integration\Renewal\RenewalDispatcher::ensure_scheduled();
-		}
+		// Deregister as an engine consumer so the engine removes its due scan (see Deactivation).
+		Deactivation::run();
 
 		flush_rewrite_rules();
 	}

@@ -15,6 +15,7 @@ use DateTimeZone;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
+use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\CycleStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\PlanStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\SchemaInstaller;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Hold;
@@ -157,13 +158,13 @@ final class ReactivationTest extends LiteIntegrationTestCase {
 		$this->assertNull( $stored->get_next_payment_gmt() );
 	}
 
-	public function test_reactivate_floors_past_due_at_now_when_the_roll_cap_exhausts(): void {
+	public function test_reactivate_floors_past_due_one_cadence_after_now_when_the_roll_cap_exhausts(): void {
 		// Daily cadence, about 6.5 years past due: more rolls than the cap allows.
 		$contract_id = $this->seed_held_contract( '2020-01-01 00:00:00', (int) $this->make_plan( 'day' )->get_id() );
 
 		( new Reactivation() )->reactivate( $contract_id, $this->utc( '2026-07-06 00:00:00' ) );
 
-		$this->assertSame( '2026-07-06 00:00:00', $this->get_contract( $contract_id )->get_next_payment_gmt() );
+		$this->assertSame( '2026-07-07 00:00:00', $this->get_contract( $contract_id )->get_next_payment_gmt(), 'As for any roll, the next due moment is in the future.' );
 	}
 
 	public function test_reactivate_floors_past_due_at_now_without_a_plan(): void {
@@ -295,6 +296,32 @@ final class ReactivationTest extends LiteIntegrationTestCase {
 
 		$this->expectException( LifecycleNotAllowedException::class );
 		( new Reactivation() )->reactivate( $contract_id, $this->utc( '2026-06-01 00:00:00' ) );
+	}
+
+	public function test_reactivate_rejects_a_contract_with_an_unpaid_renewal(): void {
+		$customer_id = $this->create_customer();
+		$contract_id = $this->create_contract(
+			$customer_id,
+			[
+				'payment_method' => 'cod',
+				'status'         => 'on-hold',
+			]
+		);
+		$this->create_renewal_order(
+			$contract_id,
+			$customer_id,
+			[
+				'status'       => 'failed',
+				'cycle_status' => CycleStatus::FAILED,
+			]
+		);
+
+		try {
+			( new Reactivation() )->reactivate( $contract_id );
+			$this->fail( 'An unpaid renewal must block reactivation.' );
+		} catch ( LifecycleNotAllowedException $e ) {
+			$this->assertSame( ContractStatus::ON_HOLD, $this->get_contract( $contract_id )->get_status() );
+		}
 	}
 
 	public function test_reactivate_returns_null_for_a_missing_contract(): void {

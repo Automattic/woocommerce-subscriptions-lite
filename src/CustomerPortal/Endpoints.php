@@ -73,9 +73,10 @@ final class Endpoints {
 	const LIST_PER_PAGE = 10;
 
 	/**
-	 * Related orders per detail-page window. The page number rides the
-	 * `orders-page` query arg on the detail URL - a long-running contract
-	 * accumulates one renewal order per period, so the list grows unbounded.
+	 * Billing cycles per related-orders window on the detail page (about one order
+	 * each). The page number rides the `orders-page` query arg on the detail URL -
+	 * a long-running contract accumulates one renewal order per period, so the list
+	 * grows unbounded.
 	 */
 	const RELATED_ORDERS_PER_PAGE = 10;
 
@@ -243,10 +244,9 @@ final class Endpoints {
 		// phpcs:ignore WordPress.Security.NonceVerification.Recommended
 		$orders_page = isset( $_GET[ self::ORDERS_PAGE_QUERY_ARG ] ) ? max( 1, absint( wp_unslash( $_GET[ self::ORDERS_PAGE_QUERY_ARG ] ) ) ) : 1;
 
-		// The +1 probe answers "is there a next page" without a count read.
-		$related_orders   = $this->provider->get_related_orders( $contract_id, self::RELATED_ORDERS_PER_PAGE + 1, ( $orders_page - 1 ) * self::RELATED_ORDERS_PER_PAGE );
-		$orders_have_next = count( $related_orders ) > self::RELATED_ORDERS_PER_PAGE;
-		$related_orders   = array_slice( $related_orders, 0, self::RELATED_ORDERS_PER_PAGE );
+		$related_orders   = $this->provider->get_related_orders( $contract_id, self::RELATED_ORDERS_PER_PAGE, ( $orders_page - 1 ) * self::RELATED_ORDERS_PER_PAGE );
+		$orders_have_next = $related_orders['has_more'];
+		$related_orders   = $related_orders['orders'];
 
 		$view_model = new ViewModel();
 		$detail     = $view_model->build_detail( $contract, $related_orders );

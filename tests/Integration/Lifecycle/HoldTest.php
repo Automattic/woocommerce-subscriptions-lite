@@ -55,7 +55,18 @@ final class HoldTest extends LiteIntegrationTestCase {
 		$this->assertSame( '2099-01-01 00:00:00', $this->get_stored_anchor( $contract_id ) );
 	}
 
-	public function test_hold_without_a_next_payment_stores_no_anchor(): void {
+	public function test_hold_without_a_next_payment_anchors_on_the_newest_period_end(): void {
+		$contract_id = $this->create_contract( $this->create_customer() );
+		Contracts::update( $contract_id, [ 'next_payment_gmt' => null ] );
+		$period_end = Contracts::get_cycles( $contract_id, 1 )[0]->get_ends_at_gmt();
+
+		( new Hold() )->hold( $contract_id );
+
+		$this->assertSame( ContractStatus::ON_HOLD, $this->get_contract( $contract_id )->get_status() );
+		$this->assertSame( $period_end, $this->get_stored_anchor( $contract_id ), 'Every customer hold carries an anchor.' );
+	}
+
+	public function test_hold_without_a_next_payment_or_a_billing_chain_stores_no_anchor(): void {
 		$contract_id = $this->seed_contract( [ 'next_payment_gmt' => null ] );
 
 		( new Hold() )->hold( $contract_id );

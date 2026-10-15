@@ -12,6 +12,12 @@
  * and compute a first renewal ({@see self::validate()}). The storefront, the cart and
  * checkout all use that one rule. A missing plan reads as no terms (null). Reads never throw.
  *
+ * It also turns the cadence into dates (UTC): the first renewal of a new contract, the period
+ * a renewal bills and the next due moment after it. Catch-up rule: a contract that comes back
+ * due late (after a hold, an owner absence or a cron outage) bills one period - the one
+ * containing now - and its next due moment is the end of that period, always in the future.
+ * Periods follow the plan's cadence from the due anchor, never from the previous cycle's end.
+ *
  * @package Automattic\WooCommerce\SubscriptionsLite\Pricing
  */
 
@@ -21,6 +27,7 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Pricing;
 
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\PlanView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\ValueObject\BillingPolicy;
+use Automattic\WooCommerce\SubscriptionsLite\Package;
 use DateTimeImmutable;
 use DateTimeZone;
 use DomainException;
@@ -37,6 +44,11 @@ final class BillingTerms {
 	private const CADENCE_MESSAGE = 'billing_policy must have a period (day, week, month or year) and a positive interval.';
 
 	private const MAX_CYCLES_MESSAGE = 'billing_policy max_cycles must be a positive integer, or null for no limit.';
+
+	/**
+	 * Bound on the forward roll, so a fine-grained cadence far behind cannot loop unboundedly.
+	 */
+	private const MAX_ROLLS = 1000;
 
 	/**
 	 * Billing period.
@@ -133,7 +145,7 @@ final class BillingTerms {
 	 * @param DateTimeImmutable $start Contract start.
 	 * @throws DomainException When the billing payload is not billable.
 	 */
-	public static function first_renewal_from( PlanView $plan, DateTimeImmutable $start ): DateTimeImmutable {
+	public static function get_first_renewal_from( PlanView $plan, DateTimeImmutable $start ): DateTimeImmutable {
 		return self::parse_first_renewal( $plan->get_billing_policy() ?? [], $start );
 	}
 
@@ -146,6 +158,77 @@ final class BillingTerms {
 	 */
 	private static function parse_first_renewal( array $policy, DateTimeImmutable $start ): DateTimeImmutable {
 		return BillingPolicy::from_array( $policy )->compute_first_renewal_from( $start );
+	}
+
+	/**
+	 * The period to bill: it starts at `$anchor` rolled forward by whole cadences while the
+	 * following boundary is not after `$now`, so it contains `$now` (or starts at a future
+	 * anchor). When the roll cap runs out the period starts at `$now` (logged).
+	 *
+	 * @param DateTimeImmutable $anchor The due moment the renewal was anchored on.
+	 * @param DateTimeImmutable $now    The current moment.
+	 * @param BillingPolicy     $policy The plan's billing policy.
+	 * @return array{0: DateTimeImmutable, 1: DateTimeImmutable} Period start and end (UTC).
+	 */
+	public static function get_period_to_bill( DateTimeImmutable $anchor, DateTimeImmutable $now, BillingPolicy $policy ): array {
+		$utc   = new DateTimeZone( 'UTC' );
+		$start = $anchor->setTimezone( $utc );
+		$now   = $now->setTimezone( $utc );
+		$end   = $policy->compute_next_renewal_from( $start );
+
+		$rolls_left = self::MAX_ROLLS;
+		while ( $end <= $now && $rolls_left-- > 0 ) {
+			$start = $end;
+			$end   = $policy->compute_next_renewal_from( $start );
+		}
+
+		if ( $end <= $now ) {
+			self::log_cap( 'get_period_to_bill', $anchor );
+			$start = $now;
+			$end   = $policy->compute_next_renewal_from( $start );
+		}
+
+		return [ $start, $end ];
+	}
+
+	/**
+	 * The next due moment from `$from`: kept when it is after `$now`, else rolled forward by
+	 * whole cadences until it is. When the roll cap runs out it is one cadence after `$now`
+	 * (logged).
+	 *
+	 * @param DateTimeImmutable $from   The moment to start from (typically a period end).
+	 * @param DateTimeImmutable $now    The current moment.
+	 * @param BillingPolicy     $policy The plan's billing policy.
+	 */
+	public static function get_next_due_after( DateTimeImmutable $from, DateTimeImmutable $now, BillingPolicy $policy ): DateTimeImmutable {
+		$utc  = new DateTimeZone( 'UTC' );
+		$next = $from->setTimezone( $utc );
+		$now  = $now->setTimezone( $utc );
+
+		$rolls_left = self::MAX_ROLLS;
+		while ( $next <= $now && $rolls_left-- > 0 ) {
+			$next = $policy->compute_next_renewal_from( $next );
+		}
+
+		if ( $next <= $now ) {
+			self::log_cap( 'get_next_due_after', $from );
+			$next = $policy->compute_next_renewal_from( $now );
+		}
+
+		return $next;
+	}
+
+	/**
+	 * Log a roll that ran out of the cap; the caller restarts the cadence from now.
+	 *
+	 * @param string            $method The method that hit the cap.
+	 * @param DateTimeImmutable $from   The moment it rolled from.
+	 */
+	private static function log_cap( string $method, DateTimeImmutable $from ): void {
+		wc_get_logger()->warning(
+			sprintf( 'BillingTerms::%s(): rolling forward from %s exhausted the roll cap; restarted from now, one cadence ahead.', $method, $from->format( 'Y-m-d H:i:s' ) ),
+			[ 'source' => Package::EXTENSION_SLUG ]
+		);
 	}
 
 	/**

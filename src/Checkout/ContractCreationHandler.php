@@ -5,10 +5,11 @@
  * Fires when an order reaches a paid status (`woocommerce_order_status_changed`,
  * gated by `is_paid()`) - covering immediate, $0, and offline (BACS/cheque)
  * payments alike - and groups the order's plan-carrying line items by selling
- * plan. A single clean group becomes one contract, then its first renewal is
- * armed. Anything that cannot be one contract - two different plans (Premium's
- * multiple-contracts case) or a mix of plan and one-time lines (WOOSUBS-1775) - is
- * left uncreated with an order note, a log line, and a flag the order-received page
+ * plan. A single clean group becomes one active contract, due at its first
+ * renewal; Lite's own renewal orders never become contracts. Anything that cannot
+ * be one contract - two different plans (Premium's multiple-contracts case) or a
+ * mix of plan and one-time lines (mixed carts are not supported yet) - is left
+ * uncreated with an order note, a log line, and a flag the order-received page
  * reads. The handler never throws out of the hook and never blocks checkout.
  *
  * Lite maps the order to explicit contract fields (customer, payment, addresses,
@@ -37,15 +38,14 @@ use Automattic\WooCommerce\SubscriptionsLite\Contracts\AddressFields;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ProductPlanResolver;
 use Automattic\WooCommerce\SubscriptionsLite\Pricing\BillingTerms;
-use Automattic\WooCommerce\SubscriptionsLite\Renewal\RenewalWiring;
+use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\RenewalOrderBuilder;
 
 defined( 'ABSPATH' ) || exit;
 
 /**
  * Create one contract per paid subscription order.
  *
- * Collaborators (the engine facades, plan resolver, and renewal wiring)
- * are called directly; the grouping, mapping, idempotency, and error paths are
+ * Collaborators (the engine facades and the plan resolver) are called directly; the grouping, mapping, idempotency, and error paths are
  * covered by integration tests against real WooCommerce.
  */
 final class ContractCreationHandler {
@@ -117,7 +117,7 @@ final class ContractCreationHandler {
 	 */
 	public function create_contracts_for_order( int $order_id ): void {
 		$order = wc_get_order( $order_id );
-		if ( ! $order instanceof WC_Order || ! $order->is_paid() ) {
+		if ( ! $order instanceof WC_Order || ! $order->is_paid() || RenewalOrderBuilder::CREATED_VIA === $order->get_created_via() ) {
 			return;
 		}
 
@@ -163,16 +163,9 @@ final class ContractCreationHandler {
 
 		if ( null === $contract ) {
 			wc_get_logger()->warning(
-				sprintf( 'ContractCreationHandler: the contract for order %d no longer exists at activation; its first renewal was not scheduled.', $order_id ),
+				sprintf( 'ContractCreationHandler: the contract for order %d no longer exists at activation.', $order_id ),
 				[ 'source' => self::LOG_SOURCE ]
 			);
-			return;
-		}
-
-		try {
-			( new RenewalWiring() )->schedule_first_renewal( $contract );
-		} catch ( Throwable $e ) {
-			$this->log_error( sprintf( 'failed to schedule the first renewal of contract %d: %s', $contract->get_id(), $e->getMessage() ) );
 		}
 	}
 
@@ -215,13 +208,15 @@ final class ContractCreationHandler {
 	 * then cycle 1 (billed by the order), then activation with the first renewal date.
 	 * Activation comes last, so a failure part-way leaves a draft that is never due.
 	 *
-	 * The first renewal date comes from {@see BillingTerms::first_renewal_from()}, the
+	 * The first renewal date comes from {@see BillingTerms::get_first_renewal_from()}, the
 	 * same parse that decides whether a plan is billable.
 	 *
 	 * @param WC_Order $order The paid order.
 	 * @param PlanView $plan  The order's selling plan.
 	 * @return ContractView|null The active contract; null when it was deleted before activation.
-	 * @throws Throwable When the billing payload does not parse or an engine write fails.
+	 * @throws LogicException When cycle 1 of the new contract already exists. Any other
+	 *                        failure (an unparseable billing payload, a failed engine
+	 *                        write) propagates as thrown.
 	 */
 	public function create_contract( WC_Order $order, PlanView $plan ): ?ContractView {
 		$plan_id    = $plan->get_id();
@@ -236,7 +231,7 @@ final class ContractCreationHandler {
 		$start = null !== $paid
 			? new DateTimeImmutable( '@' . $paid->getTimestamp() )
 			: new DateTimeImmutable( 'now', new DateTimeZone( 'UTC' ) );
-		$next  = BillingTerms::first_renewal_from( $plan, $start );
+		$next  = BillingTerms::get_first_renewal_from( $plan, $start );
 
 		$totals = $this->get_recurring_totals( $order, $plan_lines );
 
@@ -264,7 +259,7 @@ final class ContractCreationHandler {
 			]
 		);
 
-		Contracts::add_cycle(
+		$first_cycle = Contracts::add_cycle(
 			$contract->get_id(),
 			[
 				'status'         => CycleStatus::BILLED,
@@ -276,6 +271,10 @@ final class ContractCreationHandler {
 				'currency'       => $order->get_currency(),
 			]
 		);
+		if ( null === $first_cycle ) {
+			// The draft is new, so its first position cannot be taken: fail like any other write.
+			throw new LogicException( 'Contract creation: cycle 1 of the new contract already exists.' );
+		}
 
 		return Contracts::update(
 			$contract->get_id(),

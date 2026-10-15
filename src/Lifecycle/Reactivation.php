@@ -14,13 +14,13 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Lifecycle;
 
 use DateTimeImmutable;
 use DateTimeZone;
-use DomainException;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
-use Automattic\WooCommerce\SubscriptionsEngine\Api\Plans;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
-use Automattic\WooCommerce\SubscriptionsEngine\Core\ValueObject\BillingPolicy;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
+use Automattic\WooCommerce\SubscriptionsLite\Plans\ContractPlans;
+use Automattic\WooCommerce\SubscriptionsLite\Pricing\BillingTerms;
+use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\UnpaidRenewal;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -30,18 +30,13 @@ defined( 'ABSPATH' ) || exit;
 final class Reactivation {
 
 	/**
-	 * Bound on the forward roll, so a fine-grained cadence after a very long hold cannot loop unboundedly.
-	 */
-	private const MAX_FORWARD_ROLLS = 1000;
-
-	/**
 	 * Reactivate an on-hold contract. The anchor is the next payment when one was set
 	 * while held (hold clears it, so it was set deliberately), else the hold anchor.
 	 *
 	 * @param int                    $contract_id Contract id.
 	 * @param DateTimeImmutable|null $now         The current moment; the UTC wall clock when omitted.
 	 * @return ContractView|null The reactivated contract, or null when it does not exist or is not Lite's.
-	 * @throws LifecycleNotAllowedException If the contract is not on hold.
+	 * @throws LifecycleNotAllowedException If the contract is not on hold, or a renewal payment is outstanding.
 	 */
 	public function reactivate( int $contract_id, ?DateTimeImmutable $now = null ): ?ContractView {
 		$contract = Contracts::get( $contract_id );
@@ -52,6 +47,11 @@ final class Reactivation {
 		// An active contract must never reach the forward roll: it would skip an owed charge.
 		if ( ContractStatus::ON_HOLD !== $contract->get_status() ) {
 			throw new LifecycleNotAllowedException( 'Only an on-hold contract can be reactivated.' );
+		}
+
+		// A renewal waiting on payment resumes the contract when it is paid, not before.
+		if ( null !== UnpaidRenewal::find( $contract ) ) {
+			throw new LifecycleNotAllowedException( 'A renewal payment is outstanding.' );
 		}
 
 		$utc          = new DateTimeZone( 'UTC' );
@@ -86,8 +86,8 @@ final class Reactivation {
 	 * The next payment after a hold.
 	 *
 	 * A future anchor is kept; a past-due one is rolled forward by whole plan cadences until
-	 * it is in the future, floored at `$now` when there is no cadence or the roll cap runs
-	 * out (logged); no anchor leaves the contract unscheduled.
+	 * it is in the future ({@see BillingTerms::get_next_due_after()}), or floored at `$now`
+	 * when there is no cadence; no anchor leaves the contract unscheduled.
 	 *
 	 * @param ContractView      $contract The contract being reactivated.
 	 * @param string|null       $anchor   GMT moment to recompute from, or null.
@@ -104,49 +104,11 @@ final class Reactivation {
 			return $anchor;
 		}
 
-		$billing_policy = $this->get_billing_policy( $contract );
+		$billing_policy = ContractPlans::get_billing_policy_for( $contract );
 		if ( null === $billing_policy ) {
 			return $now->format( 'Y-m-d H:i:s' );
 		}
 
-		$rolls_left = self::MAX_FORWARD_ROLLS;
-		while ( $next_payment <= $now && $rolls_left-- > 0 ) {
-			$next_payment = $billing_policy->compute_next_renewal_from( $next_payment );
-		}
-
-		if ( $next_payment <= $now ) {
-			wc_get_logger()->warning(
-				sprintf( 'Reactivation: contract %d exhausted the forward-roll cap; next payment floored at now.', $contract->get_id() ),
-				[
-					'source'      => 'woocommerce-subscriptions-lite',
-					'contract_id' => $contract->get_id(),
-				]
-			);
-
-			return $now->format( 'Y-m-d H:i:s' );
-		}
-
-		return $next_payment->format( 'Y-m-d H:i:s' );
-	}
-
-	/**
-	 * The billing policy of the contract's plan, or null when it has none (no plan, a
-	 * deleted plan, or a billing payload without a usable cadence).
-	 *
-	 * @param ContractView $contract The contract.
-	 */
-	private function get_billing_policy( ContractView $contract ): ?BillingPolicy {
-		$plan_id = $contract->get_selling_plan_id();
-		$plan    = null === $plan_id ? null : Plans::get( $plan_id );
-		$billing = null === $plan ? null : $plan->get_billing_policy();
-		if ( null === $billing ) {
-			return null;
-		}
-
-		try {
-			return BillingPolicy::from_array( $billing );
-		} catch ( DomainException $e ) {
-			return null;
-		}
+		return BillingTerms::get_next_due_after( $next_payment, $now, $billing_policy )->format( 'Y-m-d H:i:s' );
 	}
 }

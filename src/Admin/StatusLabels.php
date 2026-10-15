@@ -2,10 +2,10 @@
 /**
  * StatusLabels - merchant-facing labels and badge markup for engine statuses.
  *
- * A small, WordPress-free helper shared by the admin list table and the detail
- * renderer so contract and cycle statuses read the same wherever they appear.
- * Pure functions of their inputs (no globals, no time, no WordPress calls beyond
- * the i18n pass-throughs), which keeps the label/badge vocabulary unit-testable.
+ * A small helper shared by the admin list table and the detail renderer so contract
+ * and cycle statuses read the same wherever they appear. The labels and badges are
+ * pure functions of their inputs (no globals, no time, no WordPress calls beyond the
+ * i18n pass-throughs).
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Admin
  */
@@ -69,18 +69,6 @@ final class StatusLabels {
 			default:
 				return self::humanize( $status );
 		}
-	}
-
-	/**
-	 * Whether a contract in `$status` may have a renewal run now.
-	 *
-	 * Renewing a draft or terminal contract is a no-op the facade would skip, so the
-	 * action is offered only for the other statuses.
-	 *
-	 * @param string $status Contract status slug.
-	 */
-	public static function is_renewable( string $status ): bool {
-		return ! in_array( $status, [ ContractStatus::DRAFT, ContractStatus::CANCELLED, ContractStatus::EXPIRED ], true );
 	}
 
 	/**

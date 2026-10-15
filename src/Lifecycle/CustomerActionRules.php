@@ -16,7 +16,7 @@ use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
 defined( 'ABSPATH' ) || exit;
 
 /**
- * Customer action availability by status and schedule.
+ * Customer action availability by status and unpaid renewals.
  */
 final class CustomerActionRules {
 
@@ -38,13 +38,13 @@ final class CustomerActionRules {
 	}
 
 	/**
-	 * Whether the customer may resume the contract: on hold, and not waiting on a payment.
+	 * Whether the customer may resume the contract: on hold, and no renewal waits on a payment.
 	 *
-	 * @param string $status           Contract status.
-	 * @param bool   $has_next_payment Whether a next payment is scheduled.
+	 * @param string $status             Contract status.
+	 * @param bool   $has_unpaid_renewal Whether the newest renewal is unpaid.
 	 */
-	public static function can_reactivate( string $status, bool $has_next_payment ): bool {
-		return ContractStatus::ON_HOLD === $status && ! self::needs_payment( $status, $has_next_payment );
+	public static function can_reactivate( string $status, bool $has_unpaid_renewal ): bool {
+		return ContractStatus::ON_HOLD === $status && ! $has_unpaid_renewal;
 	}
 
 	/**
@@ -57,13 +57,13 @@ final class CustomerActionRules {
 	}
 
 	/**
-	 * Whether the contract waits on a payment: on hold with a scheduled next payment is the
-	 * failed-payment retry path, while a customer or merchant hold clears the schedule.
+	 * Whether the contract waits on a payment: on hold with an unpaid renewal (a failed
+	 * charge or a manual renewal order), as opposed to a customer or merchant hold.
 	 *
-	 * @param string $status           Contract status.
-	 * @param bool   $has_next_payment Whether a next payment is scheduled.
+	 * @param string $status             Contract status.
+	 * @param bool   $has_unpaid_renewal Whether the newest renewal is unpaid.
 	 */
-	public static function needs_payment( string $status, bool $has_next_payment ): bool {
-		return ContractStatus::ON_HOLD === $status && $has_next_payment;
+	public static function needs_payment( string $status, bool $has_unpaid_renewal ): bool {
+		return ContractStatus::ON_HOLD === $status && $has_unpaid_renewal;
 	}
 }

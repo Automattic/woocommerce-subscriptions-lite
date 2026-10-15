@@ -3,7 +3,7 @@
  * SubscriptionsListTable - the WooCommerce > Subscriptions admin list.
  *
  * An Orders-like `WP_List_Table` reading subscriptions through the engine's
- * public {@see \Automattic\WooCommerce\SubscriptionsEngine\Api\Subscriptions}
+ * public {@see \Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts}
  * facade. Columns (Subscription, Customer, Items, Status, Next payment, Total)
  * follow the design order, with the Renew now / Cancel actions as native hover
  * row-actions under the Subscription column. Status views with counts, sortable
@@ -27,6 +27,7 @@ use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Cancellation;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
+use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\RenewalProcessor;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -421,7 +422,7 @@ final class SubscriptionsListTable extends WP_List_Table {
 		$status  = $item->get_status();
 		$actions = [];
 
-		if ( StatusLabels::is_renewable( $status ) ) {
+		if ( RenewalProcessor::can_renew_now( $item ) ) {
 			$actions['renew'] = PageController::action_form(
 				PageController::ACTION_RENEW_NOW,
 				$id,

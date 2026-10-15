@@ -19,6 +19,7 @@ use Automattic\WooCommerce\SubscriptionsEngine\Api\ContractActions;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 use Automattic\WooCommerce\SubscriptionsLite\Contracts\CustomerVisibility;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
+use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\UnpaidRenewal;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -71,7 +72,7 @@ final class CustomerActions {
 				'description'  => __( 'Resume the subscription.', 'woocommerce-subscriptions-lite' ),
 				'permission'   => self::MANAGE_CAPABILITY,
 				'is_available' => static function ( ContractView $contract ): bool {
-					return CustomerActionRules::can_reactivate( $contract->get_status(), '' !== (string) $contract->get_next_payment_gmt() );
+					return CustomerActionRules::can_reactivate( $contract->get_status(), null !== UnpaidRenewal::find( $contract ) );
 				},
 				'callback'     => static function ( ContractView $contract ) {
 					return self::run( [ new Reactivation(), 'reactivate' ], $contract->get_id() );

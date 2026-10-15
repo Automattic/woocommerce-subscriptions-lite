@@ -15,6 +15,7 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Lifecycle;
 use WP_REST_Request;
 use WP_REST_Response;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
+use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\CycleStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\SchemaInstaller;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
@@ -274,11 +275,10 @@ final class CustomerActionsTest extends LiteIntegrationTestCase {
 	 */
 	public function provide_unavailable_actions(): array {
 		return [
-			'reactivate an active contract'   => [ ContractStatus::ACTIVE, '2099-02-01 00:00:00', 'reactivate' ],
-			'reactivate a needs-payment hold' => [ ContractStatus::ON_HOLD, '2099-02-01 00:00:00', 'reactivate' ],
-			'hold a cancelled contract'       => [ ContractStatus::CANCELLED, null, 'hold' ],
-			'cancel an expired contract'      => [ ContractStatus::EXPIRED, null, 'cancel' ],
-			'cancel a winding-down contract'  => [ ContractStatus::PENDING_CANCELLATION, null, 'cancel' ],
+			'reactivate an active contract'  => [ ContractStatus::ACTIVE, '2099-02-01 00:00:00', 'reactivate' ],
+			'hold a cancelled contract'      => [ ContractStatus::CANCELLED, null, 'hold' ],
+			'cancel an expired contract'     => [ ContractStatus::EXPIRED, null, 'cancel' ],
+			'cancel a winding-down contract' => [ ContractStatus::PENDING_CANCELLATION, null, 'cancel' ],
 		];
 	}
 
@@ -303,11 +303,31 @@ final class CustomerActionsTest extends LiteIntegrationTestCase {
 	 */
 	public function provide_discovery_by_status(): array {
 		return [
-			'active'             => [ ContractStatus::ACTIVE, '2099-02-01 00:00:00', [ 'hold', 'cancel' ] ],
-			'on hold'            => [ ContractStatus::ON_HOLD, null, [ 'reactivate', 'cancel' ] ],
-			'needs-payment hold' => [ ContractStatus::ON_HOLD, '2099-02-01 00:00:00', [ 'cancel' ] ],
-			'cancelled'          => [ ContractStatus::CANCELLED, null, [] ],
+			'active'           => [ ContractStatus::ACTIVE, '2099-02-01 00:00:00', [ 'hold', 'cancel' ] ],
+			'on hold'          => [ ContractStatus::ON_HOLD, null, [ 'reactivate', 'cancel' ] ],
+			'hold with a date' => [ ContractStatus::ON_HOLD, '2099-02-01 00:00:00', [ 'reactivate', 'cancel' ] ],
+			'cancelled'        => [ ContractStatus::CANCELLED, null, [] ],
 		];
+	}
+
+	public function test_a_failed_renewal_is_not_offered_reactivate_and_a_reactivate_post_is_refused(): void {
+		wp_set_current_user( $this->owner_id );
+		$contract_id = $this->seed_owned_contract( ContractStatus::ON_HOLD, null );
+		$this->create_renewal_order(
+			$contract_id,
+			$this->owner_id,
+			[
+				'status'       => 'failed',
+				'cycle_status' => CycleStatus::FAILED,
+			]
+		);
+
+		$this->assertSame( [ 'cancel' ], $this->discover_actions( $contract_id ) );
+
+		$response = $this->post_action( $contract_id, 'reactivate', [] );
+
+		$this->assertSame( 409, $response->get_status() );
+		$this->assertSame( ContractStatus::ON_HOLD, $this->get_contract( $contract_id )->get_status() );
 	}
 
 	public function test_discovery_describes_the_cancel_args(): void {

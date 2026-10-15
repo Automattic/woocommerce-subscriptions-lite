@@ -11,8 +11,9 @@
  * flows, so the data under test is shaped exactly like production data.
  * Plans are created through the engine's plan write facade and read back as
  * views, as production code reads them. The engine's `Integration\` classes
- * used here (order linkage for renewal orders) are a documented test-only
- * exemption from the "consume the engine via the `Api\` facade only" rule.
+ * used here (the schema installer for raw rows, and the due dispatcher that tests
+ * drive with a fixed clock) are a documented test-only exemption from the
+ * "consume the engine via the `Api\` facade only" rule.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Tests
  */
@@ -22,17 +23,24 @@ declare( strict_types=1 );
 namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration;
 
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\Payments;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Plans;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\PlanView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
-use Automattic\WooCommerce\SubscriptionsEngine\Integration\Checkout\OrderLinkage;
+use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\CycleStatus;
+use Automattic\WooCommerce\SubscriptionsEngine\Integration\Dispatch\DueDispatcher;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\SchemaInstaller;
 use Automattic\WooCommerce\SubscriptionsLite\Cart\CartPlanHooks;
 use Automattic\WooCommerce\SubscriptionsLite\Checkout\ContractCreationHandler;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Cancellation;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Hold;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
+use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\RenewalOrderBuilder;
+use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\RenewalProcessor;
+use DateTimeImmutable;
+use DateTimeZone;
+use RuntimeException;
 use WC_Order;
 use WC_Product_Simple;
 use WP_UnitTestCase;
@@ -71,6 +79,43 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 		'postcode'   => 'SW1A 1AA',
 		'country'    => 'GB',
 	];
+
+	/**
+	 * Messages the WooCommerce logger received since {@see self::capture_log()}.
+	 *
+	 * @var array<int, string>
+	 */
+	protected $logged_messages = [];
+
+	/**
+	 * Record every message the WooCommerce logger receives from now on into
+	 * {@see self::$logged_messages}.
+	 */
+	protected function capture_log(): void {
+		$this->logged_messages = [];
+		add_filter(
+			'woocommerce_logger_log_message',
+			function ( $message ) {
+				$this->logged_messages[] = (string) $message;
+				return $message;
+			}
+		);
+	}
+
+	/**
+	 * Whether a captured log message contains `$needle`.
+	 *
+	 * @param string $needle Text to look for.
+	 */
+	protected function has_logged( string $needle ): bool {
+		foreach ( $this->logged_messages as $message ) {
+			if ( false !== strpos( $message, $needle ) ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
 
 	/**
 	 * Create a customer user.
@@ -344,24 +389,200 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 	}
 
 	/**
-	 * Create a renewal order linked to a contract, the shape the related-orders
-	 * read queries for.
+	 * Create a renewal order for a contract and append the cycle it bills, the shape the
+	 * related-orders and unpaid-renewal reads query for.
 	 *
 	 * @param int                  $contract_id Contract id.
 	 * @param int                  $customer_id Owning customer.
-	 * @param array<string, mixed> $args        total, status, date_created.
+	 * @param array<string, mixed> $args        total, status (order), date_created, cycle_status (default billed).
 	 */
 	protected function create_renewal_order( int $contract_id, int $customer_id, array $args = [] ): WC_Order {
-		$order = wc_create_order( [ 'customer_id' => $customer_id ] );
+		$order = wc_create_order(
+			[
+				'customer_id' => $customer_id,
+				'created_via' => RenewalOrderBuilder::CREATED_VIA,
+			]
+		);
 		$order->set_total( (string) ( $args['total'] ?? '19.99' ) );
 		$order->set_status( (string) ( $args['status'] ?? 'completed' ) );
 		if ( isset( $args['date_created'] ) ) {
 			$order->set_date_created( (string) $args['date_created'] );
 		}
-		$order->update_meta_data( OrderLinkage::META_CONTRACT_ID, (string) $contract_id );
-		$order->update_meta_data( OrderLinkage::META_RELATION_TYPE, 'renewal' );
 		$order->save();
 
+		$utc        = new DateTimeZone( 'UTC' );
+		$head       = Contracts::get_cycles( $contract_id, 1 )[0] ?? null;
+		$starts_at  = null === $head ? new DateTimeImmutable( '2026-01-15 00:00:00', $utc ) : new DateTimeImmutable( $head->get_ends_at_gmt(), $utc );
+		$order_id   = $order->get_id();
+		$cycle_args = [
+			'status'         => (string) ( $args['cycle_status'] ?? CycleStatus::BILLED ),
+			'count'          => null === $head ? 1 : (int) $head->get_count() + 1,
+			'starts_at_gmt'  => $starts_at,
+			'ends_at_gmt'    => $starts_at->modify( '+1 month' ),
+			'expected_total' => $order->get_total(),
+			'currency'       => 'USD',
+			'order_id'       => $order_id,
+		];
+		Contracts::add_cycle( $contract_id, $cycle_args );
+
 		return $order;
+	}
+
+	/**
+	 * Outcome of the stub charge handler installed by {@see self::support_engine_charges()}:
+	 * `paid`, `failed`, `on-hold` (an asynchronous charge), `none` (the order is left pending)
+	 * or `throw` (the gateway throws, leaving the order pending).
+	 *
+	 * @var string
+	 */
+	protected $charge_outcome = 'paid';
+
+	/**
+	 * Orders the stub charge handler received, in call order.
+	 *
+	 * @var array<int, int>
+	 */
+	protected $charged_order_ids = [];
+
+	/**
+	 * Gateways the stub charge handler is installed for.
+	 *
+	 * @var array<string, bool>
+	 */
+	private $engine_charge_gateways = [];
+
+	/**
+	 * Make `$gateway` support engine charges and automatic renewal payments (the engine
+	 * feature and {@see RenewalProcessor::GATEWAY_RENEWAL_FEATURE}) and answer each charge
+	 * with `$outcome` (see {@see self::$charge_outcome}). Calling it again only changes the
+	 * outcome. The hooks are restored with the rest after the test.
+	 *
+	 * @param string $gateway Gateway id (a core gateway such as `cod`).
+	 * @param string $outcome Charge outcome.
+	 */
+	protected function support_engine_charges( string $gateway, string $outcome = 'paid' ): void {
+		$this->charge_outcome = $outcome;
+		if ( isset( $this->engine_charge_gateways[ $gateway ] ) ) {
+			return;
+		}
+		$this->engine_charge_gateways[ $gateway ] = true;
+
+		add_filter(
+			'woocommerce_payment_gateway_supports',
+			static function ( $supported, $feature, $payment_gateway ) use ( $gateway ) {
+				if ( in_array( $feature, [ Payments::GATEWAY_FEATURE, RenewalProcessor::GATEWAY_RENEWAL_FEATURE ], true ) && is_object( $payment_gateway ) && $gateway === $payment_gateway->id ) {
+					return true;
+				}
+				return $supported;
+			},
+			10,
+			3
+		);
+		add_action(
+			'woocommerce_subscriptions_engine_scheduled_payment_' . $gateway,
+			function ( $order ): void {
+				if ( ! $order instanceof WC_Order ) {
+					return;
+				}
+				$this->charged_order_ids[] = $order->get_id();
+				switch ( $this->charge_outcome ) {
+					case 'paid':
+						$order->payment_complete();
+						break;
+					case 'failed':
+						$order->update_status( 'failed' );
+						break;
+					case 'on-hold':
+						$order->update_status( 'on-hold' );
+						break;
+					case 'throw':
+						throw new RuntimeException( 'The gateway is unreachable.' );
+					default:
+						break;
+				}
+			}
+		);
+	}
+
+	/**
+	 * Record every engine charge request for `$gateway` in {@see self::$charged_order_ids}
+	 * while the gateway does not support engine charges, so a test can prove none was made.
+	 * The gateway answers the feature check only inside `Payments::process_scheduled_payment()` (so the
+	 * charge reaches the spy should anyone call it); Lite's own check still reads no.
+	 *
+	 * @param string $gateway Gateway id.
+	 */
+	protected function spy_charge_attempts( string $gateway ): void {
+		add_filter(
+			'woocommerce_payment_gateway_supports',
+			static function ( $supported, $feature, $payment_gateway ) use ( $gateway ) {
+				if ( Payments::GATEWAY_FEATURE === $feature && is_object( $payment_gateway ) && $gateway === $payment_gateway->id && self::inside_charge() ) {
+					return true;
+				}
+				return $supported;
+			},
+			10,
+			3
+		);
+		add_action(
+			'woocommerce_subscriptions_engine_scheduled_payment_' . $gateway,
+			function ( $order ): void {
+				if ( $order instanceof WC_Order ) {
+					$this->charged_order_ids[] = $order->get_id();
+				}
+			}
+		);
+	}
+
+	/**
+	 * Whether `Payments::process_scheduled_payment()` is on the call stack.
+	 */
+	private static function inside_charge(): bool {
+		// phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_debug_backtrace -- a test spy reads its caller.
+		foreach ( debug_backtrace( DEBUG_BACKTRACE_IGNORE_ARGS ) as $frame ) {
+			if ( Payments::class === ( $frame['class'] ?? '' ) && 'process_scheduled_payment' === $frame['function'] ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	/**
+	 * How many charges the stub charge handler received.
+	 */
+	protected function charge_count(): int {
+		return count( $this->charged_order_ids );
+	}
+
+	/**
+	 * Run one engine due-dispatch batch at `$now`.
+	 *
+	 * @param DateTimeImmutable $now The scan moment.
+	 * @return int The number of contracts whose owner was notified.
+	 */
+	protected function run_due_dispatch( DateTimeImmutable $now ): int {
+		return ( new DueDispatcher() )->run_batch( $now );
+	}
+
+	/**
+	 * Run one engine due-dispatch batch once the dispatch claims taken at `$now` have expired.
+	 * Claims are measured on the database clock, so the session clock is moved past the claim
+	 * along with the scan moment, then restored.
+	 *
+	 * @param DateTimeImmutable $now The moment the earlier batch ran.
+	 * @return int The number of contracts whose owner was notified.
+	 */
+	protected function run_due_dispatch_after_claims_expire( DateTimeImmutable $now ): int {
+		global $wpdb;
+
+		$later = $now->modify( sprintf( '+%d seconds', DueDispatcher::CLAIM_TTL_SECONDS + 60 ) );
+		$wpdb->query( $wpdb->prepare( 'SET timestamp = %d', $later->getTimestamp() ) ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+
+		try {
+			return $this->run_due_dispatch( $later );
+		} finally {
+			$wpdb->query( 'SET timestamp = DEFAULT' ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+		}
 	}
 }

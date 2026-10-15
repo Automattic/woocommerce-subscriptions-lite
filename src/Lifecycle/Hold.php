@@ -4,7 +4,14 @@
  *
  * Moves the contract active -> on-hold and clears its next-due moment, which is what
  * stops renewals; the cleared moment is kept as the {@see HoldAnchor} so
- * {@see Reactivation} can resume from it.
+ * {@see Reactivation} can resume from it. A contract with no due moment (a renewal charge
+ * still in flight, or a renewal parked for a missing billing policy) is anchored on the end
+ * of its newest period instead, so every customer hold carries an anchor: that is what tells
+ * it apart from Lite's own hold, and a payment that lands during it keeps it on hold.
+ *
+ * Lite's own hold ({@see self::system_hold()}) is placed while a renewal waits to be paid: a
+ * failed or unbuildable renewal, a dead renewal order or a manual renewal order. It drops the
+ * anchor instead, so the hold ends when the unpaid renewal is paid.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Lifecycle
  */
@@ -48,7 +55,7 @@ final class Hold {
 		$held_contract = $contract;
 		if ( ContractStatus::ACTIVE === $status ) {
 			// Anchor first, so a reader that sees the contract on hold always finds it.
-			HoldAnchor::store( $contract_id, $contract->get_next_payment_gmt() );
+			HoldAnchor::store( $contract_id, $contract->get_next_payment_gmt() ?? self::newest_period_end( $contract_id ) );
 
 			$held_contract = Contracts::update(
 				$contract_id,
@@ -70,5 +77,35 @@ final class Hold {
 		do_action( 'woocommerce_subscriptions_lite_contract_held', $held_contract );
 
 		return $held_contract;
+	}
+
+	/**
+	 * Place Lite's hold for an unpaid renewal: on hold with no due moment, and no hold anchor.
+	 * No checks and no `contract_held` action; the renewal flow calling it has decided. The
+	 * anchor goes first, so a reader that sees the contract on hold never finds a stale one.
+	 *
+	 * @param int                  $contract_id Contract id.
+	 * @param array<string, mixed> $fields      Further contract fields to write with the hold.
+	 */
+	public static function system_hold( int $contract_id, array $fields = [] ): void {
+		HoldAnchor::clear( $contract_id );
+		Contracts::update(
+			$contract_id,
+			[
+				'status'           => ContractStatus::ON_HOLD,
+				'next_payment_gmt' => null,
+			] + $fields
+		);
+	}
+
+	/**
+	 * The period end of the contract's newest cycle, or null when it has none.
+	 *
+	 * @param int $contract_id Contract id.
+	 */
+	private static function newest_period_end( int $contract_id ): ?string {
+		$head = Contracts::get_cycles( $contract_id, 1 )[0] ?? null;
+
+		return null === $head ? null : $head->get_ends_at_gmt();
 	}
 }

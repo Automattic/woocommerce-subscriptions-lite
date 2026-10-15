@@ -23,6 +23,7 @@ use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\PlanRepositor
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\SchemaInstaller;
 use Automattic\WooCommerce\SubscriptionsLite\Checkout\ContractCreationHandler;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
+use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\RenewalOrderBuilder;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ApplicabilityStore;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ProductApplicability;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
@@ -287,6 +288,19 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 
 		$this->assertCount( 1, Contracts::list_for_customer( $customer_id ), 'A second paid transition creates no second contract.' );
 		$this->assertSame( '', (string) wc_get_order( $order->get_id() )->get_meta( '_subscription_contract_id' ), 'The guard reads the contract by origin order, not order meta.' );
+	}
+
+	public function test_a_paid_renewal_order_with_plan_lines_creates_nothing(): void {
+		$customer_id = $this->create_customer();
+		$order       = $this->create_subscription_order( $customer_id );
+		$this->apply_and_stamp( $order, $this->make_plan() );
+		$order->set_created_via( RenewalOrderBuilder::CREATED_VIA );
+		$order->save();
+
+		$order->update_status( 'processing' );
+
+		$this->assertSame( [], Contracts::list_for_customer( $customer_id ) );
+		$this->assertSame( '', $this->deferral_reason( $order ) );
 	}
 
 	public function test_an_order_without_plan_items_creates_nothing(): void {

@@ -14,6 +14,7 @@ declare( strict_types=1 );
 namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\CustomerPortal;
 
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
+use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\CycleStatus;
 use Automattic\WooCommerce\SubscriptionsLite\CustomerPortal\Endpoints;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
@@ -68,9 +69,7 @@ final class EndpointsRenderTest extends LiteIntegrationTestCase {
 
 	/**
 	 * Set (or clear) a contract's next payment date directly, so each on-hold shape is
-	 * seeded explicitly rather than depending on what the hold flow does with the
-	 * date: no next payment is the "admin action" shape (no missed charge pending); a
-	 * next payment is the failed-payment retry shape.
+	 * seeded explicitly rather than depending on what the hold flow does with the date.
 	 *
 	 * @param int         $contract_id      Contract id.
 	 * @param string|null $next_payment_gmt GMT next payment date, or null to clear.
@@ -249,8 +248,86 @@ final class EndpointsRenderTest extends LiteIntegrationTestCase {
 	}
 
 	public function test_on_hold_retry_path_shows_needs_payment_notice(): void {
-		// On hold with a next payment date: the failed-payment retry shape, where
-		// reactivating without a payment fix is unsafe. Seeded explicitly.
+		// A failed renewal: the contract is on hold with no date, like a customer hold;
+		// the unpaid renewal is what shows the payment prompt and hides reactivate.
+		$contract_id = $this->create_contract( $this->customer_id, [ 'status' => 'on-hold' ] );
+		$order       = $this->create_renewal_order(
+			$contract_id,
+			$this->customer_id,
+			[
+				'status'       => 'failed',
+				'cycle_status' => CycleStatus::FAILED,
+			]
+		);
+
+		$endpoints = new Endpoints();
+		$html      = $this->capture(
+			static function () use ( $endpoints, $contract_id ): void {
+				$endpoints->render_detail( $contract_id );
+			}
+		);
+
+		$this->assertStringContainsString( 'subscription-needs-payment-notice', $html );
+		$this->assertStringContainsString( 'href="' . esc_url( $order->get_checkout_payment_url() ) . '"', $html );
+		$message_at = strpos( $html, 'subscription-needs-payment-notice__message' );
+		$pay_at     = strpos( $html, 'subscription-needs-payment-notice__pay' );
+		$this->assertNotFalse( $message_at );
+		$this->assertNotFalse( $pay_at );
+		$this->assertLessThan( $pay_at, $message_at, 'The explanation comes before the Pay now link.' );
+		$this->assertStringNotContainsString( 'subscription-needs-payment-notice__contact', $html );
+		$this->assertStringNotContainsString( 'actions.submitReactivate', $html );
+	}
+
+	public function test_an_unpaid_renewal_whose_order_was_cancelled_asks_the_customer_to_get_in_touch(): void {
+		$contract_id = $this->create_contract( $this->customer_id, [ 'status' => 'on-hold' ] );
+		$order       = $this->create_renewal_order(
+			$contract_id,
+			$this->customer_id,
+			[
+				'status'       => 'failed',
+				'cycle_status' => CycleStatus::FAILED,
+			]
+		);
+		$order->update_status( 'cancelled' );
+
+		$endpoints = new Endpoints();
+		$html      = $this->capture(
+			static function () use ( $endpoints, $contract_id ): void {
+				$endpoints->render_detail( $contract_id );
+			}
+		);
+
+		$this->assertStringContainsString( 'subscription-needs-payment-notice', $html );
+		$this->assertStringNotContainsString( esc_url( $order->get_checkout_payment_url() ), $html );
+		$this->assertStringNotContainsString( 'subscription-needs-payment-notice__pay', $html );
+		$this->assertStringContainsString( 'subscription-needs-payment-notice__contact', $html );
+	}
+
+	public function test_a_customer_hold_over_an_async_charge_says_the_payment_awaits_confirmation(): void {
+		$contract_id = $this->create_contract( $this->customer_id, [ 'status' => 'on-hold' ] );
+		$this->create_renewal_order(
+			$contract_id,
+			$this->customer_id,
+			[
+				'status'       => 'on-hold',
+				'cycle_status' => CycleStatus::PROCESSING,
+			]
+		);
+
+		$endpoints = new Endpoints();
+		$html      = $this->capture(
+			static function () use ( $endpoints, $contract_id ): void {
+				$endpoints->render_detail( $contract_id );
+			}
+		);
+
+		$this->assertStringContainsString( 'subscription-needs-payment-notice--awaiting-confirmation', $html );
+		$this->assertStringNotContainsString( 'subscription-needs-payment-notice__pay', $html );
+		$this->assertStringNotContainsString( 'subscription-needs-payment-notice__contact', $html );
+		$this->assertStringNotContainsString( 'actions.submitReactivate', $html, 'Reactivate waits until the charge settles.' );
+	}
+
+	public function test_a_customer_hold_with_a_next_payment_shows_reactivate_and_no_notice(): void {
 		$contract_id = $this->create_contract( $this->customer_id, [ 'status' => 'on-hold' ] );
 		$this->set_next_payment( $contract_id, '2099-02-01 00:00:00' );
 
@@ -261,8 +338,8 @@ final class EndpointsRenderTest extends LiteIntegrationTestCase {
 			}
 		);
 
-		$this->assertStringContainsString( 'subscription-needs-payment-notice', $html );
-		$this->assertStringNotContainsString( 'actions.submitReactivate', $html );
+		$this->assertStringContainsString( 'data-wp-on--click="actions.submitReactivate"', $html );
+		$this->assertStringNotContainsString( 'subscription-needs-payment-notice', $html );
 	}
 
 	public function test_pending_cancellation_hides_all_lifecycle_actions(): void {

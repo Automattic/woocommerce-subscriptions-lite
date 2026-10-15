@@ -20,10 +20,10 @@
  *  5. `woocommerce_cart_item_price` / `_subtotal` - append the cadence to the
  *     classic price/subtotal ("$21.60 / month").
  *  6. `woocommerce_checkout_create_order_line_item` - copy `_wcsl_selling_plan_id`
- *     onto the order line item; `Checkout\ContractCreationHandler` (WOOSUBS-1774)
+ *     onto the order line item; `Checkout\ContractCreationHandler`
  *     reads it. Fires for both classic and Blocks checkout.
  *
- * Mixed-cart guards are out of scope (WOOSUBS-1775): this module keeps mixed
+ * Mixed-cart guards are out of scope: this module keeps mixed
  * carts working, it does not police them.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Cart

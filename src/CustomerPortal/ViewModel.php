@@ -76,17 +76,18 @@ final class ViewModel {
 	 * Carries the per-status logic: the dynamic date-row label/value, the
 	 * recurring summary, the payment-method line, and the action-visibility
 	 * flags (`cancel_visible`, `hold_visible`, `reactivate_visible`,
-	 * `needs_payment_notice`, `at_period_end`).
+	 * `needs_payment_notice` with its `pay_url` and `payment_in_flight`, `at_period_end`).
 	 *
 	 * @param array<string, mixed>             $contract       Domain-ish contract array.
 	 * @param array<int, array<string, mixed>> $related_orders Domain-ish related-order arrays.
 	 * @return array<string, mixed> Presentation detail view-model.
 	 */
 	public function build_detail( array $contract, array $related_orders = [] ): array {
-		$status           = (string) ( $contract['status'] ?? '' );
-		$has_next_payment = '' !== $this->to_string( $contract['next_payment_gmt'] ?? null );
-		$is_lite          = Package::EXTENSION_SLUG === ( $contract['extension_slug'] ?? '' );
-		$payment_method   = $this->normalize_payment_method( $contract['payment_method'] ?? [] );
+		$status             = (string) ( $contract['status'] ?? '' );
+		$has_unpaid_renewal = ! empty( $contract['has_unpaid_renewal'] );
+		$is_lite            = Package::EXTENSION_SLUG === ( $contract['extension_slug'] ?? '' );
+		$payment_method     = $this->normalize_payment_method( $contract['payment_method'] ?? [] );
+		$needs_payment      = $is_lite && CustomerActionRules::needs_payment( $status, $has_unpaid_renewal );
 
 		return [
 			'id'                     => (int) ( $contract['id'] ?? 0 ),
@@ -101,8 +102,11 @@ final class ViewModel {
 			'payment_method_expires' => $payment_method['expires'],
 			'cancel_visible'         => $is_lite && CustomerActionRules::can_cancel( $status ),
 			'hold_visible'           => $is_lite && CustomerActionRules::can_hold( $status ),
-			'reactivate_visible'     => $is_lite && CustomerActionRules::can_reactivate( $status, $has_next_payment ),
-			'needs_payment_notice'   => $is_lite && CustomerActionRules::needs_payment( $status, $has_next_payment ),
+			'reactivate_visible'     => $is_lite && CustomerActionRules::can_reactivate( $status, $has_unpaid_renewal ),
+			'needs_payment_notice'   => $needs_payment,
+			// An asynchronous charge still awaiting confirmation: nothing to pay or arrange yet.
+			'payment_in_flight'      => $needs_payment && ! empty( $contract['unpaid_renewal_in_flight'] ),
+			'pay_url'                => $needs_payment && empty( $contract['unpaid_renewal_in_flight'] ) ? $this->to_string( $contract['unpaid_order_pay_url'] ?? null ) : '',
 			// Cancel mode the action forwards: active cancels at period end
 			// (graceful -> pending-cancellation); on-hold cancels immediately
 			// (no period to ride out -> cancelled).
