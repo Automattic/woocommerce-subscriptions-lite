@@ -13,6 +13,8 @@
  * failed or unbuildable renewal, a dead renewal order or a manual renewal order. It drops the
  * anchor instead, so the hold ends when the unpaid renewal is paid.
  *
+ * Both run under the engine's contract lock ({@see HeldLocks}).
+ *
  * @package Automattic\WooCommerce\SubscriptionsLite\Lifecycle
  */
 
@@ -20,6 +22,9 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Lifecycle;
 
+use LogicException;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\ContractLock;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\ContractLockedException;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
@@ -33,17 +38,45 @@ defined( 'ABSPATH' ) || exit;
 final class Hold {
 
 	/**
-	 * Hold an active contract. Holding an on-hold contract writes nothing and still
+	 * Operation label of the customer hold's contract lock.
+	 */
+	public const OPERATION = 'hold';
+
+	/**
+	 * Hold an active contract under its lock: read and decide after acquiring, then the
+	 * anchor, then the status (last). Holding an on-hold contract writes nothing and still
 	 * succeeds; the current cycle is never touched. A failed anchor write throws a
 	 * `RuntimeException` before anything is disarmed.
 	 *
 	 * @param int $contract_id Contract id.
 	 * @return ContractView|null The held contract, or null when it does not exist or is not Lite's.
 	 * @throws LifecycleNotAllowedException If the contract is neither active nor on hold.
+	 * @throws ContractLockedException If another operation holds the contract's lock.
 	 */
 	public function hold( int $contract_id ): ?ContractView {
+		if ( ! self::is_lite_contract( $contract_id ) ) {
+			return null;
+		}
+
+		return HeldLocks::run(
+			$contract_id,
+			self::OPERATION,
+			static function ( ContractLock $lock ) use ( $contract_id ): ?ContractView {
+				return self::hold_locked( $contract_id, $lock );
+			}
+		);
+	}
+
+	/**
+	 * The locked section of {@see self::hold()}.
+	 *
+	 * @param int          $contract_id Contract id.
+	 * @param ContractLock $lock        The held lock.
+	 * @throws LifecycleNotAllowedException If the contract is neither active nor on hold.
+	 */
+	private static function hold_locked( int $contract_id, ContractLock $lock ): ?ContractView {
 		$contract = Contracts::get( $contract_id );
-		if ( null === $contract || Package::EXTENSION_SLUG !== $contract->get_extension_slug() ) {
+		if ( null === $contract ) {
 			return null;
 		}
 
@@ -55,14 +88,15 @@ final class Hold {
 		$held_contract = $contract;
 		if ( ContractStatus::ACTIVE === $status ) {
 			// Anchor first, so a reader that sees the contract on hold always finds it.
-			HoldAnchor::store( $contract_id, $contract->get_next_payment_gmt() ?? self::newest_period_end( $contract_id ) );
+			HoldAnchor::store( $contract_id, $contract->get_next_payment_gmt() ?? self::newest_period_end( $contract_id ), $lock );
 
 			$held_contract = Contracts::update(
 				$contract_id,
 				[
 					'status'           => ContractStatus::ON_HOLD,
 					'next_payment_gmt' => null,
-				]
+				],
+				$lock
 			);
 			if ( null === $held_contract ) {
 				return null;
@@ -70,7 +104,8 @@ final class Hold {
 		}
 
 		/**
-		 * Fires after a contract is put on hold, also for a repeated hold.
+		 * Fires after a contract is put on hold, also for a repeated hold. Runs under the
+		 * contract lock: an unlocked engine write to this contract from a callback is refused.
 		 *
 		 * @param ContractView $held_contract The held contract.
 		 */
@@ -81,21 +116,38 @@ final class Hold {
 
 	/**
 	 * Place Lite's hold for an unpaid renewal: on hold with no due moment, and no hold anchor.
-	 * No checks and no `contract_held` action; the renewal flow calling it has decided. The
-	 * anchor goes first, so a reader that sees the contract on hold never finds a stale one.
+	 * No checks and no `contract_held` action; the renewal flow calling it has decided, under
+	 * the lock it holds in this request. The anchor goes first, so a reader that sees the
+	 * contract on hold never finds a stale one.
 	 *
 	 * @param int                  $contract_id Contract id.
 	 * @param array<string, mixed> $fields      Further contract fields to write with the hold.
+	 * @throws LogicException If no lock on the contract is held in this request.
 	 */
 	public static function system_hold( int $contract_id, array $fields = [] ): void {
-		HoldAnchor::clear( $contract_id );
+		$lock = HeldLocks::require_lock( $contract_id );
+
+		HoldAnchor::clear( $contract_id, $lock );
 		Contracts::update(
 			$contract_id,
 			[
 				'status'           => ContractStatus::ON_HOLD,
 				'next_payment_gmt' => null,
-			] + $fields
+			] + $fields,
+			$lock
 		);
+	}
+
+	/**
+	 * Whether the contract exists and is Lite's. Ownership never changes, so this read
+	 * decides nothing a concurrent writer can invalidate.
+	 *
+	 * @param int $contract_id Contract id.
+	 */
+	public static function is_lite_contract( int $contract_id ): bool {
+		$contract = Contracts::get( $contract_id );
+
+		return null !== $contract && Package::EXTENSION_SLUG === $contract->get_extension_slug();
 	}
 
 	/**

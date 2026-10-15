@@ -10,11 +10,14 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Lifecycle;
 
+use LogicException;
 use RuntimeException;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\ContractLockedException;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\SchemaInstaller;
+use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\HeldLocks;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Hold;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\HoldAnchor;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\LifecycleNotAllowedException;
@@ -133,7 +136,7 @@ final class HoldTest extends LiteIntegrationTestCase {
 		$contract_id = $this->seed_contract();
 		$meta_table  = SchemaInstaller::get_table_name( SchemaInstaller::TABLE_CONTRACT_META );
 		$break       = static function ( string $query ) use ( $meta_table ): string {
-			return 0 === strpos( $query, "INSERT INTO `{$meta_table}`" ) ? 'SELECT broken syntax (' : $query;
+			return 1 === preg_match( "/^INSERT INTO `?{$meta_table}`? /", $query ) ? 'SELECT broken syntax (' : $query;
 		};
 		add_filter( 'query', $break );
 
@@ -208,5 +211,57 @@ final class HoldTest extends LiteIntegrationTestCase {
 
 		$this->assertNull( ( new Hold() )->hold( $contract_id ) );
 		$this->assertSame( ContractStatus::ACTIVE, $this->get_contract( $contract_id )->get_status() );
+	}
+
+	public function test_hold_leaves_the_contract_unlocked(): void {
+		$contract_id = $this->seed_contract();
+
+		( new Hold() )->hold( $contract_id );
+
+		$this->assertNull( $this->get_contract( $contract_id )->get_lock_state() );
+	}
+
+	public function test_hold_while_another_operation_holds_the_lock_writes_nothing(): void {
+		$contract_id = $this->seed_contract();
+		$this->hold_lock( $contract_id, 'renewal' );
+
+		try {
+			( new Hold() )->hold( $contract_id );
+			$this->fail( 'Expected ContractLockedException.' );
+		} catch ( ContractLockedException $e ) {
+			$this->assertSame( 'renewal', $e->get_operation() );
+		}
+
+		$stored = $this->get_contract( $contract_id );
+		$this->assertSame( ContractStatus::ACTIVE, $stored->get_status() );
+		$this->assertSame( '2099-01-01 00:00:00', $stored->get_next_payment_gmt() );
+		$this->assertSame( '', $this->get_stored_anchor( $contract_id ) );
+	}
+
+	public function test_system_hold_without_a_held_lock_is_a_programming_error(): void {
+		$contract_id = $this->seed_contract();
+
+		$this->expectException( LogicException::class );
+
+		Hold::system_hold( $contract_id );
+	}
+
+	public function test_system_hold_writes_with_the_held_lock(): void {
+		$contract_id = $this->seed_contract();
+		( new Hold() )->hold( $contract_id );
+
+		HeldLocks::run(
+			$contract_id,
+			'renewal',
+			static function () use ( $contract_id ): void {
+				Hold::system_hold( $contract_id, [ 'last_attempt_gmt' => '2026-02-15 00:00:00' ] );
+			}
+		);
+
+		$stored = $this->get_contract( $contract_id );
+		$this->assertSame( ContractStatus::ON_HOLD, $stored->get_status() );
+		$this->assertNull( $stored->get_next_payment_gmt() );
+		$this->assertSame( '2026-02-15 00:00:00', $stored->get_last_attempt_gmt() );
+		$this->assertSame( '', $this->get_stored_anchor( $contract_id ), 'The customer anchor is dropped.' );
 	}
 }

@@ -349,7 +349,7 @@ final class CustomerActionsTest extends LiteIntegrationTestCase {
 		$contract_id = $this->seed_owned_contract();
 		$meta_table  = SchemaInstaller::get_table_name( SchemaInstaller::TABLE_CONTRACT_META );
 		$break       = static function ( string $query ) use ( $meta_table ): string {
-			return 0 === strpos( $query, "INSERT INTO `{$meta_table}`" ) ? 'SELECT broken syntax (' : $query;
+			return 1 === preg_match( "/^INSERT INTO `?{$meta_table}`? /", $query ) ? 'SELECT broken syntax (' : $query;
 		};
 		add_filter( 'query', $break );
 

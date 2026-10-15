@@ -17,6 +17,8 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Lifecycle;
 use DateTimeImmutable;
 use DateTimeZone;
 use RuntimeException;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\ContractLock;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\ContractLockedException;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 
 defined( 'ABSPATH' ) || exit;
@@ -36,17 +38,21 @@ final class HoldAnchor {
 	/**
 	 * Store `$next_payment_gmt` as the anchor, or remove the anchor when it is null.
 	 *
-	 * @param int         $contract_id      Contract id.
-	 * @param string|null $next_payment_gmt The next-due moment the hold clears.
+	 * @param int          $contract_id      Contract id.
+	 * @param string|null  $next_payment_gmt The next-due moment the hold clears.
+	 * @param ContractLock $lock             The caller's lock on the contract.
+	 * @throws ContractLockedException If the lock was lost.
 	 * @throws RuntimeException If the anchor could not be stored.
 	 */
-	public static function store( int $contract_id, ?string $next_payment_gmt ): void {
+	public static function store( int $contract_id, ?string $next_payment_gmt, ContractLock $lock ): void {
 		try {
 			if ( null === $next_payment_gmt ) {
-				Contracts::delete_meta( $contract_id, self::META_KEY );
+				Contracts::delete_meta( $contract_id, self::META_KEY, null, $lock );
 			} else {
-				Contracts::update_meta( $contract_id, self::META_KEY, $next_payment_gmt );
+				Contracts::update_meta( $contract_id, self::META_KEY, $next_payment_gmt, null, $lock );
 			}
+		} catch ( ContractLockedException $e ) {
+			throw $e;
 		} catch ( RuntimeException $e ) {
 			throw new RuntimeException( 'The hold anchor could not be stored.', 0, $e ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- the previous exception is not output.
 		}
@@ -84,15 +90,17 @@ final class HoldAnchor {
 	}
 
 	/**
-	 * Remove the anchor. Best effort: a failure is logged, not thrown. A leftover anchor is
-	 * not harmless: on a held contract it reads as a customer hold, so a renewal paid later
-	 * keeps the contract on hold instead of resuming it; the log is how that is traced.
+	 * Remove the anchor. Best effort: a failure (a lost lock included) is logged, not thrown.
+	 * A leftover anchor is not harmless: on a held contract it reads as a customer hold, so a
+	 * renewal paid later keeps the contract on hold instead of resuming it; the log is how
+	 * that is traced.
 	 *
-	 * @param int $contract_id Contract id.
+	 * @param int          $contract_id Contract id.
+	 * @param ContractLock $lock        The caller's lock on the contract.
 	 */
-	public static function clear( int $contract_id ): void {
+	public static function clear( int $contract_id, ContractLock $lock ): void {
 		try {
-			Contracts::delete_meta( $contract_id, self::META_KEY );
+			Contracts::delete_meta( $contract_id, self::META_KEY, null, $lock );
 		} catch ( RuntimeException $e ) {
 			wc_get_logger()->warning(
 				sprintf( 'HoldAnchor: the hold anchor of contract %d could not be cleared: %s', $contract_id, $e->getMessage() ),
