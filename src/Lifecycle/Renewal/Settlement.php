@@ -23,7 +23,8 @@
  * gateway status change inside a renewal charge) or its own. The contract and cycle are
  * re-read after acquiring. When another operation holds the lock, the settlement is retried
  * through Action Scheduler ({@see self::RETRY_HOOK}), so a paid order is never left
- * unrecorded. A paid order that ends linked to no payable cycle is flagged for a refund.
+ * unrecorded; the same action guards every renewal charge ({@see self::guard_charge()}). A
+ * paid order that ends linked to no payable cycle is flagged for a refund.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal
  */
@@ -187,20 +188,35 @@ final class Settlement {
 	}
 
 	/**
-	 * Schedule a settlement action unless one with the same arguments is pending. Only pending
-	 * actions count: a running retry refused again must schedule the next one.
+	 * Guard a renewal charge: schedule the order's settlement for after the charging run's lock
+	 * expires. Should the request die between the charge and its settlement, the action records
+	 * the outcome, also on a held contract that has no due moment; on a settled order it writes
+	 * nothing, so it is never unscheduled.
+	 *
+	 * @param int $order_id The renewal order about to be charged.
+	 */
+	public static function guard_charge( int $order_id ): void {
+		self::schedule_settlement( [ 'order_id' => $order_id ], ContractLock::TTL_SECONDS + self::RETRY_DELAY_SECONDS );
+	}
+
+	/**
+	 * Schedule a settlement action unless one with the same arguments is pending to run by
+	 * then. Only pending actions count: a running retry refused again schedules the next one.
 	 *
 	 * @param array<string, mixed> $args          Action arguments.
 	 * @param int                  $delay_seconds Seconds from now.
 	 */
 	private static function schedule_settlement( array $args, int $delay_seconds ): void {
+		$run_at  = time() + $delay_seconds;
 		$pending = as_get_scheduled_actions(
 			[
-				'hook'     => self::RETRY_HOOK,
-				'args'     => $args,
-				'group'    => self::RETRY_GROUP,
-				'status'   => ActionScheduler_Store::STATUS_PENDING,
-				'per_page' => 1,
+				'hook'         => self::RETRY_HOOK,
+				'args'         => $args,
+				'group'        => self::RETRY_GROUP,
+				'status'       => ActionScheduler_Store::STATUS_PENDING,
+				'date'         => as_get_datetime_object( $run_at ),
+				'date_compare' => '<=',
+				'per_page'     => 1,
 			],
 			'ids'
 		);
@@ -208,7 +224,7 @@ final class Settlement {
 			return;
 		}
 
-		as_schedule_single_action( time() + $delay_seconds, self::RETRY_HOOK, $args, self::RETRY_GROUP );
+		as_schedule_single_action( $run_at, self::RETRY_HOOK, $args, self::RETRY_GROUP );
 	}
 
 	/**

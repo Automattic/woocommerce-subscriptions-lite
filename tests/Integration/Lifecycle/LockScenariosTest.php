@@ -18,9 +18,12 @@ use Automattic\WooCommerce\SubscriptionsEngine\Api\View\CycleView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\CycleStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\SchemaInstaller;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\ContractLock;
 use Automattic\WooCommerce\SubscriptionsLite\Checkout\ContractCreationHandler;
+use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\HeldLocks;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Reactivation;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\RenewalOrderBuilder;
+use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\RenewalProcessor;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\Settlement;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
@@ -349,5 +352,107 @@ final class LockScenariosTest extends LiteIntegrationTestCase {
 
 		$this->assertSame( CycleStatus::BILLED, $this->head( $contract_id )->get_status() );
 		$this->assertSame( ContractStatus::ACTIVE, $this->get_contract( $contract_id )->get_status() );
+	}
+
+	/**
+	 * The scheduled moments of the pending settlement actions for an order.
+	 *
+	 * @param int $order_id Order id.
+	 * @return array<int, int> Unix timestamps.
+	 */
+	private function pending_settlements( int $order_id ): array {
+		$actions = as_get_scheduled_actions(
+			[
+				'hook'   => Settlement::RETRY_HOOK,
+				'args'   => [ 'order_id' => $order_id ],
+				'group'  => Settlement::RETRY_GROUP,
+				'status' => \ActionScheduler_Store::STATUS_PENDING,
+			]
+		);
+
+		return array_values(
+			array_map(
+				static function ( $action ): int {
+					return (int) $action->get_schedule()->get_date()->getTimestamp();
+				},
+				$actions
+			)
+		);
+	}
+
+	/**
+	 * A Renew now charge on a held contract (no due moment) whose request dies after the
+	 * gateway marked the order paid is settled by the guard scheduled before the charge.
+	 */
+	public function test_a_charge_cut_short_on_a_held_contract_is_settled_by_its_guard(): void {
+		$this->support_engine_charges( 'cod', 'none' );
+		$contract_id = $this->make_due_contract( $this->create_customer() );
+		$this->assertSame( 1, $this->run_due_dispatch( $this->now() ) );
+		$this->assertSame( ContractStatus::ON_HOLD, $this->get_contract( $contract_id )->get_status(), 'Left for payment.' );
+		$order = $this->renewal_orders()[0];
+
+		$this->support_engine_charges( 'cod', 'paid' );
+		$resume = $this->interrupt_billing_writes();
+		$lock   = $this->hold_lock( $contract_id, RenewalProcessor::OPERATION );
+		try {
+			// A lock registered by with() is never released here: the request dies holding it.
+			HeldLocks::with(
+				$lock,
+				static function () use ( $contract_id ): void {
+					( new RenewalProcessor() )->renew_now( $contract_id );
+				}
+			);
+			$this->fail( 'Expected the request to die.' );
+		} catch ( RuntimeException $e ) {
+			$this->assertSame( 'The request died.', $e->getMessage() );
+		} finally {
+			$resume();
+		}
+
+		$this->assertTrue( wc_get_order( $order->get_id() )->is_paid(), 'Charged but not recorded.' );
+		$this->assertSame( CycleStatus::PENDING, $this->head( $contract_id )->get_status() );
+		$contract = $this->get_contract( $contract_id );
+		$this->assertSame( ContractStatus::ON_HOLD, $contract->get_status() );
+		$this->assertNull( $contract->get_next_payment_gmt(), 'No due moment: the due scan never repairs it.' );
+		$guards = $this->pending_settlements( $order->get_id() );
+		$this->assertCount( 1, $guards );
+		$this->assertGreaterThanOrEqual( time() + ContractLock::TTL_SECONDS - 60, $guards[0], 'Scheduled past the lock expiry.' );
+		$charges = $this->charge_count();
+
+		$this->expire_held_locks();
+		do_action( Settlement::RETRY_HOOK, $order->get_id() );
+
+		$this->assertSame( CycleStatus::BILLED, $this->head( $contract_id )->get_status() );
+		$contract = $this->get_contract( $contract_id );
+		$this->assertSame( ContractStatus::ACTIVE, $contract->get_status() );
+		$this->assertNotNull( $contract->get_next_payment_gmt(), 'Re-armed.' );
+		$this->assertSame( $charges, $this->charge_count(), 'The guard never charges.' );
+	}
+
+	/**
+	 * The guard of a charge that settled normally writes nothing when it runs.
+	 */
+	public function test_a_charge_guard_on_a_settled_renewal_writes_nothing(): void {
+		$this->support_engine_charges( 'cod' );
+		$contract_id = $this->make_due_contract( $this->create_customer() );
+		$this->assertSame( 1, $this->run_due_dispatch( $this->now() ) );
+		$order  = $this->renewal_orders()[0];
+		$before = $this->get_contract( $contract_id );
+		$head   = $this->head( $contract_id );
+		$this->assertSame( CycleStatus::BILLED, $head->get_status() );
+		$this->assertCount( 1, $this->pending_settlements( $order->get_id() ), 'The guard stays scheduled.' );
+		$paid = did_action( 'woocommerce_subscriptions_lite_renewal_paid' );
+
+		$this->expire_held_locks();
+		do_action( Settlement::RETRY_HOOK, $order->get_id() );
+
+		$after = $this->get_contract( $contract_id );
+		$this->assertSame( $before->get_status(), $after->get_status() );
+		$this->assertSame( $before->get_next_payment_gmt(), $after->get_next_payment_gmt() );
+		$this->assertSame( $before->get_last_payment_gmt(), $after->get_last_payment_gmt() );
+		$this->assertEquals( $head, $this->head( $contract_id ) );
+		$this->assertSame( $paid, did_action( 'woocommerce_subscriptions_lite_renewal_paid' ), 'No second paid action.' );
+		$this->assertSame( 1, $this->charge_count() );
+		$this->assertCount( 1, $this->renewal_orders() );
 	}
 }

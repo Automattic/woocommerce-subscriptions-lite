@@ -329,7 +329,9 @@ final class RenewalProcessor {
 	 * left pending (it awaits the customer, reports later, or threw) is left for payment like a
 	 * manual renewal order: the contract goes on the system hold, so it is not charged again,
 	 * and resumes when the order is paid. A gateway that paid and then threw left a paid order,
-	 * which settles as paid.
+	 * which settles as paid. Every charge is guarded by a settlement scheduled past the lock's
+	 * expiry ({@see Settlement::guard_charge()}), so a request that dies after the charge still
+	 * records it.
 	 *
 	 * @param ContractView      $contract The contract.
 	 * @param CycleView         $cycle    The cycle being billed.
@@ -348,6 +350,7 @@ final class RenewalProcessor {
 		}
 
 		if ( (float) $order->get_total() <= 0 ) {
+			Settlement::guard_charge( $order->get_id() );
 			$order->payment_complete();
 			$settlement->settle( $order, $now );
 			return;
@@ -364,6 +367,7 @@ final class RenewalProcessor {
 			return;
 		}
 
+		Settlement::guard_charge( $order->get_id() );
 		$handed_over = Payments::process_scheduled_payment( $order );
 		$charged     = wc_get_order( $order->get_id() );
 		if ( $charged instanceof WC_Order && $charged->has_status( OrderStatus::PENDING ) ) {

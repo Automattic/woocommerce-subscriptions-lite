@@ -10,6 +10,7 @@ declare( strict_types=1 );
 namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Lifecycle\Renewal;
 
 use Automattic\WooCommerce\SubscriptionsEngine\Api\ContractLockedException;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\ContractLock;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Payments;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\CycleView;
@@ -651,7 +652,18 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 		$this->assertInstanceOf( WC_Order::class, $order );
 		$this->assertSame( CycleStatus::BILLED, $this->head( $contract_id )->get_status() );
 		$this->assertSame( $this->period_end, $this->get_contract( $contract_id )->get_next_payment_gmt() );
-		$this->assertFalse( as_has_scheduled_action( Settlement::RETRY_HOOK, [ 'order_id' => $order->get_id() ], Settlement::RETRY_GROUP ), 'No settlement retry.' );
+		$retries = as_get_scheduled_actions(
+			[
+				'hook'         => Settlement::RETRY_HOOK,
+				'args'         => [ 'order_id' => $order->get_id() ],
+				'group'        => Settlement::RETRY_GROUP,
+				'status'       => \ActionScheduler_Store::STATUS_PENDING,
+				'date'         => as_get_datetime_object( time() + ContractLock::TTL_SECONDS ),
+				'date_compare' => '<',
+			],
+			'ids'
+		);
+		$this->assertSame( [], $retries, 'No settlement retry: only the charge guard is pending.' );
 		$this->assertFalse( $this->has_logged( 'Settlement: settling renewal order' ) );
 		$this->assertNull( $this->get_contract( $contract_id )->get_lock_state() );
 	}
