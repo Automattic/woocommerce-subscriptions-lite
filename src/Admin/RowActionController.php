@@ -7,7 +7,9 @@
  * the request (capability and a POST nonce verified with `check_admin_referer()`),
  * runs Lite's renewal ({@see RenewalProcessor::renew_now()}) or cancel
  * ({@see Cancellation}), queues a flash notice, and redirects back to the page the
- * action was triggered from (the detail page or the list), not a fixed destination.
+ * action was triggered from (the detail page or the list), not a fixed destination. An
+ * action refused because another operation holds the subscription's lock gets an
+ * "operation in progress" notice.
  *
  * The decision logic ({@see self::handle_renew_now()}, {@see self::handle_cancel()})
  * is separated from the request plumbing ({@see self::renew_now_request()},
@@ -30,6 +32,7 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Admin;
 use Throwable;
 use WC_Order;
 use Automattic\WooCommerce\Enums\OrderStatus;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\ContractLockedException;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\CycleStatus;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Cancellation;
@@ -167,6 +170,8 @@ final class RowActionController {
 
 		try {
 			$order = ( new RenewalProcessor() )->renew_now( $contract_id );
+		} catch ( ContractLockedException $e ) {
+			return self::conflict( $contract_id, $e );
 		} catch ( Throwable $e ) {
 			$this->log_failure( 'renew', $contract_id, $e );
 			return RowActionResult::failed(
@@ -267,6 +272,8 @@ final class RowActionController {
 
 		try {
 			$cancelled = ( $this->cancel )( $contract_id );
+		} catch ( ContractLockedException $e ) {
+			return self::conflict( $contract_id, $e );
 		} catch ( Throwable $e ) {
 			$this->log_failure( 'cancel', $contract_id, $e );
 			return RowActionResult::failed(
@@ -282,6 +289,24 @@ final class RowActionController {
 			sprintf(
 				/* translators: %d: subscription number. */
 				__( 'Subscription #%d cancelled.', 'woocommerce-subscriptions-lite' ),
+				$contract_id
+			)
+		);
+	}
+
+	/**
+	 * The notice for an action refused because another operation holds the contract's lock:
+	 * a retry hint naming the operation, not an error.
+	 *
+	 * @param int                     $contract_id Subscription number.
+	 * @param ContractLockedException $conflict    The lock conflict.
+	 */
+	private static function conflict( int $contract_id, ContractLockedException $conflict ): RowActionResult {
+		return RowActionResult::info(
+			sprintf(
+				/* translators: 1: operation label (e.g. "renewal"), 2: subscription number. */
+				__( 'Another operation (%1$s) is in progress on subscription #%2$d. Try again shortly.', 'woocommerce-subscriptions-lite' ),
+				$conflict->get_operation() ?? __( 'unknown', 'woocommerce-subscriptions-lite' ),
 				$contract_id
 			)
 		);
