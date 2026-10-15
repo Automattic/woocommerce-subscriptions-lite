@@ -35,6 +35,7 @@ use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\SchemaInstall
 use Automattic\WooCommerce\SubscriptionsLite\Cart\CartPlanHooks;
 use Automattic\WooCommerce\SubscriptionsLite\Checkout\ContractCreationHandler;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Cancellation;
+use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\HeldLocks;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Hold;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\HoldAnchor;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
@@ -607,6 +608,27 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 	 */
 	protected function expire_held_locks(): void {
 		$this->expire_lock_at( new DateTimeImmutable( sprintf( '+%d seconds', ContractLock::TTL_SECONDS + 60 ), new DateTimeZone( 'UTC' ) ) );
+	}
+
+	/**
+	 * Run `$flow` as another request would: with none of this request's held locks visible
+	 * (Lite flows otherwise reuse a lock held in the same request). Test-only reflection.
+	 *
+	 * @template T
+	 * @param callable(): T $flow The other request's work.
+	 * @return T
+	 */
+	protected function as_another_request( callable $flow ) {
+		$locks = new \ReflectionProperty( HeldLocks::class, 'locks' );
+		$locks->setAccessible( true );
+		$held = $locks->getValue();
+		$locks->setValue( null, [] );
+
+		try {
+			return $flow();
+		} finally {
+			$locks->setValue( null, $held );
+		}
 	}
 
 	/**
