@@ -3,7 +3,7 @@
  * StatusLabels - merchant-facing labels and badge markup for engine statuses.
  *
  * A small helper shared by the admin list table and the detail renderer so contract
- * and cycle statuses read the same wherever they appear. The labels and badges are
+ * and cycle statuses (and lock operations) read the same wherever they appear. The labels and badges are
  * pure functions of their inputs (no globals, no time, no WordPress calls beyond the
  * i18n pass-throughs).
  *
@@ -16,6 +16,12 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Admin;
 
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\CycleStatus;
+use Automattic\WooCommerce\SubscriptionsLite\Checkout\ContractCreationHandler;
+use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Cancellation;
+use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Hold;
+use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Reactivation;
+use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\RenewalProcessor;
+use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\Settlement;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -72,6 +78,31 @@ final class StatusLabels {
 	}
 
 	/**
+	 * Lower-case label for the operation holding a contract's lock, for inline use.
+	 * Unknown labels (other extensions, the engine's own) are humanized.
+	 *
+	 * @param string $operation Lock operation label.
+	 */
+	public static function lock_operation_label( string $operation ): string {
+		switch ( $operation ) {
+			case RenewalProcessor::OPERATION:
+				return __( 'renewal', 'woocommerce-subscriptions-lite' );
+			case Settlement::OPERATION:
+				return __( 'payment settlement', 'woocommerce-subscriptions-lite' );
+			case ContractCreationHandler::OPERATION:
+				return __( 'checkout', 'woocommerce-subscriptions-lite' );
+			case Cancellation::OPERATION:
+				return __( 'cancellation', 'woocommerce-subscriptions-lite' );
+			case Hold::OPERATION:
+				return __( 'putting on hold', 'woocommerce-subscriptions-lite' );
+			case Reactivation::OPERATION:
+				return __( 'reactivation', 'woocommerce-subscriptions-lite' );
+			default:
+				return strtolower( self::humanize( $operation ) );
+		}
+	}
+
+	/**
 	 * Status badge markup for a contract status.
 	 *
 	 * Reuses WooCommerce's `mark.order-status` badge chrome (the flex/border/
@@ -90,11 +121,11 @@ final class StatusLabels {
 	}
 
 	/**
-	 * Humanize a status slug as a last resort: `pending-cancellation` -> `Pending cancellation`.
+	 * Humanize a slug as a last resort: `pending-cancellation` -> `Pending cancellation`.
 	 *
-	 * @param string $slug Raw status slug.
+	 * @param string $slug Raw slug.
 	 */
 	private static function humanize( string $slug ): string {
-		return ucfirst( str_replace( '-', ' ', $slug ) );
+		return ucfirst( str_replace( [ '-', '_' ], ' ', $slug ) );
 	}
 }

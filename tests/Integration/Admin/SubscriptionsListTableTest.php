@@ -101,6 +101,29 @@ final class SubscriptionsListTableTest extends LiteIntegrationTestCase {
 		);
 	}
 
+	public function test_status_column_flags_a_locked_row_in_progress(): void {
+		$customer = $this->create_customer();
+		$locked   = $this->create_contract( $customer );
+		$this->create_contract( $customer );
+		$lock = $this->hold_lock( $locked );
+
+		try {
+			$table = $this->prepared_table();
+		} finally {
+			$lock->release();
+		}
+
+		$this->assertCount( 2, $table->items );
+		foreach ( $table->items as $item ) {
+			$cell = $table->column_status( $item );
+			if ( $locked === (int) $item->get_id() ) {
+				$this->assertStringContainsString( 'In progress', $cell );
+			} else {
+				$this->assertStringNotContainsString( 'In progress', $cell );
+			}
+		}
+	}
+
 	public function test_search_matches_contract_id(): void {
 		$customer = $this->create_customer();
 		$wanted   = $this->create_contract( $customer );

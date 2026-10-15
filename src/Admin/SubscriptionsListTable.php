@@ -317,12 +317,23 @@ final class SubscriptionsListTable extends WP_List_Table {
 	}
 
 	/**
-	 * Status cell: badge.
+	 * Status cell: badge, plus an "In progress" note while another operation holds the
+	 * contract's lock (list reads carry the lock state, so no extra query).
 	 *
 	 * @param ContractView $item Current row.
 	 */
 	public function column_status( $item ): string {
-		return StatusLabels::contract_badge_html( $item->get_status() );
+		$badge = StatusLabels::contract_badge_html( $item->get_status() );
+		$lock  = $item->get_lock_state();
+		if ( null === $lock ) {
+			return $badge;
+		}
+
+		return $badge . sprintf(
+			'<br /><span class="description wc-subs-lite-lock-indicator" title="%1$s">%2$s</span>',
+			esc_attr( StatusLabels::lock_operation_label( $lock['operation'] ) ),
+			esc_html__( 'In progress', 'woocommerce-subscriptions-lite' )
+		);
 	}
 
 	/**
