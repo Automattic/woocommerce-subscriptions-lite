@@ -26,6 +26,7 @@ use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\RenewalOrderBuild
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\RenewalProcessor;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\Settlement;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
+use Automattic\WooCommerce\SubscriptionsLite\Utilities\ScheduledActions;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
 use DateTimeImmutable;
 use DateTimeZone;
@@ -347,17 +348,17 @@ final class LockScenariosTest extends LiteIntegrationTestCase {
 		$this->assertSame( CycleStatus::PENDING, $this->head( $contract_id )->get_status() );
 		$this->assertNotFalse(
 			as_has_scheduled_action(
-				Settlement::RETRY_HOOK,
+				'woocommerce_subscriptions_lite_settle_order',
 				[
 					'order_id' => $order->get_id(),
 					'paid'     => true,
 				],
-				Settlement::RETRY_GROUP
+				ScheduledActions::GROUP
 			)
 		);
 
 		$lock->release();
-		do_action( Settlement::RETRY_HOOK, $order->get_id() );
+		do_action( 'woocommerce_subscriptions_lite_settle_order', $order->get_id() );
 
 		$this->assertSame( CycleStatus::BILLED, $this->head( $contract_id )->get_status() );
 		$this->assertSame( ContractStatus::ACTIVE, $this->get_contract( $contract_id )->get_status() );
@@ -372,12 +373,12 @@ final class LockScenariosTest extends LiteIntegrationTestCase {
 	private function pending_settlements( int $order_id ): array {
 		$actions = as_get_scheduled_actions(
 			[
-				'hook'   => Settlement::RETRY_HOOK,
+				'hook'   => 'woocommerce_subscriptions_lite_settle_order',
 				'args'   => [
 					'order_id' => $order_id,
 					'paid'     => false,
 				],
-				'group'  => Settlement::RETRY_GROUP,
+				'group'  => ScheduledActions::GROUP,
 				'status' => \ActionScheduler_Store::STATUS_PENDING,
 			]
 		);
@@ -429,7 +430,7 @@ final class LockScenariosTest extends LiteIntegrationTestCase {
 		$charges = $this->charge_count();
 
 		$this->expire_held_locks();
-		do_action( Settlement::RETRY_HOOK, $order->get_id() );
+		do_action( 'woocommerce_subscriptions_lite_settle_order', $order->get_id() );
 
 		$this->assertSame( CycleStatus::BILLED, $this->head( $contract_id )->get_status() );
 		$contract = $this->get_contract( $contract_id );
@@ -453,7 +454,7 @@ final class LockScenariosTest extends LiteIntegrationTestCase {
 		$paid = did_action( 'woocommerce_subscriptions_lite_renewal_paid' );
 
 		$this->expire_held_locks();
-		do_action( Settlement::RETRY_HOOK, $order->get_id() );
+		do_action( 'woocommerce_subscriptions_lite_settle_order', $order->get_id() );
 
 		$after = $this->get_contract( $contract_id );
 		$this->assertSame( $before->get_status(), $after->get_status() );

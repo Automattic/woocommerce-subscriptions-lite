@@ -69,7 +69,7 @@ final class DetailRendererTest extends LiteIntegrationTestCase {
 		}
 
 		$this->assertStringContainsString( 'wc-subs-lite-lock-notice', $html );
-		$this->assertStringContainsString( 'Another change to this subscription is in progress (renewal). Try again after ', $html );
+		$this->assertStringContainsString( sprintf( 'Another change to subscription #%d is in progress (renewal). Try again after ', $id ), $html );
 	}
 
 	public function test_unlocked_contract_renders_no_in_progress_notice(): void {

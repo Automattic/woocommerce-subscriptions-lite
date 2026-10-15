@@ -23,6 +23,7 @@ use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\HeldLocks;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\RenewalOrderBuilder;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\RenewalProcessor;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\Settlement;
+use Automattic\WooCommerce\SubscriptionsLite\Utilities\ScheduledActions;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
 use DateTimeImmutable;
 use DateTimeZone;
@@ -654,8 +655,8 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 		$this->assertSame( $this->period_end, $this->get_contract( $contract_id )->get_next_payment_gmt() );
 		$retries = as_get_scheduled_actions(
 			[
-				'hook'         => Settlement::RETRY_HOOK,
-				'group'        => Settlement::RETRY_GROUP,
+				'hook'         => 'woocommerce_subscriptions_lite_settle_order',
+				'group'        => ScheduledActions::GROUP,
 				'status'       => \ActionScheduler_Store::STATUS_PENDING,
 				'date'         => as_get_datetime_object( time() + ContractLock::TTL_SECONDS ),
 				'date_compare' => '<',

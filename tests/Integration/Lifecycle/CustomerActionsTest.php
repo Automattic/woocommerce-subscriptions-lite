@@ -412,7 +412,7 @@ final class CustomerActionsTest extends LiteIntegrationTestCase {
 		$this->assertSame( 409, $response->get_status() );
 		$data = $this->get_response_data( $response );
 		$this->assertSame( 'woocommerce_subscriptions_lite_contract_locked', $data['code'] );
-		$this->assertSame( 'Another change to this subscription is in progress.', $data['message'] );
+		$this->assertSame( sprintf( 'Another change to subscription #%d is in progress (renewal).', $contract_id ), $data['message'] );
 		$stored = $this->get_contract( $contract_id );
 		$this->assertSame( $status, $stored->get_status(), 'Nothing was written.' );
 		$this->assertSame( $next_payment, $stored->get_next_payment_gmt() );

@@ -28,6 +28,7 @@ use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\RenewalOrderBuilder;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ApplicabilityStore;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ProductApplicability;
+use Automattic\WooCommerce\SubscriptionsLite\Utilities\ScheduledActions;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
 use WC_Order;
 use WC_Order_Item_Fee;
@@ -540,9 +541,9 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 	private function pending_resumes( int $order_id ): array {
 		return as_get_scheduled_actions(
 			[
-				'hook'   => ContractCreationHandler::RESUME_HOOK,
+				'hook'   => 'woocommerce_subscriptions_lite_resume_checkout',
 				'args'   => [ 'order_id' => $order_id ],
-				'group'  => ContractCreationHandler::RESUME_GROUP,
+				'group'  => ScheduledActions::GROUP,
 				'status' => \ActionScheduler_Store::STATUS_PENDING,
 			],
 			'ids'
@@ -575,7 +576,7 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 		$created  = Contracts::create_locked(
 			[
 				'extension_slug'  => Package::EXTENSION_SLUG,
-				'creation_key'    => ContractCreationHandler::creation_key( $order ),
+				'creation_key'    => 'order:' . $order->get_id(),
 				'status'          => ContractStatus::DRAFT,
 				'customer_id'     => $customer_id,
 				'currency'        => 'USD',
@@ -588,7 +589,7 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 		$draft_id = $created['contract']->get_id();
 
 		$order->update_status( 'processing' );
-		do_action( ContractCreationHandler::RESUME_HOOK, $order->get_id() );
+		do_action( 'woocommerce_subscriptions_lite_resume_checkout', $order->get_id() );
 
 		$draft = $this->get_contract( $draft_id );
 		$this->assertSame( ContractStatus::DRAFT, $draft->get_status(), 'Refused while the creation may still run.' );
@@ -638,7 +639,7 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 		$this->assertCount( 1, Contracts::get_cycles( $drafts[0]->get_id() ), 'Cut short after cycle 1.' );
 		$this->assertCount( 1, $this->pending_resumes( $order->get_id() ), 'Scheduled before the draft was written.' );
 
-		do_action( ContractCreationHandler::RESUME_HOOK, $order->get_id() );
+		do_action( 'woocommerce_subscriptions_lite_resume_checkout', $order->get_id() );
 
 		$contract = $this->get_contract( $drafts[0]->get_id() );
 		$this->assertSame( ContractStatus::ACTIVE, $contract->get_status() );
@@ -657,7 +658,7 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 		$order->update_status( 'processing' );
 		$this->assertSame( [], $this->pending_resumes( $order->get_id() ) );
 
-		do_action( ContractCreationHandler::RESUME_HOOK, $order->get_id() );
+		do_action( 'woocommerce_subscriptions_lite_resume_checkout', $order->get_id() );
 
 		$this->assertCount( 1, Contracts::find_by_origin_order( $order->get_id() ) );
 		$this->assertSame( [], $this->notes_with( $order, 'activated after its creation was interrupted' ) );
@@ -685,14 +686,14 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 			$this->assertCount( 1, $this->pending_resumes( $order->get_id() ) );
 
 			for ( $run = 1; $run < ContractCreationHandler::MAX_RESUME_ATTEMPTS; $run++ ) {
-				do_action( ContractCreationHandler::RESUME_HOOK, $order->get_id() );
+				do_action( 'woocommerce_subscriptions_lite_resume_checkout', $order->get_id() );
 				$this->assertCount( 1, $this->pending_resumes( $order->get_id() ), "Rescheduled after failed run {$run}." );
 			}
-			do_action( ContractCreationHandler::RESUME_HOOK, $order->get_id() );
+			do_action( 'woocommerce_subscriptions_lite_resume_checkout', $order->get_id() );
 			$this->assertSame( [], $this->pending_resumes( $order->get_id() ), 'Not rescheduled past the cap.' );
 			$this->assertCount( 1, $this->notes_with( $order, $final ) );
 
-			do_action( ContractCreationHandler::RESUME_HOOK, $order->get_id() ); // A stray run past the cap.
+			do_action( 'woocommerce_subscriptions_lite_resume_checkout', $order->get_id() ); // A stray run past the cap.
 			$this->assertSame( [], $this->pending_resumes( $order->get_id() ) );
 			$this->assertCount( 1, $this->notes_with( $order, $final ), 'One final note only.' );
 		} finally {
@@ -722,13 +723,13 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 		add_filter( 'query', $fail );
 		try {
 			$order->update_status( 'processing' );
-			do_action( ContractCreationHandler::RESUME_HOOK, $order->get_id() );
+			do_action( 'woocommerce_subscriptions_lite_resume_checkout', $order->get_id() );
 		} finally {
 			remove_filter( 'query', $fail );
 		}
 		$this->assertSame( '1', (string) wc_get_order( $order->get_id() )->get_meta( ContractCreationHandler::RESUME_ATTEMPTS_META ) );
 
-		do_action( ContractCreationHandler::RESUME_HOOK, $order->get_id() );
+		do_action( 'woocommerce_subscriptions_lite_resume_checkout', $order->get_id() );
 
 		$created = Contracts::find_by_origin_order( $order->get_id() );
 		$this->assertCount( 1, $created );

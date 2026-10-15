@@ -17,7 +17,7 @@
  * contracts facade; the engine records what it is given and never reads the order.
  *
  * A creation cut short leaves a draft. The next paid status change of the order, or the
- * resume action scheduled before the draft is written ({@see self::RESUME_HOOK}), resumes
+ * resume action scheduled before the draft is written (`woocommerce_subscriptions_lite_resume_checkout`), resumes
  * it under its lock: cycle 1 if missing, then activation.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Checkout
@@ -27,7 +27,6 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Checkout;
 
-use ActionScheduler_Store;
 use DateTimeImmutable;
 use DateTimeZone;
 use LogicException;
@@ -46,6 +45,7 @@ use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\HeldLocks;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ProductPlanResolver;
 use Automattic\WooCommerce\SubscriptionsLite\Pricing\BillingTerms;
+use Automattic\WooCommerce\SubscriptionsLite\Utilities\ScheduledActions;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\RenewalOrderBuilder;
 
 defined( 'ABSPATH' ) || exit;
@@ -100,17 +100,6 @@ final class ContractCreationHandler {
 	public const OPERATION = 'checkout';
 
 	/**
-	 * Action Scheduler hook that resumes an order's contract creation cut short. Its single
-	 * argument is the order id.
-	 */
-	public const RESUME_HOOK = 'woocommerce_subscriptions_lite_resume_checkout';
-
-	/**
-	 * Action Scheduler group of the resume action.
-	 */
-	public const RESUME_GROUP = 'woocommerce-subscriptions-lite';
-
-	/**
 	 * Seconds before a resume refused by a live lock is tried again; also added to the lock
 	 * TTL for the resume scheduled before a creation.
 	 */
@@ -154,7 +143,8 @@ final class ContractCreationHandler {
 	public static function register(): void {
 		$instance = new self();
 		add_action( 'woocommerce_order_status_changed', [ $instance, 'create_contracts_for_order' ], 10, 1 );
-		add_action( self::RESUME_HOOK, [ $instance, 'resume_checkout' ] );
+		// Resumes an order's contract creation cut short; its argument is the order id.
+		add_action( 'woocommerce_subscriptions_lite_resume_checkout', [ $instance, 'resume_checkout' ] );
 	}
 
 	/**
@@ -354,30 +344,13 @@ final class ContractCreationHandler {
 	}
 
 	/**
-	 * Schedule the order's resume action unless one is pending to run by then. Only pending
-	 * actions count: a running resume refused again schedules the next one.
+	 * Schedule the order's resume action unless one is pending to run by then.
 	 *
 	 * @param int $order_id      Order id.
 	 * @param int $delay_seconds Seconds from now.
 	 */
 	private static function schedule_resume( int $order_id, int $delay_seconds ): void {
-		$args    = [ 'order_id' => $order_id ];
-		$run_at  = time() + $delay_seconds;
-		$pending = as_get_scheduled_actions(
-			[
-				'hook'         => self::RESUME_HOOK,
-				'args'         => $args,
-				'group'        => self::RESUME_GROUP,
-				'status'       => ActionScheduler_Store::STATUS_PENDING,
-				'date'         => as_get_datetime_object( $run_at ),
-				'date_compare' => '<=',
-				'per_page'     => 1,
-			],
-			'ids'
-		);
-		if ( [] === $pending ) {
-			as_schedule_single_action( $run_at, self::RESUME_HOOK, $args, self::RESUME_GROUP );
-		}
+		ScheduledActions::schedule_once( 'woocommerce_subscriptions_lite_resume_checkout', [ 'order_id' => $order_id ], $delay_seconds );
 	}
 
 	/**
@@ -386,7 +359,7 @@ final class ContractCreationHandler {
 	 * @param int $order_id Order id.
 	 */
 	private static function unschedule_resume( int $order_id ): void {
-		as_unschedule_all_actions( self::RESUME_HOOK, [ 'order_id' => $order_id ], self::RESUME_GROUP );
+		ScheduledActions::unschedule( 'woocommerce_subscriptions_lite_resume_checkout', [ 'order_id' => $order_id ] );
 	}
 
 	/**
@@ -437,16 +410,10 @@ final class ContractCreationHandler {
 	}
 
 	/**
-	 * Create the contract for a paid order on `$plan`: a draft with the mapped fields, locked
-	 * from birth under the order's creation key (`order:{id}`), then cycle 1 (billed by the
-	 * order), then activation with the first renewal date, all with that lock. Activation
-	 * comes last, so a failure part-way leaves a draft that is never due; the lock is released
-	 * on every path, so a stuck draft is not locked. A resume action scheduled before the draft
-	 * is written (past the lock's expiry, dropped on success) resumes a draft the request
-	 * leaves behind.
-	 *
-	 * The first renewal date comes from {@see BillingTerms::get_first_renewal_from()}, the
-	 * same parse that decides whether a plan is billable.
+	 * Create the contract for a paid order: a draft locked from birth under the order's
+	 * creation key, then cycle 1 and activation (last, so a failure leaves a draft that is never
+	 * due) with that lock, released on every path. A resume action scheduled before the draft
+	 * past the lock's expiry, and dropped on success, resumes a draft the request leaves behind.
 	 *
 	 * @param WC_Order $order The paid order.
 	 * @param PlanView $plan  The order's selling plan.
@@ -473,7 +440,7 @@ final class ContractCreationHandler {
 		$created = Contracts::create_locked(
 			[
 				'extension_slug'       => Package::EXTENSION_SLUG,
-				'creation_key'         => self::creation_key( $order ),
+				'creation_key'         => self::get_creation_key( $order ),
 				'status'               => ContractStatus::DRAFT,
 				'customer_id'          => $order->get_customer_id() > 0 ? $order->get_customer_id() : null,
 				'currency'             => $order->get_currency(),
@@ -536,7 +503,7 @@ final class ContractCreationHandler {
 	 *
 	 * @param WC_Order $order The order.
 	 */
-	public static function creation_key( WC_Order $order ): string {
+	private static function get_creation_key( WC_Order $order ): string {
 		return 'order:' . $order->get_id();
 	}
 

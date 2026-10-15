@@ -1,11 +1,9 @@
 <?php
 /**
- * StatusLabels - merchant-facing labels and badge markup for engine statuses.
+ * StatusLabels - labels and badge markup for engine statuses and contract locks.
  *
- * A small helper shared by the admin list table and the detail renderer so contract
- * and cycle statuses (and lock operations) read the same wherever they appear. The labels and badges are
- * pure functions of their inputs (no globals, no time, no WordPress calls beyond the
- * i18n pass-throughs).
+ * Shared by the admin screens and the customer actions, so statuses and lock conflicts read
+ * the same wherever they appear. Pure functions of their inputs, beyond the i18n calls.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Admin
  */
@@ -100,6 +98,27 @@ final class StatusLabels {
 			default:
 				return strtolower( self::humanize( $operation ) );
 		}
+	}
+
+	/**
+	 * The one phrasing of a lock conflict: another operation (named when known) is changing
+	 * the subscription. Callers add their own retry advice.
+	 *
+	 * @param int         $contract_id Subscription number.
+	 * @param string|null $operation   Operation label of the lock holder, when known.
+	 */
+	public static function get_lock_conflict_message( int $contract_id, ?string $operation ): string {
+		if ( null === $operation ) {
+			/* translators: %d: subscription number. */
+			return sprintf( __( 'Another change to subscription #%d is in progress.', 'woocommerce-subscriptions-lite' ), $contract_id );
+		}
+
+		return sprintf(
+			/* translators: 1: subscription number, 2: operation label (e.g. "renewal"). */
+			__( 'Another change to subscription #%1$d is in progress (%2$s).', 'woocommerce-subscriptions-lite' ),
+			$contract_id,
+			self::lock_operation_label( $operation )
+		);
 	}
 
 	/**

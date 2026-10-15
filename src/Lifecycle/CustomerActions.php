@@ -18,6 +18,7 @@ use WP_Error;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\ContractActions;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\ContractLockedException;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
+use Automattic\WooCommerce\SubscriptionsLite\Admin\StatusLabels;
 use Automattic\WooCommerce\SubscriptionsLite\Contracts\CustomerVisibility;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\UnpaidRenewal;
@@ -151,7 +152,7 @@ final class CustomerActions {
 		} catch ( ContractLockedException $e ) {
 			return new WP_Error(
 				'woocommerce_subscriptions_lite_contract_locked',
-				__( 'Another change to this subscription is in progress.', 'woocommerce-subscriptions-lite' ),
+				StatusLabels::get_lock_conflict_message( $e->get_contract_id(), $e->get_operation() ),
 				[ 'status' => 409 ]
 			);
 		}

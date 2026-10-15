@@ -222,10 +222,9 @@ final class DetailRenderer {
 		printf(
 			'<div class="notice notice-warning inline wc-subs-lite-lock-notice"><p>%s</p></div>',
 			esc_html(
-				sprintf(
-					/* translators: 1: operation label (e.g. "renewal"), 2: date and time the lock expires. */
-					__( 'Another change to this subscription is in progress (%1$s). Try again after %2$s.', 'woocommerce-subscriptions-lite' ),
-					StatusLabels::lock_operation_label( $lock['operation'] ),
+				StatusLabels::get_lock_conflict_message( $contract->get_id(), $lock['operation'] ) . ' ' . sprintf(
+					/* translators: %s: date and time the lock expires. */
+					__( 'Try again after %s.', 'woocommerce-subscriptions-lite' ),
 					(string) wp_date( $format, $lock['locked_until']->getTimestamp() )
 				)
 			)

@@ -171,7 +171,7 @@ final class RowActionController {
 		try {
 			$order = ( new RenewalProcessor() )->renew_now( $contract_id );
 		} catch ( ContractLockedException $e ) {
-			return self::conflict( $contract_id, $e );
+			return self::get_lock_conflict_result( $e );
 		} catch ( Throwable $e ) {
 			$this->log_failure( 'renew', $contract_id, $e );
 			return RowActionResult::failed(
@@ -273,7 +273,7 @@ final class RowActionController {
 		try {
 			$cancelled = ( $this->cancel )( $contract_id );
 		} catch ( ContractLockedException $e ) {
-			return self::conflict( $contract_id, $e );
+			return self::get_lock_conflict_result( $e );
 		} catch ( Throwable $e ) {
 			$this->log_failure( 'cancel', $contract_id, $e );
 			return RowActionResult::failed(
@@ -298,17 +298,11 @@ final class RowActionController {
 	 * The notice for an action refused because another operation holds the contract's lock:
 	 * a retry hint naming the operation, not an error.
 	 *
-	 * @param int                     $contract_id Subscription number.
-	 * @param ContractLockedException $conflict    The lock conflict.
+	 * @param ContractLockedException $conflict The lock conflict.
 	 */
-	private static function conflict( int $contract_id, ContractLockedException $conflict ): RowActionResult {
+	private static function get_lock_conflict_result( ContractLockedException $conflict ): RowActionResult {
 		return RowActionResult::info(
-			sprintf(
-				/* translators: 1: operation label (e.g. "renewal"), 2: subscription number. */
-				__( 'Another operation (%1$s) is in progress on subscription #%2$d. Try again shortly.', 'woocommerce-subscriptions-lite' ),
-				$conflict->get_operation() ?? __( 'unknown', 'woocommerce-subscriptions-lite' ),
-				$contract_id
-			)
+			StatusLabels::get_lock_conflict_message( $conflict->get_contract_id(), $conflict->get_operation() ) . ' ' . __( 'Try again shortly.', 'woocommerce-subscriptions-lite' )
 		);
 	}
 

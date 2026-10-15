@@ -2,15 +2,10 @@
 /**
  * RenewalProcessor - renews a Lite contract: one cycle, one order, one charge.
  *
- * Runs under the engine's contract lock, so concurrent runs are excluded: a due renewal under
- * the dispatcher's lock, Renew now under its own ({@see HeldLocks}). The lock is held through
- * the charge, so settlement reached from the gateway's status change uses it too. The cycle
- * compare-and-set writes are state checks inside the locked section: the next lock holder
- * resumes a cycle an interrupted run left pending. A due contract several periods behind bills the one period containing
- * now ({@see BillingTerms::get_period_to_bill()}). A gateway that declares both the engine's
- * `subscriptions_engine` feature and the `subscriptions` feature is charged through the
- * engine; any other gateway gets a manual renewal order the customer pays, with the
- * contract on hold until then.
+ * Runs under the contract lock (the dispatcher's, or Renew now's own), held through the
+ * charge; the next lock holder resumes a cycle an interrupted run left pending. A gateway that
+ * declares the engine's feature and `subscriptions` is charged through the engine; any other
+ * gets a manual renewal order, with the contract on hold until it is paid.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal
  */
@@ -320,20 +315,10 @@ final class RenewalProcessor {
 	}
 
 	/**
-	 * Collect the order's payment: settle an already paid order or one whose asynchronous
-	 * charge is in flight, complete a free one, charge
-	 * through the engine when the gateway supports the engine and automatic renewal payments
-	 * ({@see self::GATEWAY_RENEWAL_FEATURE}), else leave a manual renewal order for the
-	 * customer and hold the contract.
-	 *
-	 * After a charge the order status is the outcome the gateway set: paid, failed, or on-hold
-	 * while an asynchronous charge awaits confirmation. Lite never sets it. An order the gateway
-	 * left pending (it awaits the customer, reports later, or threw) is left for payment like a
-	 * manual renewal order: the contract goes on the system hold, so it is not charged again,
-	 * and resumes when the order is paid. A gateway that paid and then threw left a paid order,
-	 * which settles as paid. Every charge is guarded by a settlement scheduled past the lock's
-	 * expiry ({@see Settlement::guard_charge()}), so a request that dies after the charge still
-	 * records it.
+	 * Collect the order's payment: settle a paid order or one whose asynchronous charge is in
+	 * flight, complete a free one, charge through the engine when the gateway supports it, else
+	 * leave the order for the customer. A charge the gateway left pending is left for payment
+	 * too; every charge is guarded by a settlement past the lock's expiry ({@see Settlement::guard_charge()}).
 	 *
 	 * @param ContractView      $contract The contract.
 	 * @param CycleView         $cycle    The cycle being billed.

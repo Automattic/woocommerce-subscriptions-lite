@@ -22,7 +22,7 @@
  * Every settlement runs under the contract lock: the one this request already holds (a
  * gateway status change inside a renewal charge) or its own. The contract and cycle are
  * re-read after acquiring. When another operation holds the lock, the settlement is retried
- * through Action Scheduler ({@see self::RETRY_HOOK}), so a paid order is never left
+ * through Action Scheduler (`woocommerce_subscriptions_lite_settle_order`), so a paid order is never left
  * unrecorded; the same action guards every renewal charge ({@see self::guard_charge()}). A
  * paid order that ends linked to no payable cycle is flagged for a refund.
  *
@@ -47,7 +47,7 @@ use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\HoldAnchor;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Hold;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ContractPlans;
-use ActionScheduler_Store;
+use Automattic\WooCommerce\SubscriptionsLite\Utilities\ScheduledActions;
 use DateTimeImmutable;
 use DateTimeZone;
 use Throwable;
@@ -64,17 +64,6 @@ final class Settlement {
 	 * Operation label of a settlement's own contract lock.
 	 */
 	public const OPERATION = 'settlement';
-
-	/**
-	 * Action Scheduler hook that retries a settlement refused by another operation's lock.
-	 * Its arguments are the order id and whether the order was paid when it was scheduled.
-	 */
-	public const RETRY_HOOK = 'woocommerce_subscriptions_lite_settle_order';
-
-	/**
-	 * Action Scheduler group of the retry.
-	 */
-	public const RETRY_GROUP = 'woocommerce-subscriptions-lite';
 
 	/**
 	 * Seconds before a refused settlement is retried.
@@ -137,12 +126,13 @@ final class Settlement {
 		add_action( 'wp_trash_post', [ $instance, 'handle_removed_post' ] );
 		add_action( 'before_delete_post', [ $instance, 'handle_removed_post' ] );
 		add_filter( 'woocommerce_valid_order_statuses_for_cancel', [ $instance, 'statuses_for_customer_cancel' ], 10, 2 );
-		add_action( self::RETRY_HOOK, [ $instance, 'retry' ], 10, 2 );
+		// Retries a settlement refused by another operation's lock, and guards every charge.
+		add_action( 'woocommerce_subscriptions_lite_settle_order', [ $instance, 'retry' ], 10, 2 );
 	}
 
 	/**
 	 * Action Scheduler entry point for a refused settlement: settle the order when it still
-	 * exists, else fail the cycles still linked to its id as dead (it was deleted unpaid). An
+	 * exists, else fail the cycle still linked to its id as dead (it was deleted unpaid). An
 	 * order that was paid and then deleted fails nothing: a warning is logged. A retry refused
 	 * again schedules the next one; the lock it waits for expires on its own.
 	 *
@@ -198,7 +188,8 @@ final class Settlement {
 			]
 		);
 
-		self::schedule_settlement(
+		ScheduledActions::schedule_once(
+			'woocommerce_subscriptions_lite_settle_order',
 			[
 				'order_id' => $order_id,
 				'paid'     => $paid,
@@ -216,41 +207,14 @@ final class Settlement {
 	 * @param int $order_id The renewal order about to be charged.
 	 */
 	public static function guard_charge( int $order_id ): void {
-		self::schedule_settlement(
+		ScheduledActions::schedule_once(
+			'woocommerce_subscriptions_lite_settle_order',
 			[
 				'order_id' => $order_id,
 				'paid'     => false,
 			],
 			ContractLock::TTL_SECONDS + self::RETRY_DELAY_SECONDS
 		);
-	}
-
-	/**
-	 * Schedule a settlement action unless one with the same arguments is pending to run by
-	 * then. Only pending actions count: a running retry refused again schedules the next one.
-	 *
-	 * @param array<string, mixed> $args          Action arguments.
-	 * @param int                  $delay_seconds Seconds from now.
-	 */
-	private static function schedule_settlement( array $args, int $delay_seconds ): void {
-		$run_at  = time() + $delay_seconds;
-		$pending = as_get_scheduled_actions(
-			[
-				'hook'         => self::RETRY_HOOK,
-				'args'         => $args,
-				'group'        => self::RETRY_GROUP,
-				'status'       => ActionScheduler_Store::STATUS_PENDING,
-				'date'         => as_get_datetime_object( $run_at ),
-				'date_compare' => '<=',
-				'per_page'     => 1,
-			],
-			'ids'
-		);
-		if ( [] !== $pending ) {
-			return;
-		}
-
-		as_schedule_single_action( $run_at, self::RETRY_HOOK, $args, self::RETRY_GROUP );
 	}
 
 	/**
@@ -472,10 +436,10 @@ final class Settlement {
 		} elseif ( ! in_array( $cycle->get_status(), self::PAYABLE_CYCLE_STATUSES, true ) ) {
 			self::flag_for_refund(
 				$order,
-				$contract->get_id(),
 				/* translators: %s: renewal (cycle) status. */
 				sprintf( __( 'This renewal order was paid, but its renewal can no longer be billed (status: %s). Refund this payment.', 'woocommerce-subscriptions-lite' ), $cycle->get_status() ),
-				sprintf( 'Settlement: renewal order %d was paid for cycle %d, which is %s; a refund is needed.', $order->get_id(), $cycle->get_id(), $cycle->get_status() )
+				sprintf( 'Settlement: renewal order %d was paid for cycle %d, which is %s; a refund is needed.', $order->get_id(), $cycle->get_id(), $cycle->get_status() ),
+				$contract->get_id()
 			);
 			return;
 		} elseif ( ! Contracts::transition_cycle(
@@ -714,13 +678,10 @@ final class Settlement {
 	}
 
 	/**
-	 * A replaced renewal order was paid after all. While its renewal is still unpaid and the
-	 * replacement's charge is not in flight, it takes the renewal back: the cycle is relinked
-	 * to it, the unpaid replacement is stamped as replaced and cancelled, and the payment
-	 * settles. Otherwise the replacement keeps the renewal and this order is flagged once for
-	 * a refund (note and warning): once the replacement paid, while its charge awaits
-	 * confirmation (it may still complete), when the relink fails, or when the renewal is gone
-	 * or can no longer be billed. Runs under the lock of the contract named on the order.
+	 * A replaced renewal order was paid after all. While its renewal is unpaid and not in
+	 * flight, it takes the renewal back (relink, cancel the unpaid replacement, settle);
+	 * otherwise it is flagged once for a refund. Runs under the lock of the contract named on
+	 * the order.
 	 *
 	 * @param WC_Order               $order The paid replaced order.
 	 * @param DateTimeImmutable|null $now   The current moment.
@@ -757,9 +718,9 @@ final class Settlement {
 			if ( null === $cycle ) {
 				self::flag_for_refund(
 					$order,
-					$contract_id,
 					__( 'This renewal order was paid after another order replaced it, and its renewal no longer exists. Refund this payment.', 'woocommerce-subscriptions-lite' ),
-					sprintf( 'Settlement: renewal order %d was paid after it was replaced, and its cycle %d no longer exists; a refund is needed.', $order->get_id(), $cycle_id )
+					sprintf( 'Settlement: renewal order %d was paid after it was replaced, and its cycle %d no longer exists; a refund is needed.', $order->get_id(), $cycle_id ),
+					$contract_id
 				);
 				return;
 			}
@@ -789,9 +750,9 @@ final class Settlement {
 				if ( ! $relinked ) {
 					self::flag_for_refund(
 						$order,
-						$contract_id,
 						__( 'This renewal order was paid after another order replaced it, and the renewal could not be moved back to it. Refund this payment.', 'woocommerce-subscriptions-lite' ),
-						sprintf( 'Settlement: renewal order %d was paid after it was replaced and could not be relinked to cycle %d; a refund is needed.', $order->get_id(), $cycle_id )
+						sprintf( 'Settlement: renewal order %d was paid after it was replaced and could not be relinked to cycle %d; a refund is needed.', $order->get_id(), $cycle_id ),
+						$contract_id
 					);
 					return;
 				}
@@ -825,7 +786,7 @@ final class Settlement {
 				$message = sprintf( 'Settlement: renewal order %d was paid after it was replaced, for cycle %d, which is %s; a refund is needed.', $order->get_id(), $cycle_id, $cycle->get_status() );
 			}
 
-			self::flag_for_refund( $order, $contract_id, $note, $message );
+			self::flag_for_refund( $order, $note, $message, $contract_id );
 		} finally {
 			if ( $acquired ) {
 				HeldLocks::release( $lock );
@@ -838,11 +799,11 @@ final class Settlement {
 	 * warning. Idempotent on the flag.
 	 *
 	 * @param WC_Order $order       The paid order.
-	 * @param int      $contract_id Contract id, for the log.
 	 * @param string   $note        Order note for the merchant.
 	 * @param string   $log_message Warning logged.
+	 * @param int      $contract_id Contract id, for the log.
 	 */
-	private static function flag_for_refund( WC_Order $order, int $contract_id, string $note, string $log_message ): void {
+	private static function flag_for_refund( WC_Order $order, string $note, string $log_message, int $contract_id ): void {
 		if ( '' !== (string) $order->get_meta( self::REFUND_FLAGGED_META ) ) {
 			return;
 		}

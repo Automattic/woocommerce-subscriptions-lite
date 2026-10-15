@@ -19,6 +19,7 @@ use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\HoldAnchor;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\RenewalOrderBuilder;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\Settlement;
+use Automattic\WooCommerce\SubscriptionsLite\Utilities\ScheduledActions;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
 use DateTimeImmutable;
 use DateTimeZone;
@@ -426,8 +427,8 @@ final class SettlementTest extends LiteIntegrationTestCase {
 	private function pending_retries( int $order_id ): array {
 		$actions = as_get_scheduled_actions(
 			[
-				'hook'     => Settlement::RETRY_HOOK,
-				'group'    => Settlement::RETRY_GROUP,
+				'hook'     => 'woocommerce_subscriptions_lite_settle_order',
+				'group'    => ScheduledActions::GROUP,
 				'status'   => \ActionScheduler_Store::STATUS_PENDING,
 				'per_page' => -1,
 			]
@@ -574,7 +575,7 @@ final class SettlementTest extends LiteIntegrationTestCase {
 		$this->assertSame( CycleStatus::PENDING, $this->head( $contract_id )->get_status() );
 
 		$lock->release();
-		do_action( Settlement::RETRY_HOOK, $order->get_id() );
+		do_action( 'woocommerce_subscriptions_lite_settle_order', $order->get_id() );
 
 		$this->assertSame( CycleStatus::BILLED, $this->head( $contract_id )->get_status() );
 	}
@@ -588,7 +589,7 @@ final class SettlementTest extends LiteIntegrationTestCase {
 
 		$actions = as_get_scheduled_actions(
 			[
-				'hook'   => Settlement::RETRY_HOOK,
+				'hook'   => 'woocommerce_subscriptions_lite_settle_order',
 				'args'   => [
 					'order_id' => $order->get_id(),
 					'paid'     => true,
