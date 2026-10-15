@@ -450,11 +450,11 @@ final class ContractCreationHandler {
 	 *
 	 * @param WC_Order $order The paid order.
 	 * @param PlanView $plan  The order's selling plan.
-	 * @return ContractView|null The active contract; null when the order's contract was already
+	 * @return ContractView|null The active contract as written under the checkout lock (its lock
+	 *                           state still shows it); null when the order's contract was already
 	 *                           created (its creation key is taken) or deleted before activation.
-	 * @throws LogicException When cycle 1 of the new contract already exists. Any other
-	 *                        failure (an unparseable billing payload, a failed engine
-	 *                        write) propagates as thrown.
+	 * @throws LogicException When the billing payload does not parse; a failed engine write
+	 *                        propagates as thrown too.
 	 */
 	public function create_contract( WC_Order $order, PlanView $plan ): ?ContractView {
 		$plan_id    = $plan->get_id();
@@ -508,14 +508,11 @@ final class ContractCreationHandler {
 			HeldLocks::release( $lock );
 		}
 
-		if ( null === $activated ) {
-			return null;
+		if ( null !== $activated ) {
+			self::finish_resume( $order );
 		}
 
-		self::finish_resume( $order );
-
-		// Read after the release, so the view does not report the checkout lock.
-		return Contracts::get( $lock->get_contract_id() );
+		return $activated;
 	}
 
 	/**
@@ -551,29 +548,24 @@ final class ContractCreationHandler {
 	 * @param DateTimeImmutable $start         Contract start.
 	 * @param DateTimeImmutable $next          First renewal date.
 	 * @param string            $billing_total Recurring total.
-	 * @throws LogicException When cycle 1 cannot be appended.
+	 * @return ContractView|null The active contract, as written under the lock; null when it is gone.
 	 */
 	private static function activate( ContractLock $lock, WC_Order $order, DateTimeImmutable $start, DateTimeImmutable $next, string $billing_total ): ?ContractView {
 		$contract_id = $lock->get_contract_id();
-		if ( [] === Contracts::get_cycles( $contract_id, 1 ) ) {
-			$first_cycle = Contracts::add_cycle(
-				$contract_id,
-				[
-					'status'         => CycleStatus::BILLED,
-					'count'          => 1,
-					'order_id'       => $order->get_id(),
-					'starts_at_gmt'  => $start,
-					'ends_at_gmt'    => $next,
-					'expected_total' => $billing_total,
-					'currency'       => $order->get_currency(),
-				],
-				$lock
-			);
-			if ( null === $first_cycle ) {
-				// The chain was empty under the lock, so the position cannot be taken: fail like any other write.
-				throw new LogicException( 'Contract creation: cycle 1 of the contract already exists.' );
-			}
-		}
+		// Null when cycle 1 exists: a resumed draft whose creation was cut short after it.
+		Contracts::add_cycle(
+			$contract_id,
+			[
+				'status'         => CycleStatus::BILLED,
+				'count'          => 1,
+				'order_id'       => $order->get_id(),
+				'starts_at_gmt'  => $start,
+				'ends_at_gmt'    => $next,
+				'expected_total' => $billing_total,
+				'currency'       => $order->get_currency(),
+			],
+			$lock
+		);
 
 		return Contracts::update(
 			$contract_id,

@@ -94,8 +94,16 @@ final class ContractCreationOutcomesTest extends LiteIntegrationTestCase {
 		$created = ( new ContractCreationHandler() )->create_contract( $order, $plan );
 		$this->assertInstanceOf( ContractView::class, $created );
 
+		// Written under the checkout lock, so the returned view still shows it; a fresh read
+		// after the release does not, and otherwise matches.
+		$this->assertSame( ContractCreationHandler::OPERATION, $created->get_lock_state()['operation'] ?? null );
 		$view = Contracts::get( $created->get_id() );
-		$this->assertEquals( $view, $created, 'The returned view matches a fresh read.' );
+		$this->assertNull( $view->get_lock_state() );
+		$lock_state = new \ReflectionProperty( ContractView::class, 'lock_state' );
+		$lock_state->setAccessible( true );
+		$unlocked = clone $created;
+		$lock_state->setValue( $unlocked, null );
+		$this->assertEquals( $view, $unlocked, 'The returned view matches a fresh read.' );
 
 		return $view;
 	}
