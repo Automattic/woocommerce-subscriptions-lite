@@ -14,7 +14,7 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Lifecycle;
 
 use DateTimeImmutable;
 use DateTimeZone;
-use Automattic\WooCommerce\SubscriptionsEngine\Api\ContractLockedException;
+use WP_Error;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
@@ -35,7 +35,6 @@ final class Reactivation {
 	 */
 	public const OPERATION = 'reactivate';
 
-	// phpcs:disable Squiz.Commenting.FunctionCommentThrowTag.WrongNumber -- @throws also lists the lock conflict, thrown from a variable.
 	/**
 	 * Reactivate an on-hold contract under its lock; every check reads after acquiring. The
 	 * anchor is the next payment when one was set while held (hold clears it, so it was set
@@ -43,23 +42,18 @@ final class Reactivation {
 	 *
 	 * @param int                    $contract_id Contract id.
 	 * @param DateTimeImmutable|null $now         The current moment; the UTC wall clock when omitted.
-	 * @return ContractView|null The reactivated contract, or null when it does not exist or is not Lite's.
+	 * @return ContractView|WP_Error|null The reactivated contract; a lock conflict when another
+	 *                                    operation holds the lock; null when it does not exist or is not Lite's.
 	 * @throws LifecycleNotAllowedException If the contract is not on hold, or a renewal payment is outstanding.
-	 * @throws ContractLockedException If another operation holds the contract's lock.
 	 */
-	public function reactivate( int $contract_id, ?DateTimeImmutable $now = null ): ?ContractView {
+	public function reactivate( int $contract_id, ?DateTimeImmutable $now = null ) {
 		$lock     = HeldLocks::get( $contract_id );
 		$acquired = null === $lock;
 		if ( $acquired ) {
-			$lock = Contracts::lock( $contract_id, self::OPERATION );
+			$lock = HeldLocks::acquire( $contract_id, self::OPERATION );
 			if ( null === $lock ) {
-				$conflict = HeldLocks::get_conflict( $contract_id );
-				if ( null === $conflict ) {
-					return null;
-				}
-				throw $conflict;
+				return HeldLocks::get_conflict( $contract_id );
 			}
-			HeldLocks::register( $lock );
 		}
 
 		try {
@@ -113,7 +107,6 @@ final class Reactivation {
 			}
 		}
 	}
-	// phpcs:enable Squiz.Commenting.FunctionCommentThrowTag.WrongNumber
 
 	/**
 	 * The next payment after a hold.

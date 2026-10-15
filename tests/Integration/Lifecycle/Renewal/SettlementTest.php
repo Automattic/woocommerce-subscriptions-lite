@@ -465,6 +465,21 @@ final class SettlementTest extends LiteIntegrationTestCase {
 		$this->assertSame( [ 'woocommerce_subscriptions_lite_renewal_paid' => 1 ], $this->fired );
 	}
 
+	public function test_settle_under_another_operations_lock_returns_the_conflict_and_writes_nothing(): void {
+		[ $contract_id, $order ] = $this->seed_renewal();
+		$lock                    = $this->hold_lock( $contract_id, 'hold' );
+		$this->pay( $order );
+
+		$conflict = ( new Settlement() )->settle( $order, $this->utc( '2026-02-16 12:00:00' ) );
+
+		$this->assert_lock_conflict( $conflict, $contract_id, 'hold' );
+		$this->assertSame( CycleStatus::PENDING, $this->head( $contract_id )->get_status() );
+		$this->assertSame( [], $this->fired );
+		$lock->release();
+		$this->assertNull( ( new Settlement() )->settle( $order, $this->utc( '2026-02-16 12:00:00' ) ) );
+		$this->assertSame( CycleStatus::BILLED, $this->head( $contract_id )->get_status() );
+	}
+
 	public function test_a_retry_refused_again_schedules_the_next_one(): void {
 		[ $contract_id, $order ] = $this->seed_renewal();
 		$this->hold_lock( $contract_id, 'hold' );

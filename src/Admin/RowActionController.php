@@ -31,11 +31,13 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Admin;
 
 use Throwable;
 use WC_Order;
+use WP_Error;
 use Automattic\WooCommerce\Enums\OrderStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\ContractLockedException;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\CycleStatus;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Cancellation;
+use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\HeldLocks;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\RenewalProcessor;
 
@@ -51,9 +53,10 @@ defined( 'ABSPATH' ) || exit;
 final class RowActionController {
 
 	/**
-	 * Canceller; false when the contract does not exist. Production: `Cancellation::cancel()`.
+	 * Canceller; false when the contract does not exist, a `WP_Error` on a lock conflict.
+	 * Production: `Cancellation::cancel()`.
 	 *
-	 * @var callable(int): bool
+	 * @var callable(int): (bool|WP_Error)
 	 */
 	private $cancel;
 
@@ -75,7 +78,7 @@ final class RowActionController {
 	/**
 	 * Construct the controller.
 	 *
-	 * @param (callable(int): bool)|null                          $cancel    Canceller; defaults to `Cancellation::cancel()`.
+	 * @param (callable(int): (bool|WP_Error))|null               $cancel    Canceller; defaults to `Cancellation::cancel()`.
 	 * @param (callable(): bool)|null                             $can       Capability check; defaults to `current_user_can()`.
 	 * @param (callable(string, array<string, mixed>): void)|null $log_error Error logger; defaults to `wc_get_logger()->error()`.
 	 */
@@ -84,8 +87,10 @@ final class RowActionController {
 		?callable $can = null,
 		?callable $log_error = null
 	) {
-		$this->cancel    = $cancel ?? static function ( int $id ): bool {
-			return null !== ( new Cancellation() )->cancel( $id );
+		$this->cancel    = $cancel ?? static function ( int $id ) {
+			$cancelled = ( new Cancellation() )->cancel( $id );
+
+			return $cancelled instanceof WP_Error ? $cancelled : null !== $cancelled;
 		};
 		$this->can       = $can ?? static function (): bool {
 			return current_user_can( PageController::CAPABILITY );
@@ -171,12 +176,16 @@ final class RowActionController {
 		try {
 			$order = ( new RenewalProcessor() )->renew_now( $contract_id );
 		} catch ( ContractLockedException $e ) {
-			return self::get_lock_conflict_result( $e );
+			$order = HeldLocks::get_refused_conflict( $e );
 		} catch ( Throwable $e ) {
 			$this->log_failure( 'renew', $contract_id, $e );
 			return RowActionResult::failed(
 				__( 'Renewal could not be processed. Check the WooCommerce logs for details.', 'woocommerce-subscriptions-lite' )
 			);
+		}
+
+		if ( $order instanceof WP_Error ) {
+			return self::get_lock_conflict_result( $order );
 		}
 
 		if ( null === $order && self::renewal_order_build_failed( $contract_id ) ) {
@@ -273,12 +282,16 @@ final class RowActionController {
 		try {
 			$cancelled = ( $this->cancel )( $contract_id );
 		} catch ( ContractLockedException $e ) {
-			return self::get_lock_conflict_result( $e );
+			$cancelled = HeldLocks::get_refused_conflict( $e );
 		} catch ( Throwable $e ) {
 			$this->log_failure( 'cancel', $contract_id, $e );
 			return RowActionResult::failed(
 				__( 'The subscription could not be cancelled. Check the WooCommerce logs for details.', 'woocommerce-subscriptions-lite' )
 			);
+		}
+
+		if ( $cancelled instanceof WP_Error ) {
+			return self::get_lock_conflict_result( $cancelled );
 		}
 
 		if ( ! $cancelled ) {
@@ -298,12 +311,10 @@ final class RowActionController {
 	 * The notice for an action refused because another operation holds the contract's lock:
 	 * a retry hint naming the operation, not an error.
 	 *
-	 * @param ContractLockedException $conflict The lock conflict.
+	 * @param WP_Error $conflict The lock conflict.
 	 */
-	private static function get_lock_conflict_result( ContractLockedException $conflict ): RowActionResult {
-		return RowActionResult::info(
-			StatusLabels::get_lock_conflict_message( $conflict->get_contract_id(), $conflict->get_operation() ) . ' ' . __( 'Try again shortly.', 'woocommerce-subscriptions-lite' )
-		);
+	private static function get_lock_conflict_result( WP_Error $conflict ): RowActionResult {
+		return RowActionResult::info( $conflict->get_error_message() . ' ' . __( 'Try again shortly.', 'woocommerce-subscriptions-lite' ) );
 	}
 
 	/**

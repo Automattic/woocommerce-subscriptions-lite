@@ -13,11 +13,11 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Lifecycle;
 
-use Automattic\WooCommerce\SubscriptionsEngine\Api\ContractLockedException;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
+use WP_Error;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -45,29 +45,23 @@ final class Cancellation {
 		return in_array( $status, self::CANCELLABLE_STATUSES, true );
 	}
 
-	// phpcs:disable Squiz.Commenting.FunctionCommentThrowTag.WrongNumber -- @throws also lists the lock conflict, thrown from a variable.
 	/**
 	 * Cancel a draft, active, on-hold or pending-cancellation contract now, under its lock.
 	 * Cancelling a cancelled contract writes nothing and still succeeds.
 	 *
 	 * @param int $contract_id Contract id.
-	 * @return ContractView|null The cancelled contract, or null when it does not exist or is not Lite's.
+	 * @return ContractView|WP_Error|null The cancelled contract; a lock conflict when another
+	 *                                    operation holds the lock; null when it does not exist or is not Lite's.
 	 * @throws LifecycleNotAllowedException If the contract's status cannot be cancelled.
-	 * @throws ContractLockedException If another operation holds the contract's lock.
 	 */
-	public function cancel( int $contract_id ): ?ContractView {
+	public function cancel( int $contract_id ) {
 		$lock     = HeldLocks::get( $contract_id );
 		$acquired = null === $lock;
 		if ( $acquired ) {
-			$lock = Contracts::lock( $contract_id, self::OPERATION );
+			$lock = HeldLocks::acquire( $contract_id, self::OPERATION );
 			if ( null === $lock ) {
-				$conflict = HeldLocks::get_conflict( $contract_id );
-				if ( null === $conflict ) {
-					return null;
-				}
-				throw $conflict;
+				return HeldLocks::get_conflict( $contract_id );
 			}
-			HeldLocks::register( $lock );
 		}
 
 		try {
@@ -114,9 +108,7 @@ final class Cancellation {
 			}
 		}
 	}
-	// phpcs:enable Squiz.Commenting.FunctionCommentThrowTag.WrongNumber
 
-	// phpcs:disable Squiz.Commenting.FunctionCommentThrowTag.WrongNumber -- @throws also lists the lock conflict, thrown from a variable.
 	/**
 	 * Wind an active or on-hold contract down at the end of the current period, under its
 	 * lock: it moves to pending-cancellation and, when it has no end date yet, ends at its
@@ -124,23 +116,18 @@ final class Cancellation {
 	 * pending-cancellation contract writes nothing and still succeeds.
 	 *
 	 * @param int $contract_id Contract id.
-	 * @return ContractView|null The pending-cancellation contract, or null when it does not exist or is not Lite's.
+	 * @return ContractView|WP_Error|null The pending-cancellation contract; a lock conflict when another
+	 *                                    operation holds the lock; null when it does not exist or is not Lite's.
 	 * @throws LifecycleNotAllowedException If the contract is not active, on hold or pending cancellation.
-	 * @throws ContractLockedException If another operation holds the contract's lock.
 	 */
-	public function cancel_at_period_end( int $contract_id ): ?ContractView {
+	public function cancel_at_period_end( int $contract_id ) {
 		$lock     = HeldLocks::get( $contract_id );
 		$acquired = null === $lock;
 		if ( $acquired ) {
-			$lock = Contracts::lock( $contract_id, self::OPERATION );
+			$lock = HeldLocks::acquire( $contract_id, self::OPERATION );
 			if ( null === $lock ) {
-				$conflict = HeldLocks::get_conflict( $contract_id );
-				if ( null === $conflict ) {
-					return null;
-				}
-				throw $conflict;
+				return HeldLocks::get_conflict( $contract_id );
 			}
-			HeldLocks::register( $lock );
 		}
 
 		try {
@@ -180,7 +167,6 @@ final class Cancellation {
 			}
 		}
 	}
-	// phpcs:enable Squiz.Commenting.FunctionCommentThrowTag.WrongNumber
 
 	/**
 	 * The fields that wind `$contract` down: pending-cancellation, no next-due moment, and

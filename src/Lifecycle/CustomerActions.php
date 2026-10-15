@@ -18,7 +18,6 @@ use WP_Error;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\ContractActions;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\ContractLockedException;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
-use Automattic\WooCommerce\SubscriptionsLite\Admin\StatusLabels;
 use Automattic\WooCommerce\SubscriptionsLite\Contracts\CustomerVisibility;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\UnpaidRenewal;
@@ -133,11 +132,11 @@ final class CustomerActions {
 
 	/**
 	 * Run a lifecycle flow and map its outcome: a missing contract is a 404, a status the flow
-	 * rejects a 409, and another operation holding the contract's lock a 409 the portal shows
+	 * rejects a 409, and a lock conflict (lost acquire or refused write) a 409 the portal shows
 	 * (its retry advice comes from the portal's error suffix).
 	 *
-	 * @param callable( int ): ?ContractView $flow        Lifecycle flow method.
-	 * @param int                            $contract_id Contract id.
+	 * @param callable( int ): (ContractView|WP_Error|null) $flow        Lifecycle flow method.
+	 * @param int                                           $contract_id Contract id.
 	 * @return ContractView|WP_Error
 	 */
 	private static function run( callable $flow, int $contract_id ) {
@@ -150,11 +149,12 @@ final class CustomerActions {
 				[ 'status' => 409 ]
 			);
 		} catch ( ContractLockedException $e ) {
-			return new WP_Error(
-				'woocommerce_subscriptions_lite_contract_locked',
-				StatusLabels::get_lock_conflict_message( $e->get_contract_id(), $e->get_operation() ),
-				[ 'status' => 409 ]
-			);
+			$result = HeldLocks::get_refused_conflict( $e );
+		}
+
+		if ( $result instanceof WP_Error ) {
+			$result->add_data( [ 'status' => 409 ] + (array) $result->get_error_data() );
+			return $result;
 		}
 
 		if ( null === $result ) {

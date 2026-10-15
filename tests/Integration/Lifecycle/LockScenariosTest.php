@@ -12,7 +12,6 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Lifecycle;
 
-use Automattic\WooCommerce\SubscriptionsEngine\Api\ContractLockedException;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\CycleView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
@@ -215,16 +214,11 @@ final class LockScenariosTest extends LiteIntegrationTestCase {
 			'woocommerce_logger_log_message',
 			function ( $message ) use ( $contract_id, &$conflict ) {
 				if ( null === $conflict && false !== strpos( (string) $message, 'only active contracts renew' ) ) {
-					try {
-						$this->as_another_request(
-							static function () use ( $contract_id ): void {
-								( new Reactivation() )->reactivate( $contract_id );
-							}
-						);
-						$conflict = false;
-					} catch ( ContractLockedException $e ) {
-						$conflict = $e;
-					}
+					$conflict = $this->as_another_request(
+						static function () use ( $contract_id ) {
+							return ( new Reactivation() )->reactivate( $contract_id );
+						}
+					);
 				}
 				return $message;
 			}
@@ -232,8 +226,7 @@ final class LockScenariosTest extends LiteIntegrationTestCase {
 
 		$this->assertSame( 1, $this->run_due_dispatch( $this->now() ) );
 
-		$this->assertInstanceOf( ContractLockedException::class, $conflict );
-		$this->assertSame( 'due', $conflict->get_operation() );
+		$this->assert_lock_conflict( $conflict, $contract_id, 'due' );
 		$contract = $this->get_contract( $contract_id );
 		$this->assertSame( ContractStatus::ON_HOLD, $contract->get_status() );
 		$this->assertNull( $contract->get_next_payment_gmt(), 'The handler cleared the due moment and nothing re-armed it.' );

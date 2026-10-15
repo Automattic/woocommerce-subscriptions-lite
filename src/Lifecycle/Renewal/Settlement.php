@@ -52,6 +52,7 @@ use DateTimeImmutable;
 use DateTimeZone;
 use Throwable;
 use WC_Order;
+use WP_Error;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -162,11 +163,16 @@ final class Settlement {
 		}
 
 		try {
-			$this->settle_deleted( $order_id );
+			$conflict = $this->settle_deleted( $order_id );
 		} catch ( ContractLockedException $e ) {
-			$this->schedule_retry( $order_id, $e, false );
+			$conflict = HeldLocks::get_refused_conflict( $e );
 		} catch ( Throwable $e ) {
 			$this->log_failure( sprintf( 'Settlement: settling deleted renewal order %d failed: %s', $order_id, $e->getMessage() ), $order_id );
+			return;
+		}
+
+		if ( null !== $conflict ) {
+			$this->schedule_retry( $order_id, $conflict, false );
 		}
 	}
 
@@ -174,16 +180,17 @@ final class Settlement {
 	 * Schedule a retry of the order's settlement, once: an action already pending for it covers
 	 * this conflict too.
 	 *
-	 * @param int                     $order_id Order id.
-	 * @param ContractLockedException $conflict The lock conflict.
-	 * @param bool                    $paid     Whether the order is paid.
+	 * @param int      $order_id Order id.
+	 * @param WP_Error $conflict The lock conflict.
+	 * @param bool     $paid     Whether the order is paid.
 	 */
-	private function schedule_retry( int $order_id, ContractLockedException $conflict, bool $paid ): void {
+	private function schedule_retry( int $order_id, WP_Error $conflict, bool $paid ): void {
+		$data = (array) $conflict->get_error_data();
 		wc_get_logger()->info(
-			sprintf( 'Settlement: renewal order %d waits for the %s operation on contract %d; its settlement is retried.', $order_id, (string) $conflict->get_operation(), $conflict->get_contract_id() ),
+			sprintf( 'Settlement: renewal order %d waits for the %s operation on contract %d; its settlement is retried.', $order_id, (string) ( $data['operation'] ?? '' ), (int) ( $data['contract_id'] ?? 0 ) ),
 			[
 				'source'      => Package::EXTENSION_SLUG,
-				'contract_id' => $conflict->get_contract_id(),
+				'contract_id' => $data['contract_id'] ?? null,
 				'order_id'    => $order_id,
 			]
 		);
@@ -270,11 +277,16 @@ final class Settlement {
 		}
 
 		try {
-			$this->settle_deleted( $order->get_id() );
+			$conflict = $this->settle_deleted( $order->get_id() );
 		} catch ( ContractLockedException $e ) {
-			$this->schedule_retry( $order->get_id(), $e, false );
+			$conflict = HeldLocks::get_refused_conflict( $e );
 		} catch ( Throwable $e ) {
 			$this->log_failure( sprintf( 'Settlement: settling removed renewal order %d failed: %s', $order->get_id(), $e->getMessage() ), $order->get_id() );
+			return;
+		}
+
+		if ( null !== $conflict ) {
+			$this->schedule_retry( $order->get_id(), $conflict, false );
 		}
 	}
 
@@ -283,27 +295,22 @@ final class Settlement {
 	 * contract's lock.
 	 *
 	 * @param int $order_id Order id.
-	 * @throws ContractLockedException If another operation holds the contract's lock.
+	 * @return WP_Error|null A lock conflict when another operation holds the lock, else null.
 	 */
-	private function settle_deleted( int $order_id ): void {
+	private function settle_deleted( int $order_id ): ?WP_Error {
 		$linked = Contracts::find_cycles_by_order( $order_id )[0] ?? null;
 		if ( null === $linked ) {
-			return;
+			return null;
 		}
 
 		$contract_id = $linked->get_contract_id();
 		$lock        = HeldLocks::get( $contract_id );
 		$acquired    = null === $lock;
 		if ( $acquired ) {
-			$lock = Contracts::lock( $contract_id, self::OPERATION );
+			$lock = HeldLocks::acquire( $contract_id, self::OPERATION );
 			if ( null === $lock ) {
-				$conflict = HeldLocks::get_conflict( $contract_id );
-				if ( null === $conflict ) {
-					return;
-				}
-				throw $conflict;
+				return HeldLocks::get_conflict( $contract_id );
 			}
-			HeldLocks::register( $lock );
 		}
 
 		try {
@@ -312,6 +319,8 @@ final class Settlement {
 			if ( null !== $contract && Package::EXTENSION_SLUG === $contract->get_extension_slug() && null !== $cycle ) {
 				$this->settle_dead( $contract, $cycle, $lock );
 			}
+
+			return null;
 		} finally {
 			if ( $acquired ) {
 				HeldLocks::release( $lock );
@@ -334,11 +343,16 @@ final class Settlement {
 		}
 
 		try {
-			$this->settle( $order );
+			$conflict = $this->settle( $order );
 		} catch ( ContractLockedException $e ) {
-			$this->schedule_retry( $order->get_id(), $e, $order->is_paid() );
+			$conflict = HeldLocks::get_refused_conflict( $e );
 		} catch ( Throwable $e ) {
 			$this->log_failure( sprintf( 'Settlement: settling renewal order %d failed: %s', $order->get_id(), $e->getMessage() ), $order->get_id() );
+			return;
+		}
+
+		if ( null !== $conflict ) {
+			$this->schedule_retry( $order->get_id(), $conflict, $order->is_paid() );
 		}
 	}
 
@@ -349,21 +363,18 @@ final class Settlement {
 	 *
 	 * @param WC_Order               $order The order (re-read, so a stale object is fine).
 	 * @param DateTimeImmutable|null $now   The current moment; the UTC wall clock when omitted.
-	 * @throws ContractLockedException If another operation holds the contract's lock.
+	 * @return WP_Error|null A lock conflict when another operation holds the lock, else null.
 	 */
-	public function settle( WC_Order $order, ?DateTimeImmutable $now = null ): void {
+	public function settle( WC_Order $order, ?DateTimeImmutable $now = null ): ?WP_Error {
 		$fresh_order = wc_get_order( $order->get_id() );
 		if ( ! $fresh_order instanceof WC_Order || RenewalOrderBuilder::CREATED_VIA !== $fresh_order->get_created_via() ) {
-			return;
+			return null;
 		}
 
 		$order_id = $fresh_order->get_id();
 		$linked   = Contracts::find_cycles_by_order( $order_id )[0] ?? null;
 		if ( null === $linked ) {
-			if ( $fresh_order->is_paid() ) {
-				$this->settle_replaced_paid( $fresh_order, $now );
-			}
-			return;
+			return $fresh_order->is_paid() ? $this->settle_replaced_paid( $fresh_order, $now ) : null;
 		}
 
 		$utc_now     = ( $now ?? new DateTimeImmutable( 'now', new DateTimeZone( 'UTC' ) ) )->setTimezone( new DateTimeZone( 'UTC' ) );
@@ -371,30 +382,22 @@ final class Settlement {
 		$lock        = HeldLocks::get( $contract_id );
 		$acquired    = null === $lock;
 		if ( $acquired ) {
-			$lock = Contracts::lock( $contract_id, self::OPERATION );
+			$lock = HeldLocks::acquire( $contract_id, self::OPERATION );
 			if ( null === $lock ) {
-				$conflict = HeldLocks::get_conflict( $contract_id );
-				if ( null === $conflict ) {
-					return;
-				}
-				throw $conflict;
+				return HeldLocks::get_conflict( $contract_id );
 			}
-			HeldLocks::register( $lock );
 		}
 
 		try {
 			$contract = Contracts::get( $contract_id );
 			if ( null === $contract || Package::EXTENSION_SLUG !== $contract->get_extension_slug() ) {
-				return;
+				return null;
 			}
 
 			$cycle = self::find_order_cycle( $order_id, $contract_id );
 			if ( null === $cycle ) {
 				// The order was relinked away before the lock: settle it as a replaced order.
-				if ( $fresh_order->is_paid() ) {
-					$this->settle_replaced_paid( $fresh_order, $now );
-				}
-				return;
+				return $fresh_order->is_paid() ? $this->settle_replaced_paid( $fresh_order, $now ) : null;
 			}
 
 			if ( $fresh_order->is_paid() ) {
@@ -406,6 +409,8 @@ final class Settlement {
 			} elseif ( self::is_dead( $fresh_order ) ) {
 				$this->settle_dead( $contract, $cycle, $lock );
 			}
+
+			return null;
 		} finally {
 			if ( $acquired ) {
 				HeldLocks::release( $lock );
@@ -687,32 +692,27 @@ final class Settlement {
 	 *
 	 * @param WC_Order               $order The paid replaced order.
 	 * @param DateTimeImmutable|null $now   The current moment.
-	 * @throws ContractLockedException If another operation holds the contract's lock.
+	 * @return WP_Error|null A lock conflict when another operation holds the lock, else null.
 	 */
-	private function settle_replaced_paid( WC_Order $order, ?DateTimeImmutable $now ): void {
+	private function settle_replaced_paid( WC_Order $order, ?DateTimeImmutable $now ): ?WP_Error {
 		$contract_id = (int) $order->get_meta( self::REPLACED_CONTRACT_META );
 		if ( $contract_id <= 0 ) {
-			return;
+			return null;
 		}
 
 		$lock     = HeldLocks::get( $contract_id );
 		$acquired = null === $lock;
 		if ( $acquired ) {
-			$lock = Contracts::lock( $contract_id, self::OPERATION );
+			$lock = HeldLocks::acquire( $contract_id, self::OPERATION );
 			if ( null === $lock ) {
-				$conflict = HeldLocks::get_conflict( $contract_id );
-				if ( null === $conflict ) {
-					return;
-				}
-				throw $conflict;
+				return HeldLocks::get_conflict( $contract_id );
 			}
-			HeldLocks::register( $lock );
 		}
 
 		try {
 			$contract = Contracts::get( $contract_id );
 			if ( null === $contract || Package::EXTENSION_SLUG !== $contract->get_extension_slug() ) {
-				return;
+				return null;
 			}
 
 			$cycle_id = (int) $order->get_meta( self::REPLACED_CYCLE_META );
@@ -724,7 +724,7 @@ final class Settlement {
 					sprintf( 'Settlement: renewal order %d was paid after it was replaced, and its cycle %d no longer exists; a refund is needed.', $order->get_id(), $cycle_id ),
 					$contract_id
 				);
-				return;
+				return null;
 			}
 
 			$replacement_id = $cycle->get_order_id();
@@ -756,7 +756,7 @@ final class Settlement {
 						sprintf( 'Settlement: renewal order %d was paid after it was replaced and could not be relinked to cycle %d; a refund is needed.', $order->get_id(), $cycle_id ),
 						$contract_id
 					);
-					return;
+					return null;
 				}
 
 				if ( $cancel_replacement ) {
@@ -764,12 +764,11 @@ final class Settlement {
 					$replacement->update_status( OrderStatus::CANCELLED, sprintf( __( 'Order #%d paid this renewal after this order replaced it.', 'woocommerce-subscriptions-lite' ), $order->get_id() ) );
 				}
 
-				$this->settle( $order, $now );
-				return;
+				return $this->settle( $order, $now );
 			}
 
 			if ( $replacement_id === $order->get_id() ) {
-				return;
+				return null;
 			}
 
 			if ( null !== $replacement_id && CycleStatus::BILLED === $cycle->get_status() ) {
@@ -789,6 +788,8 @@ final class Settlement {
 			}
 
 			self::flag_for_refund( $order, $note, $message, $contract_id );
+
+			return null;
 		} finally {
 			if ( $acquired ) {
 				HeldLocks::release( $lock );

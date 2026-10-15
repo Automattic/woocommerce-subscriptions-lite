@@ -11,7 +11,6 @@ declare( strict_types=1 );
 namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Lifecycle;
 
 use RuntimeException;
-use Automattic\WooCommerce\SubscriptionsEngine\Api\ContractLockedException;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
@@ -222,16 +221,13 @@ final class HoldTest extends LiteIntegrationTestCase {
 		$this->assertNull( $this->get_contract( $contract_id )->get_lock_state() );
 	}
 
-	public function test_hold_while_another_operation_holds_the_lock_writes_nothing(): void {
+	public function test_hold_while_another_operation_holds_the_lock_returns_the_conflict_and_writes_nothing(): void {
 		$contract_id = $this->seed_contract();
 		$this->hold_lock( $contract_id, 'renewal' );
 
-		try {
-			( new Hold() )->hold( $contract_id );
-			$this->fail( 'Expected ContractLockedException.' );
-		} catch ( ContractLockedException $e ) {
-			$this->assertSame( 'renewal', $e->get_operation() );
-		}
+		$conflict = ( new Hold() )->hold( $contract_id );
+
+		$this->assert_lock_conflict( $conflict, $contract_id, 'renewal' );
 
 		$stored = $this->get_contract( $contract_id );
 		$this->assertSame( ContractStatus::ACTIVE, $stored->get_status() );

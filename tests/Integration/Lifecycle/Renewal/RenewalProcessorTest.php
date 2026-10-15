@@ -9,7 +9,6 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Lifecycle\Renewal;
 
-use Automattic\WooCommerce\SubscriptionsEngine\Api\ContractLockedException;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\ContractLock;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Payments;
@@ -270,17 +269,14 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 		$this->assertSame( ContractStatus::ACTIVE, $this->get_contract( $contract_id )->get_status() );
 	}
 
-	public function test_renew_now_while_another_operation_holds_the_lock_writes_nothing(): void {
+	public function test_renew_now_while_another_operation_holds_the_lock_returns_the_conflict_and_writes_nothing(): void {
 		$this->support_engine_charges( 'cod' );
 		$contract_id = $this->make_contract();
 		$this->hold_lock( $contract_id, 'due' );
 
-		try {
-			( new RenewalProcessor() )->renew_now( $contract_id );
-			$this->fail( 'Expected ContractLockedException.' );
-		} catch ( ContractLockedException $e ) {
-			$this->assertSame( 'due', $e->get_operation() );
-		}
+		$conflict = ( new RenewalProcessor() )->renew_now( $contract_id );
+
+		$this->assert_lock_conflict( $conflict, $contract_id, 'due' );
 
 		$this->assertSame( 0, $this->charge_count() );
 		$this->assertSame( [], $this->renewal_order_ids() );

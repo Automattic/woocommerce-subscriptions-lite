@@ -46,6 +46,7 @@ use DateTimeZone;
 use RuntimeException;
 use WC_Order;
 use WC_Product_Simple;
+use WP_Error;
 use WP_UnitTestCase;
 
 /**
@@ -592,6 +593,22 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 		$this->assertNotNull( $lock, 'The lock is free.' );
 
 		return $lock;
+	}
+
+	/**
+	 * Assert `$result` is Lite's lock conflict on the contract, labelled with `$operation`.
+	 *
+	 * @param mixed  $result      The flow's result.
+	 * @param int    $contract_id Contract id.
+	 * @param string $operation   The holder's operation label.
+	 */
+	protected function assert_lock_conflict( $result, int $contract_id, string $operation ): void {
+		$this->assertInstanceOf( WP_Error::class, $result );
+		$this->assertSame( 'woocommerce_subscriptions_lite_contract_locked', $result->get_error_code() );
+		$data = $result->get_error_data();
+		$this->assertSame( $contract_id, $data['contract_id'] ?? null );
+		$this->assertSame( $operation, $data['operation'] ?? null );
+		$this->assertInstanceOf( DateTimeImmutable::class, $data['locked_until'] ?? null );
 	}
 
 	/**

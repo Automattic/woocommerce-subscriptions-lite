@@ -12,7 +12,6 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Lifecycle;
 
 use DateTimeImmutable;
 use DateTimeZone;
-use Automattic\WooCommerce\SubscriptionsEngine\Api\ContractLockedException;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
@@ -343,16 +342,13 @@ final class ReactivationTest extends LiteIntegrationTestCase {
 		$this->assertSame( ContractStatus::ON_HOLD, $this->get_contract( $contract_id )->get_status() );
 	}
 
-	public function test_reactivation_while_another_operation_holds_the_lock_leaves_the_contract_on_hold(): void {
+	public function test_reactivation_while_another_operation_holds_the_lock_returns_the_conflict_and_stays_on_hold(): void {
 		$contract_id = $this->seed_held_contract( null, $this->make_monthly_plan_id(), '2099-01-01 00:00:00' );
 		$this->hold_lock( $contract_id, 'cancel' );
 
-		try {
-			( new Reactivation() )->reactivate( $contract_id, $this->utc( '2026-02-01 00:00:00' ) );
-			$this->fail( 'Expected ContractLockedException.' );
-		} catch ( ContractLockedException $e ) {
-			$this->assertSame( 'cancel', $e->get_operation() );
-		}
+		$conflict = ( new Reactivation() )->reactivate( $contract_id, $this->utc( '2026-02-01 00:00:00' ) );
+
+		$this->assert_lock_conflict( $conflict, $contract_id, 'cancel' );
 
 		$stored = $this->get_contract( $contract_id );
 		$this->assertSame( ContractStatus::ON_HOLD, $stored->get_status() );

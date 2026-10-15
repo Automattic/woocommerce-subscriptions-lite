@@ -1,6 +1,6 @@
 <?php
 /**
- * Integration tests for HeldLocks: register, share within the request, release, conflicts.
+ * Integration tests for HeldLocks: acquire, register, share within the request, release, conflicts.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Tests
  */
@@ -56,17 +56,50 @@ final class HeldLocksTest extends LiteIntegrationTestCase {
 		HeldLocks::release( $second );
 	}
 
+	public function test_acquire_takes_and_registers_the_lock(): void {
+		$contract_id = $this->seed_contract();
+
+		$lock = HeldLocks::acquire( $contract_id, 'hold' );
+
+		$this->assertNotNull( $lock );
+		$this->assertSame( $lock, HeldLocks::get( $contract_id ) );
+		$this->assertSame( 'hold', $this->get_contract( $contract_id )->get_lock_state()['operation'] ?? null );
+		HeldLocks::release( $lock );
+	}
+
+	public function test_a_lost_acquire_is_null_and_registers_nothing(): void {
+		$contract_id = $this->seed_contract();
+		$lock        = $this->hold_lock( $contract_id, 'cancel' );
+
+		$this->assertNull( HeldLocks::acquire( $contract_id, 'hold' ) );
+		$this->assertNull( HeldLocks::acquire( 999999, 'hold' ) );
+		$this->assertNull( HeldLocks::get( $contract_id ) );
+		$lock->release();
+	}
+
 	public function test_a_held_lock_is_a_conflict_labelled_with_its_operation(): void {
 		$contract_id = $this->seed_contract();
 		$lock        = $this->hold_lock( $contract_id, 'cancel' );
 
 		$conflict = HeldLocks::get_conflict( $contract_id );
 
-		$this->assertInstanceOf( ContractLockedException::class, $conflict );
-		$this->assertSame( $contract_id, $conflict->get_contract_id() );
-		$this->assertSame( 'cancel', $conflict->get_operation() );
-		$this->assertNotNull( $conflict->get_locked_until() );
+		$this->assert_lock_conflict( $conflict, $contract_id, 'cancel' );
+		$this->assertStringContainsString( '#' . $contract_id, $conflict->get_error_message() );
 		$lock->release();
+	}
+
+	public function test_a_refused_write_is_the_same_conflict(): void {
+		$contract_id = $this->seed_contract();
+		$lock        = $this->hold_lock( $contract_id, 'cancel' );
+
+		try {
+			Contracts::update( $contract_id, [ 'next_payment_gmt' => '2099-03-01 00:00:00' ] );
+			$this->fail( 'Expected the unlocked write to be refused.' );
+		} catch ( ContractLockedException $e ) {
+			$this->assert_lock_conflict( HeldLocks::get_refused_conflict( $e ), $contract_id, 'cancel' );
+		} finally {
+			$lock->release();
+		}
 	}
 
 	public function test_a_missing_or_foreign_contract_is_no_conflict(): void {

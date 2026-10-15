@@ -28,6 +28,7 @@ use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
+use WP_Error;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -41,30 +42,24 @@ final class Hold {
 	 */
 	public const OPERATION = 'hold';
 
-	// phpcs:disable Squiz.Commenting.FunctionCommentThrowTag.WrongNumber -- @throws also lists the lock conflict, thrown from a variable.
 	/**
 	 * Hold an active contract under its lock: read and decide after acquiring, then the
 	 * anchor, then the status (last). Holding an on-hold contract writes nothing and still
 	 * succeeds. A failed anchor write throws a `RuntimeException` before anything is disarmed.
 	 *
 	 * @param int $contract_id Contract id.
-	 * @return ContractView|null The held contract, or null when it does not exist or is not Lite's.
+	 * @return ContractView|WP_Error|null The held contract; a lock conflict when another operation
+	 *                                    holds the lock; null when it does not exist or is not Lite's.
 	 * @throws LifecycleNotAllowedException If the contract is neither active nor on hold.
-	 * @throws ContractLockedException If another operation holds the contract's lock.
 	 */
-	public function hold( int $contract_id ): ?ContractView {
+	public function hold( int $contract_id ) {
 		$lock     = HeldLocks::get( $contract_id );
 		$acquired = null === $lock;
 		if ( $acquired ) {
-			$lock = Contracts::lock( $contract_id, self::OPERATION );
+			$lock = HeldLocks::acquire( $contract_id, self::OPERATION );
 			if ( null === $lock ) {
-				$conflict = HeldLocks::get_conflict( $contract_id );
-				if ( null === $conflict ) {
-					return null;
-				}
-				throw $conflict;
+				return HeldLocks::get_conflict( $contract_id );
 			}
-			HeldLocks::register( $lock );
 		}
 
 		try {
@@ -112,7 +107,6 @@ final class Hold {
 			}
 		}
 	}
-	// phpcs:enable Squiz.Commenting.FunctionCommentThrowTag.WrongNumber
 
 	/**
 	 * Place Lite's hold for an unpaid renewal: on hold with no due moment, and no hold anchor.

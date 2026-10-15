@@ -280,17 +280,22 @@ final class ContractCreationHandler {
 			}
 
 			try {
-				$this->resume_draft( $order, $contract->get_id(), $plan );
+				$locked = ! $this->resume_draft( $order, $contract->get_id(), $plan );
 			} catch ( ContractLockedException $e ) {
-				wc_get_logger()->info(
-					sprintf( 'ContractCreationHandler: draft contract %d of order %d is locked by %s; its creation is resumed later.', $contract->get_id(), $order->get_id(), (string) $e->get_operation() ),
-					[ 'source' => self::LOG_SOURCE ]
-				);
-				self::schedule_resume( $order->get_id(), self::RESUME_DELAY_SECONDS );
+				$locked = true;
 			} catch ( Throwable $e ) {
 				$resumed = false;
 				$this->log_error( sprintf( 'failed to resume draft contract %d of order %d: %s', $contract->get_id(), $order->get_id(), $e->getMessage() ) );
 				self::schedule_resume( $order->get_id(), ContractLock::TTL_SECONDS + self::RESUME_DELAY_SECONDS );
+				continue;
+			}
+
+			if ( $locked ) {
+				wc_get_logger()->info(
+					sprintf( 'ContractCreationHandler: draft contract %d of order %d is locked by another operation; its creation is resumed later.', $contract->get_id(), $order->get_id() ),
+					[ 'source' => self::LOG_SOURCE ]
+				);
+				self::schedule_resume( $order->get_id(), self::RESUME_DELAY_SECONDS );
 			}
 		}
 
@@ -304,29 +309,24 @@ final class ContractCreationHandler {
 	 * @param WC_Order $order       The paid order.
 	 * @param int      $contract_id The draft.
 	 * @param PlanView $plan        The order's selling plan.
-	 * @throws ContractLockedException If its lock is live.
+	 * @return bool False when its lock is live (or the draft is gone): resume it later.
 	 */
-	private function resume_draft( WC_Order $order, int $contract_id, PlanView $plan ): void {
+	private function resume_draft( WC_Order $order, int $contract_id, PlanView $plan ): bool {
 		[ $start, $next ] = self::first_period( $order, $plan );
 
 		$lock     = HeldLocks::get( $contract_id );
 		$acquired = null === $lock;
 		if ( $acquired ) {
-			$lock = Contracts::lock( $contract_id, self::OPERATION );
+			$lock = HeldLocks::acquire( $contract_id, self::OPERATION );
 			if ( null === $lock ) {
-				$conflict = HeldLocks::get_conflict( $contract_id );
-				if ( null === $conflict ) {
-					return;
-				}
-				throw $conflict;
+				return false;
 			}
-			HeldLocks::register( $lock );
 		}
 
 		try {
 			$draft = Contracts::get( $contract_id );
 			if ( null === $draft || Package::EXTENSION_SLUG !== $draft->get_extension_slug() || ContractStatus::DRAFT !== $draft->get_status() ) {
-				return;
+				return true;
 			}
 
 			$activated = self::activate( $lock, $order, $start, $next, (string) $draft->get_billing_total() );
@@ -336,7 +336,7 @@ final class ContractCreationHandler {
 			}
 		}
 		if ( null === $activated ) {
-			return;
+			return true;
 		}
 
 		self::finish_resume( $order );
@@ -347,6 +347,8 @@ final class ContractCreationHandler {
 				$contract_id
 			)
 		);
+
+		return true;
 	}
 
 	/**

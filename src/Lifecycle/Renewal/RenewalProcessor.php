@@ -16,7 +16,6 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal;
 
 use Automattic\WooCommerce\Enums\OrderStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\ContractLock;
-use Automattic\WooCommerce\SubscriptionsEngine\Api\ContractLockedException;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Payments;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
@@ -32,6 +31,7 @@ use Automattic\WooCommerce\SubscriptionsLite\Plans\ContractPlans;
 use DateTimeImmutable;
 use DateTimeZone;
 use WC_Order;
+use WP_Error;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -104,22 +104,17 @@ final class RenewalProcessor {
 	 * renewal. The contract and its head are read after acquiring.
 	 *
 	 * @param int $contract_id Contract id.
-	 * @return WC_Order|null The renewal order; null when the contract is not renewable now.
-	 * @throws ContractLockedException If another operation holds the contract's lock.
+	 * @return WC_Order|WP_Error|null The renewal order; a lock conflict when another operation holds
+	 *                                the lock; null when the contract is not renewable now.
 	 */
-	public function renew_now( int $contract_id ): ?WC_Order {
+	public function renew_now( int $contract_id ) {
 		$lock     = HeldLocks::get( $contract_id );
 		$acquired = null === $lock;
 		if ( $acquired ) {
-			$lock = Contracts::lock( $contract_id, self::OPERATION );
+			$lock = HeldLocks::acquire( $contract_id, self::OPERATION );
 			if ( null === $lock ) {
-				$conflict = HeldLocks::get_conflict( $contract_id );
-				if ( null === $conflict ) {
-					return null;
-				}
-				throw $conflict;
+				return HeldLocks::get_conflict( $contract_id );
 			}
-			HeldLocks::register( $lock );
 		}
 
 		try {
