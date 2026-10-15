@@ -407,17 +407,14 @@ final class LockScenariosTest extends LiteIntegrationTestCase {
 		$resume = $this->interrupt_billing_writes();
 		$lock   = $this->hold_lock( $contract_id, RenewalProcessor::OPERATION );
 		try {
-			// A lock registered by with() is never released here: the request dies holding it.
-			HeldLocks::with(
-				$lock,
-				static function () use ( $contract_id ): void {
-					( new RenewalProcessor() )->renew_now( $contract_id );
-				}
-			);
+			// Registered but never released here: the request dies holding it.
+			HeldLocks::register( $lock );
+			( new RenewalProcessor() )->renew_now( $contract_id );
 			$this->fail( 'Expected the request to die.' );
 		} catch ( RuntimeException $e ) {
 			$this->assertSame( 'The request died.', $e->getMessage() );
 		} finally {
+			HeldLocks::unregister( $lock );
 			$resume();
 		}
 

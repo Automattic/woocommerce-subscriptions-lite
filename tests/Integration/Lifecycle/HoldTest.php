@@ -10,14 +10,12 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Lifecycle;
 
-use LogicException;
 use RuntimeException;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\ContractLockedException;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\SchemaInstaller;
-use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\HeldLocks;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Hold;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\HoldAnchor;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\LifecycleNotAllowedException;
@@ -210,7 +208,9 @@ final class HoldTest extends LiteIntegrationTestCase {
 		$contract_id = $this->seed_contract( [ 'extension_slug' => 'another-extension' ] );
 
 		$this->assertNull( ( new Hold() )->hold( $contract_id ) );
-		$this->assertSame( ContractStatus::ACTIVE, $this->get_contract( $contract_id )->get_status() );
+		$contract = $this->get_contract( $contract_id );
+		$this->assertSame( ContractStatus::ACTIVE, $contract->get_status() );
+		$this->assertNull( $contract->get_lock_state(), 'The lock taken to read it is released.' );
 	}
 
 	public function test_hold_leaves_the_contract_unlocked(): void {
@@ -238,25 +238,16 @@ final class HoldTest extends LiteIntegrationTestCase {
 		$this->assertSame( '', $this->get_stored_anchor( $contract_id ) );
 	}
 
-	public function test_system_hold_without_a_held_lock_is_a_programming_error(): void {
-		$contract_id = $this->seed_contract();
-
-		$this->expectException( LogicException::class );
-
-		Hold::system_hold( $contract_id );
-	}
-
 	public function test_system_hold_writes_with_the_held_lock(): void {
 		$contract_id = $this->seed_contract();
 		( new Hold() )->hold( $contract_id );
 
-		HeldLocks::run(
-			$contract_id,
-			'renewal',
-			static function () use ( $contract_id ): void {
-				Hold::system_hold( $contract_id, [ 'last_attempt_gmt' => '2026-02-15 00:00:00' ] );
-			}
-		);
+		$lock = $this->hold_lock( $contract_id, 'renewal' );
+		try {
+			Hold::system_hold( $lock, [ 'last_attempt_gmt' => '2026-02-15 00:00:00' ] );
+		} finally {
+			$lock->release();
+		}
 
 		$stored = $this->get_contract( $contract_id );
 		$this->assertSame( ContractStatus::ON_HOLD, $stored->get_status() );

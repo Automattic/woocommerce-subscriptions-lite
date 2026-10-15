@@ -588,7 +588,10 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 	 * @param string $operation   Operation label.
 	 */
 	protected function hold_lock( int $contract_id, string $operation = 'test' ): ContractLock {
-		return Contracts::lock( $contract_id, $operation );
+		$lock = Contracts::lock( $contract_id, $operation );
+		$this->assertNotNull( $lock, 'The lock is free.' );
+
+		return $lock;
 	}
 
 	/**

@@ -315,28 +315,44 @@ final class Settlement {
 	}
 
 	/**
-	 * Fail every open Lite cycle linked to an unpaid order that is removed or gone, each under
-	 * its contract's lock.
+	 * Fail the open Lite cycle linked to an unpaid order that is removed or gone, under its
+	 * contract's lock.
 	 *
 	 * @param int $order_id Order id.
-	 * @throws ContractLockedException If another operation holds a contract's lock.
+	 * @throws ContractLockedException If another operation holds the contract's lock.
 	 */
 	private function settle_deleted( int $order_id ): void {
-		$match = $this->find_lite_cycle( $order_id );
-		if ( null === $match ) {
+		$linked = Contracts::find_cycles_by_order( $order_id )[0] ?? null;
+		if ( null === $linked ) {
 			return;
 		}
 
-		HeldLocks::run(
-			$match['contract']->get_id(),
-			self::OPERATION,
-			function ( ContractLock $lock ) use ( $order_id ): void {
-				$locked = $this->find_lite_cycle( $order_id );
-				if ( null !== $locked ) {
-					$this->settle_dead( $locked['contract'], $locked['cycle'], $lock );
+		$contract_id = $linked->get_contract_id();
+		$lock        = HeldLocks::get( $contract_id );
+		$acquired    = null === $lock;
+		if ( $acquired ) {
+			$lock = Contracts::lock( $contract_id, self::OPERATION );
+			if ( null === $lock ) {
+				$conflict = HeldLocks::get_conflict( $contract_id );
+				if ( null === $conflict ) {
+					return;
 				}
+				throw $conflict;
 			}
-		);
+			HeldLocks::register( $lock );
+		}
+
+		try {
+			$contract = Contracts::get( $contract_id );
+			$cycle    = self::find_order_cycle( $order_id, $contract_id );
+			if ( null !== $contract && Package::EXTENSION_SLUG === $contract->get_extension_slug() && null !== $cycle ) {
+				$this->settle_dead( $contract, $cycle, $lock );
+			}
+		} finally {
+			if ( $acquired ) {
+				HeldLocks::release( $lock );
+			}
+		}
 	}
 
 	/**
@@ -364,8 +380,8 @@ final class Settlement {
 
 	/**
 	 * Settle a Lite renewal order from its current status; any other order is ignored. The
-	 * cycle lookup only locates the contract: the decision reads the contract and the cycle
-	 * again under its lock.
+	 * linked cycle only locates the contract: the decision reads the contract and the cycle
+	 * under its lock.
 	 *
 	 * @param WC_Order               $order The order (re-read, so a stale object is fine).
 	 * @param DateTimeImmutable|null $now   The current moment; the UTC wall clock when omitted.
@@ -377,52 +393,59 @@ final class Settlement {
 			return;
 		}
 
-		$match = $this->find_lite_cycle( $fresh_order->get_id() );
-		if ( null === $match ) {
+		$order_id = $fresh_order->get_id();
+		$linked   = Contracts::find_cycles_by_order( $order_id )[0] ?? null;
+		if ( null === $linked ) {
 			if ( $fresh_order->is_paid() ) {
 				$this->settle_replaced_paid( $fresh_order, $now );
 			}
 			return;
 		}
 
-		$utc_now = ( $now ?? new DateTimeImmutable( 'now', new DateTimeZone( 'UTC' ) ) )->setTimezone( new DateTimeZone( 'UTC' ) );
-
-		HeldLocks::run(
-			$match['contract']->get_id(),
-			self::OPERATION,
-			function ( ContractLock $lock ) use ( $fresh_order, $utc_now, $now ): void {
-				$this->settle_locked( $fresh_order, $utc_now, $now, $lock );
+		$utc_now     = ( $now ?? new DateTimeImmutable( 'now', new DateTimeZone( 'UTC' ) ) )->setTimezone( new DateTimeZone( 'UTC' ) );
+		$contract_id = $linked->get_contract_id();
+		$lock        = HeldLocks::get( $contract_id );
+		$acquired    = null === $lock;
+		if ( $acquired ) {
+			$lock = Contracts::lock( $contract_id, self::OPERATION );
+			if ( null === $lock ) {
+				$conflict = HeldLocks::get_conflict( $contract_id );
+				if ( null === $conflict ) {
+					return;
+				}
+				throw $conflict;
 			}
-		);
-	}
-
-	/**
-	 * The locked section of {@see self::settle()}: re-read the cycle and contract, then
-	 * settle from the order's status.
-	 *
-	 * @param WC_Order               $order   The fresh order.
-	 * @param DateTimeImmutable      $utc_now The current moment (UTC).
-	 * @param DateTimeImmutable|null $now     The caller's moment, for a replaced-order settlement.
-	 * @param ContractLock           $lock    The held lock.
-	 */
-	private function settle_locked( WC_Order $order, DateTimeImmutable $utc_now, ?DateTimeImmutable $now, ContractLock $lock ): void {
-		$match = $this->find_lite_cycle( $order->get_id() );
-		if ( null === $match || $match['contract']->get_id() !== $lock->get_contract_id() ) {
-			// The order was relinked away while unlocked: settle it as a replaced order.
-			if ( $order->is_paid() ) {
-				$this->settle_replaced_paid( $order, $now );
-			}
-			return;
+			HeldLocks::register( $lock );
 		}
 
-		if ( $order->is_paid() ) {
-			$this->settle_paid( $order, $match['contract'], $match['cycle'], $utc_now, $lock );
-		} elseif ( $order->has_status( OrderStatus::FAILED ) ) {
-			$this->settle_failed( $order, $match['contract'], $match['cycle'], $utc_now, $lock );
-		} elseif ( $order->has_status( OrderStatus::ON_HOLD ) ) {
-			$this->settle_in_progress( $match['contract'], $match['cycle'], $lock );
-		} elseif ( self::is_dead( $order ) ) {
-			$this->settle_dead( $match['contract'], $match['cycle'], $lock );
+		try {
+			$contract = Contracts::get( $contract_id );
+			if ( null === $contract || Package::EXTENSION_SLUG !== $contract->get_extension_slug() ) {
+				return;
+			}
+
+			$cycle = self::find_order_cycle( $order_id, $contract_id );
+			if ( null === $cycle ) {
+				// The order was relinked away before the lock: settle it as a replaced order.
+				if ( $fresh_order->is_paid() ) {
+					$this->settle_replaced_paid( $fresh_order, $now );
+				}
+				return;
+			}
+
+			if ( $fresh_order->is_paid() ) {
+				$this->settle_paid( $fresh_order, $contract, $cycle, $utc_now, $lock );
+			} elseif ( $fresh_order->has_status( OrderStatus::FAILED ) ) {
+				$this->settle_failed( $fresh_order, $contract, $cycle, $utc_now, $lock );
+			} elseif ( $fresh_order->has_status( OrderStatus::ON_HOLD ) ) {
+				$this->settle_in_progress( $contract, $cycle, $lock );
+			} elseif ( self::is_dead( $fresh_order ) ) {
+				$this->settle_dead( $contract, $cycle, $lock );
+			}
+		} finally {
+			if ( $acquired ) {
+				HeldLocks::release( $lock );
+			}
 		}
 	}
 
@@ -517,7 +540,7 @@ final class Settlement {
 		if ( ContractStatus::ON_HOLD === $status && null !== HoldAnchor::read( $contract_id ) ) {
 			// A customer hold absorbs a late payment: it resumes from the period after this one.
 			if ( null !== $next ) {
-				HoldAnchor::store( $contract_id, $next->format( 'Y-m-d H:i:s' ), $lock );
+				HoldAnchor::store( $lock, $next->format( 'Y-m-d H:i:s' ) );
 			}
 			Contracts::update( $contract_id, [ 'last_payment_gmt' => $last_payment ], $lock );
 			return;
@@ -532,7 +555,7 @@ final class Settlement {
 			],
 			$lock
 		);
-		HoldAnchor::clear( $contract_id, $lock );
+		HoldAnchor::clear( $lock );
 	}
 
 	/**
@@ -592,7 +615,7 @@ final class Settlement {
 		$contract_id = $contract->get_id();
 		if ( in_array( $contract->get_status(), [ ContractStatus::ACTIVE, ContractStatus::ON_HOLD ], true ) ) {
 			// Also over a customer hold: its anchor would sit on the end of an unpaid period.
-			Hold::system_hold( $contract_id, [ 'last_attempt_gmt' => $now ] );
+			Hold::system_hold( $lock, [ 'last_attempt_gmt' => $now ] );
 		}
 
 		$settled = $this->read_settled( $contract_id, $cycle->get_id(), $order->get_id() );
@@ -654,7 +677,7 @@ final class Settlement {
 		}
 
 		if ( in_array( $contract->get_status(), [ ContractStatus::ACTIVE, ContractStatus::ON_HOLD ], true ) ) {
-			Hold::system_hold( $contract->get_id() );
+			Hold::system_hold( $lock );
 		}
 	}
 
@@ -705,102 +728,109 @@ final class Settlement {
 	 */
 	private function settle_replaced_paid( WC_Order $order, ?DateTimeImmutable $now ): void {
 		$contract_id = (int) $order->get_meta( self::REPLACED_CONTRACT_META );
-		if ( $contract_id <= 0 || ! Hold::is_lite_contract( $contract_id ) ) {
+		if ( $contract_id <= 0 ) {
 			return;
 		}
 
-		HeldLocks::run(
-			$contract_id,
-			self::OPERATION,
-			function ( ContractLock $lock ) use ( $order, $now, $contract_id ): void {
-				$this->settle_replaced_paid_locked( $order, $now, $contract_id, $lock );
+		$lock     = HeldLocks::get( $contract_id );
+		$acquired = null === $lock;
+		if ( $acquired ) {
+			$lock = Contracts::lock( $contract_id, self::OPERATION );
+			if ( null === $lock ) {
+				$conflict = HeldLocks::get_conflict( $contract_id );
+				if ( null === $conflict ) {
+					return;
+				}
+				throw $conflict;
 			}
-		);
-	}
-
-	/**
-	 * The locked section of {@see self::settle_replaced_paid()}.
-	 *
-	 * @param WC_Order               $order       The paid replaced order.
-	 * @param DateTimeImmutable|null $now         The current moment.
-	 * @param int                    $contract_id Contract id named on the order.
-	 * @param ContractLock           $lock        The held lock.
-	 */
-	private function settle_replaced_paid_locked( WC_Order $order, ?DateTimeImmutable $now, int $contract_id, ContractLock $lock ): void {
-		$cycle_id = (int) $order->get_meta( self::REPLACED_CYCLE_META );
-		$cycle    = $cycle_id <= 0 ? null : self::find_cycle( $contract_id, $cycle_id );
-		if ( null === $cycle ) {
-			self::flag_for_refund(
-				$order,
-				$contract_id,
-				__( 'This renewal order was paid after another order replaced it, and its renewal no longer exists. Refund this payment.', 'woocommerce-subscriptions-lite' ),
-				sprintf( 'Settlement: renewal order %d was paid after it was replaced, and its cycle %d no longer exists; a refund is needed.', $order->get_id(), $cycle_id )
-			);
-			return;
+			HeldLocks::register( $lock );
 		}
 
-		$replacement_id = $cycle->get_order_id();
-		$replacement    = null === $replacement_id || $replacement_id === $order->get_id() ? false : wc_get_order( $replacement_id );
-		$in_flight      = CycleStatus::PROCESSING === $cycle->get_status()
-			|| ( $replacement instanceof WC_Order && $replacement->has_status( OrderStatus::ON_HOLD ) );
-
-		if ( in_array( $cycle->get_status(), self::PAYABLE_CYCLE_STATUSES, true ) && ! $in_flight ) {
-			$cancel_replacement = $replacement instanceof WC_Order && ! $replacement->is_paid() && ! self::is_dead( $replacement );
-			if ( $cancel_replacement ) {
-				// Stamped before the relink, so should the replacement be paid after the relink
-				// (before it is cancelled, or after all), that payment is flagged for a refund.
-				self::mark_replaced( $replacement, $contract_id, $cycle_id );
+		try {
+			$contract = Contracts::get( $contract_id );
+			if ( null === $contract || Package::EXTENSION_SLUG !== $contract->get_extension_slug() ) {
+				return;
 			}
 
-			$relinked = Contracts::transition_cycle(
-				$cycle_id,
-				[
-					'from_status' => $cycle->get_status(),
-					'to_status'   => $cycle->get_status(),
-					'order_id'    => $order->get_id(),
-				],
-				$lock
-			);
-			if ( ! $relinked ) {
+			$cycle_id = (int) $order->get_meta( self::REPLACED_CYCLE_META );
+			$cycle    = $cycle_id <= 0 ? null : self::find_cycle( $contract_id, $cycle_id );
+			if ( null === $cycle ) {
 				self::flag_for_refund(
 					$order,
 					$contract_id,
-					__( 'This renewal order was paid after another order replaced it, and the renewal could not be moved back to it. Refund this payment.', 'woocommerce-subscriptions-lite' ),
-					sprintf( 'Settlement: renewal order %d was paid after it was replaced and could not be relinked to cycle %d; a refund is needed.', $order->get_id(), $cycle_id )
+					__( 'This renewal order was paid after another order replaced it, and its renewal no longer exists. Refund this payment.', 'woocommerce-subscriptions-lite' ),
+					sprintf( 'Settlement: renewal order %d was paid after it was replaced, and its cycle %d no longer exists; a refund is needed.', $order->get_id(), $cycle_id )
 				);
 				return;
 			}
 
-			if ( $cancel_replacement ) {
-				/* translators: %d: order number. */
-				$replacement->update_status( OrderStatus::CANCELLED, sprintf( __( 'Order #%d paid this renewal after this order replaced it.', 'woocommerce-subscriptions-lite' ), $order->get_id() ) );
+			$replacement_id = $cycle->get_order_id();
+			$replacement    = null === $replacement_id || $replacement_id === $order->get_id() ? false : wc_get_order( $replacement_id );
+			$in_flight      = CycleStatus::PROCESSING === $cycle->get_status()
+				|| ( $replacement instanceof WC_Order && $replacement->has_status( OrderStatus::ON_HOLD ) );
+
+			if ( in_array( $cycle->get_status(), self::PAYABLE_CYCLE_STATUSES, true ) && ! $in_flight ) {
+				$cancel_replacement = $replacement instanceof WC_Order && ! $replacement->is_paid() && ! self::is_dead( $replacement );
+				if ( $cancel_replacement ) {
+					// Stamped before the relink, so should the replacement be paid after the relink
+					// (before it is cancelled, or after all), that payment is flagged for a refund.
+					self::mark_replaced( $replacement, $contract_id, $cycle_id );
+				}
+
+				$relinked = Contracts::transition_cycle(
+					$cycle_id,
+					[
+						'from_status' => $cycle->get_status(),
+						'to_status'   => $cycle->get_status(),
+						'order_id'    => $order->get_id(),
+					],
+					$lock
+				);
+				if ( ! $relinked ) {
+					self::flag_for_refund(
+						$order,
+						$contract_id,
+						__( 'This renewal order was paid after another order replaced it, and the renewal could not be moved back to it. Refund this payment.', 'woocommerce-subscriptions-lite' ),
+						sprintf( 'Settlement: renewal order %d was paid after it was replaced and could not be relinked to cycle %d; a refund is needed.', $order->get_id(), $cycle_id )
+					);
+					return;
+				}
+
+				if ( $cancel_replacement ) {
+					/* translators: %d: order number. */
+					$replacement->update_status( OrderStatus::CANCELLED, sprintf( __( 'Order #%d paid this renewal after this order replaced it.', 'woocommerce-subscriptions-lite' ), $order->get_id() ) );
+				}
+
+				$this->settle( $order, $now );
+				return;
 			}
 
-			$this->settle( $order, $now );
-			return;
-		}
+			if ( $replacement_id === $order->get_id() ) {
+				return;
+			}
 
-		if ( $replacement_id === $order->get_id() ) {
-			return;
-		}
+			if ( null !== $replacement_id && CycleStatus::BILLED === $cycle->get_status() ) {
+				/* translators: %d: order number. */
+				$note    = sprintf( __( 'This renewal order was paid after order #%d replaced it and paid the same renewal. Refund one of the two payments.', 'woocommerce-subscriptions-lite' ), $replacement_id );
+				$message = sprintf( 'Settlement: renewal order %d was paid after order %d replaced it and paid the same renewal; a refund is needed.', $order->get_id(), $replacement_id );
+			} elseif ( null !== $replacement_id && $in_flight ) {
+				// The replacement's charge may still complete: it keeps the renewal, so at most one
+				// payment settles it and the other is flagged here rather than cancelled unseen.
+				/* translators: %d: order number. */
+				$note    = sprintf( __( 'This renewal order was paid after order #%d replaced it, while that order\'s payment was still awaiting confirmation. If that payment completes, refund one of the two payments.', 'woocommerce-subscriptions-lite' ), $replacement_id );
+				$message = sprintf( 'Settlement: renewal order %d was paid after order %d replaced it while that order\'s payment was in flight; a refund is likely needed.', $order->get_id(), $replacement_id );
+			} else {
+				/* translators: %s: renewal (cycle) status. */
+				$note    = sprintf( __( 'This renewal order was paid, but its renewal can no longer be billed (status: %s). Refund this payment.', 'woocommerce-subscriptions-lite' ), $cycle->get_status() );
+				$message = sprintf( 'Settlement: renewal order %d was paid after it was replaced, for cycle %d, which is %s; a refund is needed.', $order->get_id(), $cycle_id, $cycle->get_status() );
+			}
 
-		if ( null !== $replacement_id && CycleStatus::BILLED === $cycle->get_status() ) {
-			/* translators: %d: order number. */
-			$note    = sprintf( __( 'This renewal order was paid after order #%d replaced it and paid the same renewal. Refund one of the two payments.', 'woocommerce-subscriptions-lite' ), $replacement_id );
-			$message = sprintf( 'Settlement: renewal order %d was paid after order %d replaced it and paid the same renewal; a refund is needed.', $order->get_id(), $replacement_id );
-		} elseif ( null !== $replacement_id && $in_flight ) {
-			// The replacement's charge may still complete: it keeps the renewal, so at most one
-			// payment settles it and the other is flagged here rather than cancelled unseen.
-			/* translators: %d: order number. */
-			$note    = sprintf( __( 'This renewal order was paid after order #%d replaced it, while that order\'s payment was still awaiting confirmation. If that payment completes, refund one of the two payments.', 'woocommerce-subscriptions-lite' ), $replacement_id );
-			$message = sprintf( 'Settlement: renewal order %d was paid after order %d replaced it while that order\'s payment was in flight; a refund is likely needed.', $order->get_id(), $replacement_id );
-		} else {
-			/* translators: %s: renewal (cycle) status. */
-			$note    = sprintf( __( 'This renewal order was paid, but its renewal can no longer be billed (status: %s). Refund this payment.', 'woocommerce-subscriptions-lite' ), $cycle->get_status() );
-			$message = sprintf( 'Settlement: renewal order %d was paid after it was replaced, for cycle %d, which is %s; a refund is needed.', $order->get_id(), $cycle_id, $cycle->get_status() );
+			self::flag_for_refund( $order, $contract_id, $note, $message );
+		} finally {
+			if ( $acquired ) {
+				HeldLocks::release( $lock );
+			}
 		}
-
-		self::flag_for_refund( $order, $contract_id, $note, $message );
 	}
 
 	/**
@@ -862,19 +892,15 @@ final class Settlement {
 	}
 
 	/**
-	 * The newest cycle billed by the order on a Lite-owned contract, with its contract.
+	 * The newest cycle of the contract linked to the order, or null.
 	 *
-	 * @param int $order_id Order id.
-	 * @return array{contract: ContractView, cycle: CycleView}|null
+	 * @param int $order_id    Order id.
+	 * @param int $contract_id Contract id.
 	 */
-	private function find_lite_cycle( int $order_id ): ?array {
+	private static function find_order_cycle( int $order_id, int $contract_id ): ?CycleView {
 		foreach ( Contracts::find_cycles_by_order( $order_id ) as $cycle ) {
-			$contract = Contracts::get( $cycle->get_contract_id() );
-			if ( null !== $contract && Package::EXTENSION_SLUG === $contract->get_extension_slug() ) {
-				return [
-					'contract' => $contract,
-					'cycle'    => $cycle,
-				];
+			if ( $cycle->get_contract_id() === $contract_id ) {
+				return $cycle;
 			}
 		}
 

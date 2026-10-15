@@ -51,28 +51,12 @@ final class ContractDueHandler {
 			return;
 		}
 
-		HeldLocks::with(
-			$lock,
-			function ( ContractLock $lock ) use ( $contract, $due_at ): void {
-				$this->handle_locked( $contract, $due_at, $lock );
-			}
-		);
-	}
-
-	/**
-	 * The locked section of {@see self::handle()}.
-	 *
-	 * @param ContractView      $contract The due contract, read under the lock.
-	 * @param DateTimeImmutable $due_at   The due moment.
-	 * @param ContractLock      $lock     The dispatcher's lock.
-	 * @throws Throwable When the flow fails (after logging it).
-	 */
-	private function handle_locked( ContractView $contract, DateTimeImmutable $due_at, ContractLock $lock ): void {
 		$contract_id = $contract->get_id();
+		HeldLocks::register( $lock );
 
 		try {
 			if ( ContractStatus::ACTIVE === $contract->get_status() ) {
-				( new RenewalProcessor() )->renew( $contract, $due_at, new DateTimeImmutable( 'now', new DateTimeZone( 'UTC' ) ), false );
+				( new RenewalProcessor() )->renew( $contract, $due_at, new DateTimeImmutable( 'now', new DateTimeZone( 'UTC' ) ), false, $lock );
 				return;
 			}
 
@@ -93,6 +77,9 @@ final class ContractDueHandler {
 				]
 			);
 			throw $e;
+		} finally {
+			// The dispatcher acquired the lock, so it releases it (or keeps it after a throw).
+			HeldLocks::unregister( $lock );
 		}
 	}
 }

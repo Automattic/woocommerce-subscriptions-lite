@@ -62,20 +62,19 @@ final class RenewalProcessor {
 	public const REASON_ORDER_BUILD_FAILED = 'order-build-failed';
 
 	/**
-	 * Renew `$contract` for the period due at `$anchor`, under the lock this request holds on
-	 * it (the dispatcher's or Renew now's); every engine write passes that lock.
+	 * Renew `$contract` for the period due at `$anchor` under `$lock` (the dispatcher's or
+	 * Renew now's), registered as held in this request; every engine write passes it.
 	 *
 	 * @param ContractView      $contract The contract (read under the lock, with its items and addresses).
 	 * @param DateTimeImmutable $anchor   The due moment the period is anchored on.
 	 * @param DateTimeImmutable $now      The current moment.
 	 * @param bool              $manual   Whether a person asked for the renewal (retries a failed cycle).
+	 * @param ContractLock      $lock     The held lock on the contract.
 	 * @return WC_Order|null The renewal order; null when nothing was renewed (in flight,
 	 *                       awaiting payment, no billing policy, or the order could not be built).
-	 * @throws \LogicException If no lock on the contract is held in this request.
 	 */
-	public function renew( ContractView $contract, DateTimeImmutable $anchor, DateTimeImmutable $now, bool $manual ): ?WC_Order {
+	public function renew( ContractView $contract, DateTimeImmutable $anchor, DateTimeImmutable $now, bool $manual, ContractLock $lock ): ?WC_Order {
 		$contract_id = $contract->get_id();
-		$lock        = HeldLocks::require_lock( $contract_id );
 		$policy      = ContractPlans::get_billing_policy_for( $contract );
 		$head        = Contracts::get_cycles( $contract_id, 1 )[0] ?? null;
 		if ( null === $policy || null === $head ) {
@@ -114,37 +113,38 @@ final class RenewalProcessor {
 	 * @throws ContractLockedException If another operation holds the contract's lock.
 	 */
 	public function renew_now( int $contract_id ): ?WC_Order {
-		// Checked before locking: a foreign or missing contract is not Lite's to lock.
-		if ( ! Hold::is_lite_contract( $contract_id ) ) {
-			return null;
-		}
-
-		return HeldLocks::run(
-			$contract_id,
-			self::OPERATION,
-			function () use ( $contract_id ): ?WC_Order {
-				return $this->renew_now_locked( $contract_id );
+		$lock     = HeldLocks::get( $contract_id );
+		$acquired = null === $lock;
+		if ( $acquired ) {
+			$lock = Contracts::lock( $contract_id, self::OPERATION );
+			if ( null === $lock ) {
+				$conflict = HeldLocks::get_conflict( $contract_id );
+				if ( null === $conflict ) {
+					return null;
+				}
+				throw $conflict;
 			}
-		);
-	}
-
-	/**
-	 * The locked section of {@see self::renew_now()}.
-	 *
-	 * @param int $contract_id Contract id.
-	 */
-	private function renew_now_locked( int $contract_id ): ?WC_Order {
-		$contract = Contracts::get( $contract_id );
-		if ( null === $contract || ! self::can_renew_now( $contract ) ) {
-			return null;
+			HeldLocks::register( $lock );
 		}
 
-		$utc    = new DateTimeZone( 'UTC' );
-		$now    = new DateTimeImmutable( 'now', $utc );
-		$head   = Contracts::get_cycles( $contract_id, 1 )[0] ?? null;
-		$anchor = $contract->get_next_payment_gmt() ?? ( null === $head ? null : $head->get_ends_at_gmt() );
+		try {
+			// can_renew_now() also checks the contract is Lite's.
+			$contract = Contracts::get( $contract_id );
+			if ( null === $contract || ! self::can_renew_now( $contract ) ) {
+				return null;
+			}
 
-		return $this->renew( $contract, null === $anchor ? $now : new DateTimeImmutable( $anchor, $utc ), $now, true );
+			$utc    = new DateTimeZone( 'UTC' );
+			$now    = new DateTimeImmutable( 'now', $utc );
+			$head   = Contracts::get_cycles( $contract_id, 1 )[0] ?? null;
+			$anchor = $contract->get_next_payment_gmt() ?? ( null === $head ? null : $head->get_ends_at_gmt() );
+
+			return $this->renew( $contract, null === $anchor ? $now : new DateTimeImmutable( $anchor, $utc ), $now, true, $lock );
+		} finally {
+			if ( $acquired ) {
+				HeldLocks::release( $lock );
+			}
+		}
 	}
 
 	/**
@@ -187,7 +187,7 @@ final class RenewalProcessor {
 				return $head;
 			case CycleStatus::FAILED:
 				if ( ! $manual ) {
-					$this->reapply_hold( $contract );
+					$this->reapply_hold( $contract, $lock );
 					return null;
 				}
 				$retried = Contracts::transition_cycle(
@@ -252,10 +252,11 @@ final class RenewalProcessor {
 	 * customer pays the failed order.
 	 *
 	 * @param ContractView $contract The contract.
+	 * @param ContractLock $lock     The held lock.
 	 */
-	private function reapply_hold( ContractView $contract ): void {
+	private function reapply_hold( ContractView $contract, ContractLock $lock ): void {
 		$this->log( 'warning', sprintf( 'contract %d is due while its newest renewal failed; it is put on hold until the renewal is paid.', $contract->get_id() ), $contract->get_id() );
-		Hold::system_hold( $contract->get_id() );
+		Hold::system_hold( $lock );
 	}
 
 	/**
@@ -290,7 +291,7 @@ final class RenewalProcessor {
 				$lock
 			);
 			if ( $failed ) {
-				Hold::system_hold( $contract->get_id() );
+				Hold::system_hold( $lock );
 			}
 			return null;
 		}
@@ -417,7 +418,7 @@ final class RenewalProcessor {
 			return;
 		}
 
-		Hold::system_hold( $contract->get_id() );
+		Hold::system_hold( $lock );
 	}
 
 	/**

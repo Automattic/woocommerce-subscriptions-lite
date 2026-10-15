@@ -15,7 +15,6 @@ declare( strict_types=1 );
 namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Checkout;
 
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
-use Automattic\WooCommerce\SubscriptionsEngine\Api\DuplicateContractException;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Plans;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\PlanView;
@@ -500,12 +499,7 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 		$first = ( new ContractCreationHandler() )->create_contract( $order, $plan );
 		$this->assertInstanceOf( ContractView::class, $first );
 
-		try {
-			( new ContractCreationHandler() )->create_contract( $order, $plan );
-			$this->fail( 'Expected DuplicateContractException.' );
-		} catch ( DuplicateContractException $e ) {
-			$this->assertSame( $first->get_id(), $e->get_existing_contract_id() );
-		}
+		$this->assertNull( ( new ContractCreationHandler() )->create_contract( $order, $plan ), 'The creation key is taken.' );
 
 		$this->assertCount( 1, Contracts::list_for_customer( $customer_id ) );
 	}
@@ -578,7 +572,7 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 		$plan        = $this->make_plan();
 		$order       = $this->create_subscription_order( $customer_id );
 		$this->apply_and_stamp( $order, $plan );
-		$draft_id = Contracts::create_locked(
+		$created  = Contracts::create_locked(
 			[
 				'extension_slug'  => Package::EXTENSION_SLUG,
 				'creation_key'    => ContractCreationHandler::creation_key( $order ),
@@ -590,7 +584,8 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 				'billing_total'   => '19.99',
 			],
 			ContractCreationHandler::OPERATION
-		)->get_contract_id();
+		);
+		$draft_id = $created['contract']->get_id();
 
 		$order->update_status( 'processing' );
 		do_action( ContractCreationHandler::RESUME_HOOK, $order->get_id() );

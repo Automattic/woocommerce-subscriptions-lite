@@ -26,7 +26,6 @@ use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\Settlement;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
 use DateTimeImmutable;
 use DateTimeZone;
-use LogicException;
 use WC_Order;
 
 /**
@@ -110,13 +109,13 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 		$run_at = '' === $now ? $this->from_now( '' ) : $now;
 
 		// As the due dispatcher runs it: under the contract lock, the contract read after acquiring.
-		return HeldLocks::run(
-			$contract_id,
-			'due',
-			function () use ( $contract_id, $run_at, $manual ): ?WC_Order {
-				return ( new RenewalProcessor() )->renew( $this->get_contract( $contract_id ), $this->utc( $this->due_at ), $this->utc( $run_at ), $manual );
-			}
-		);
+		$lock = $this->hold_lock( $contract_id, 'due' );
+		HeldLocks::register( $lock );
+		try {
+			return ( new RenewalProcessor() )->renew( $this->get_contract( $contract_id ), $this->utc( $this->due_at ), $this->utc( $run_at ), $manual, $lock );
+		} finally {
+			HeldLocks::release( $lock );
+		}
 	}
 
 	/**
@@ -285,14 +284,6 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 		$this->assertSame( 0, $this->charge_count() );
 		$this->assertSame( [], $this->renewal_order_ids() );
 		$this->assertCount( 1, Contracts::get_cycles( $contract_id ), 'No cycle appended.' );
-	}
-
-	public function test_renew_without_a_held_lock_is_a_programming_error(): void {
-		$contract_id = $this->make_contract();
-
-		$this->expectException( LogicException::class );
-
-		( new RenewalProcessor() )->renew( $this->get_contract( $contract_id ), $this->utc( $this->due_at ), $this->utc( $this->from_now( '' ) ), false );
 	}
 
 	public function test_a_lost_order_link_deletes_the_draft_and_charges_nothing(): void {
@@ -628,7 +619,7 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 		$this->assertSame( 0, $this->charge_count() );
 	}
 
-	public function test_renew_now_never_locks_another_extensions_contract(): void {
+	public function test_renew_now_on_another_extensions_locked_contract_is_not_a_conflict(): void {
 		$foreign = $this->seed_contract( [ 'extension_slug' => 'another-extension' ] );
 		$lock    = $this->hold_lock( $foreign, 'foreign' );
 

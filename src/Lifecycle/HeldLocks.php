@@ -2,12 +2,10 @@
 /**
  * HeldLocks - the engine contract locks Lite holds in this request, by contract id.
  *
- * Every Lite flow that changes a contract runs under the engine's per-contract lock. A flow
- * acquires it through {@see self::run()}, or registers one acquired elsewhere (the due
- * dispatcher's, a locked create) through {@see self::with()}; code it reaches in the same
- * request (settlement inside a gateway charge, the system hold inside a renewal) finds the
- * held lock here instead of acquiring and conflicting with its own operation. Locks never
- * cross requests.
+ * A Lite flow that changes a contract uses the lock this request already holds on it, or
+ * acquires one, registers it here and releases it when done. Code it reaches in the same
+ * request (settlement inside a gateway charge, a lifecycle action listener) finds the held
+ * lock here instead of conflicting with its own operation. Locks never cross requests.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Lifecycle
  */
@@ -16,7 +14,6 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Lifecycle;
 
-use LogicException;
 use Throwable;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\ContractLock;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\ContractLockedException;
@@ -38,7 +35,8 @@ final class HeldLocks {
 	private static $locks = [];
 
 	/**
-	 * The lock held on the contract in this request, or null.
+	 * The lock held on the contract in this request, or null. A listener of a Lite lifecycle
+	 * action writes the contract with this lock: an unlocked write is refused while it is held.
 	 *
 	 * @param int $contract_id Contract id.
 	 */
@@ -47,81 +45,34 @@ final class HeldLocks {
 	}
 
 	/**
-	 * The lock held on the contract in this request.
+	 * Register a lock as held in this request.
 	 *
-	 * @param int $contract_id Contract id.
-	 * @throws LogicException If none is held: the caller must run inside a locked flow.
+	 * @param ContractLock $lock The acquired lock.
 	 */
-	public static function require_lock( int $contract_id ): ContractLock {
-		$lock = self::get( $contract_id );
-		if ( null === $lock ) {
-			throw new LogicException( sprintf( 'No lock is held on contract %d in this request.', $contract_id ) ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- not output.
-		}
-
-		return $lock;
+	public static function register( ContractLock $lock ): void {
+		self::$locks[ $lock->get_contract_id() ] = $lock;
 	}
 
 	/**
-	 * Run `$flow( ContractLock )` under the contract's lock: the held one when this request
-	 * holds it (not released here), else a new one acquired for the call and released after
-	 * it, also on a throw.
+	 * Unregister a lock without releasing it (its acquirer releases it).
 	 *
-	 * @template T
-	 * @param int                       $contract_id Contract id.
-	 * @param string                    $operation   Operation label for a new lock.
-	 * @param callable(ContractLock): T $flow        The locked section.
-	 * @return T The flow's result.
-	 * @throws ContractLockedException If another operation holds the lock.
+	 * @param ContractLock $lock The registered lock.
 	 */
-	public static function run( int $contract_id, string $operation, callable $flow ) {
-		$held = self::get( $contract_id );
-		if ( null !== $held ) {
-			return $flow( $held );
-		}
-
-		$lock                        = Contracts::lock( $contract_id, $operation );
-		self::$locks[ $contract_id ] = $lock;
-
-		try {
-			return $flow( $lock );
-		} finally {
-			unset( self::$locks[ $contract_id ] );
-			self::release( $lock );
+	public static function unregister( ContractLock $lock ): void {
+		if ( self::get( $lock->get_contract_id() ) === $lock ) {
+			unset( self::$locks[ $lock->get_contract_id() ] );
 		}
 	}
 
 	/**
-	 * Run `$flow( ContractLock )` with a lock acquired elsewhere registered as held. The lock
-	 * is unregistered afterwards but never released: its acquirer releases it.
-	 *
-	 * @template T
-	 * @param ContractLock              $lock The acquired lock.
-	 * @param callable(ContractLock): T $flow The locked section.
-	 * @return T The flow's result.
-	 */
-	public static function with( ContractLock $lock, callable $flow ) {
-		$contract_id = $lock->get_contract_id();
-		$previous    = self::get( $contract_id );
-
-		self::$locks[ $contract_id ] = $lock;
-
-		try {
-			return $flow( $lock );
-		} finally {
-			if ( null === $previous ) {
-				unset( self::$locks[ $contract_id ] );
-			} else {
-				self::$locks[ $contract_id ] = $previous;
-			}
-		}
-	}
-
-	/**
-	 * Release a lock; a failed release is logged, and the lock expires on its own.
+	 * Unregister and release a lock acquired in this request. A failed release is logged, not
+	 * thrown, so it never masks the flow's result; the lock expires on its own.
 	 *
 	 * @param ContractLock $lock The lock.
 	 */
 	public static function release( ContractLock $lock ): void {
+		self::unregister( $lock );
+
 		try {
 			$lock->release();
 		} catch ( Throwable $e ) {
@@ -133,5 +84,23 @@ final class HeldLocks {
 				]
 			);
 		}
+	}
+
+	/**
+	 * After `Contracts::lock()` returned null: the conflict to report, labelled with the
+	 * holder's operation, or null when the contract does not exist or is not Lite's.
+	 *
+	 * @param int $contract_id Contract id.
+	 */
+	public static function get_conflict( int $contract_id ): ?ContractLockedException {
+		$contract = Contracts::get( $contract_id );
+		if ( null === $contract || Package::EXTENSION_SLUG !== $contract->get_extension_slug() ) {
+			return null;
+		}
+
+		// Null state: the holder released between the two reads; still a conflict, unlabelled.
+		$state = $contract->get_lock_state();
+
+		return new ContractLockedException( $contract_id, $state['operation'] ?? null, $state['locked_until'] ?? null );
 	}
 }

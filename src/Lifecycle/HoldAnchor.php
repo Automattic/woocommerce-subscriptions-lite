@@ -38,13 +38,13 @@ final class HoldAnchor {
 	/**
 	 * Store `$next_payment_gmt` as the anchor, or remove the anchor when it is null.
 	 *
-	 * @param int          $contract_id      Contract id.
-	 * @param string|null  $next_payment_gmt The next-due moment the hold clears.
 	 * @param ContractLock $lock             The caller's lock on the contract.
+	 * @param string|null  $next_payment_gmt The next-due moment the hold clears.
 	 * @throws ContractLockedException If the lock was lost.
 	 * @throws RuntimeException If the anchor could not be stored.
 	 */
-	public static function store( int $contract_id, ?string $next_payment_gmt, ContractLock $lock ): void {
+	public static function store( ContractLock $lock, ?string $next_payment_gmt ): void {
+		$contract_id = $lock->get_contract_id();
 		try {
 			if ( null === $next_payment_gmt ) {
 				Contracts::delete_meta( $contract_id, self::META_KEY, null, $lock );
@@ -95,10 +95,10 @@ final class HoldAnchor {
 	 * renewal paid later keeps the contract on hold instead of resuming it; the log is how
 	 * that is traced.
 	 *
-	 * @param int          $contract_id Contract id.
-	 * @param ContractLock $lock        The caller's lock on the contract.
+	 * @param ContractLock $lock The caller's lock on the contract.
 	 */
-	public static function clear( int $contract_id, ContractLock $lock ): void {
+	public static function clear( ContractLock $lock ): void {
+		$contract_id = $lock->get_contract_id();
 		try {
 			Contracts::delete_meta( $contract_id, self::META_KEY, null, $lock );
 		} catch ( RuntimeException $e ) {

@@ -37,7 +37,6 @@ use WC_Order_Item_Product;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\ContractLock;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\ContractLockedException;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
-use Automattic\WooCommerce\SubscriptionsEngine\Api\DuplicateContractException;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\PlanView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
@@ -237,16 +236,6 @@ final class ContractCreationHandler {
 
 		try {
 			$contract = $this->create_contract( $order, $outcome['plan'] );
-		} catch ( DuplicateContractException $e ) {
-			wc_get_logger()->info(
-				sprintf( 'ContractCreationHandler: the contract for order %d was already created (contract %d).', $order_id, $e->get_existing_contract_id() ),
-				[ 'source' => self::LOG_SOURCE ]
-			);
-			$duplicate = Contracts::get( $e->get_existing_contract_id() );
-			if ( null !== $duplicate ) {
-				$this->resume_drafts( $order, [ $duplicate ], $outcome['plan'] );
-			}
-			return;
 		} catch ( Throwable $e ) {
 			$this->run_failed = true;
 			$this->log_error( sprintf( 'failed to create a contract for order %d: %s', $order_id, $e->getMessage() ) );
@@ -270,10 +259,12 @@ final class ContractCreationHandler {
 		}
 
 		if ( null === $contract ) {
-			wc_get_logger()->warning(
-				sprintf( 'ContractCreationHandler: the contract for order %d no longer exists at activation.', $order_id ),
+			// The creation key is taken: a signal racing past the fast path created it first.
+			wc_get_logger()->info(
+				sprintf( 'ContractCreationHandler: the contract for order %d was already created.', $order_id ),
 				[ 'source' => self::LOG_SOURCE ]
 			);
+			$this->resume_drafts( $order, Contracts::find_by_origin_order( $order_id ), $outcome['plan'] );
 		}
 	}
 
@@ -322,18 +313,32 @@ final class ContractCreationHandler {
 	private function resume_draft( WC_Order $order, int $contract_id, PlanView $plan ): void {
 		[ $start, $next ] = self::first_period( $order, $plan );
 
-		$activated = HeldLocks::run(
-			$contract_id,
-			self::OPERATION,
-			static function ( ContractLock $lock ) use ( $contract_id, $order, $start, $next ): ?ContractView {
-				$draft = Contracts::get( $contract_id );
-				if ( null === $draft || ContractStatus::DRAFT !== $draft->get_status() ) {
-					return null;
+		$lock     = HeldLocks::get( $contract_id );
+		$acquired = null === $lock;
+		if ( $acquired ) {
+			$lock = Contracts::lock( $contract_id, self::OPERATION );
+			if ( null === $lock ) {
+				$conflict = HeldLocks::get_conflict( $contract_id );
+				if ( null === $conflict ) {
+					return;
 				}
-
-				return self::activate( $lock, $order, $start, $next, (string) $draft->get_billing_total() );
+				throw $conflict;
 			}
-		);
+			HeldLocks::register( $lock );
+		}
+
+		try {
+			$draft = Contracts::get( $contract_id );
+			if ( null === $draft || Package::EXTENSION_SLUG !== $draft->get_extension_slug() || ContractStatus::DRAFT !== $draft->get_status() ) {
+				return;
+			}
+
+			$activated = self::activate( $lock, $order, $start, $next, (string) $draft->get_billing_total() );
+		} finally {
+			if ( $acquired ) {
+				HeldLocks::release( $lock );
+			}
+		}
 		if ( null === $activated ) {
 			return;
 		}
@@ -445,8 +450,8 @@ final class ContractCreationHandler {
 	 *
 	 * @param WC_Order $order The paid order.
 	 * @param PlanView $plan  The order's selling plan.
-	 * @return ContractView|null The active contract; null when it was deleted before activation.
-	 * @throws DuplicateContractException When the order's contract was already created.
+	 * @return ContractView|null The active contract; null when the order's contract was already
+	 *                           created (its creation key is taken) or deleted before activation.
 	 * @throws LogicException When cycle 1 of the new contract already exists. Any other
 	 *                        failure (an unparseable billing payload, a failed engine
 	 *                        write) propagates as thrown.
@@ -465,7 +470,7 @@ final class ContractCreationHandler {
 		$totals = $this->get_recurring_totals( $order, $plan_lines );
 
 		self::schedule_resume( $order->get_id(), ContractLock::TTL_SECONDS + self::RESUME_DELAY_SECONDS );
-		$lock = Contracts::create_locked(
+		$created = Contracts::create_locked(
 			[
 				'extension_slug'       => Package::EXTENSION_SLUG,
 				'creation_key'         => self::creation_key( $order ),
@@ -491,13 +496,14 @@ final class ContractCreationHandler {
 			self::OPERATION
 		);
 
+		if ( null === $created ) {
+			return null;
+		}
+
+		$lock = $created['lock'];
+		HeldLocks::register( $lock );
 		try {
-			$activated = HeldLocks::with(
-				$lock,
-				static function ( ContractLock $lock ) use ( $order, $start, $next, $totals ): ?ContractView {
-					return self::activate( $lock, $order, $start, $next, $totals['billing_total'] );
-				}
-			);
+			$activated = self::activate( $lock, $order, $start, $next, $totals['billing_total'] );
 		} finally {
 			HeldLocks::release( $lock );
 		}
