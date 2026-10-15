@@ -29,12 +29,15 @@ use LogicException;
 use Throwable;
 use WC_Order;
 use WC_Order_Item_Product;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\ContractLock;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\DuplicateContractException;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\PlanView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\CycleStatus;
 use Automattic\WooCommerce\SubscriptionsLite\Contracts\AddressFields;
+use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\HeldLocks;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ProductPlanResolver;
 use Automattic\WooCommerce\SubscriptionsLite\Pricing\BillingTerms;
@@ -87,6 +90,11 @@ final class ContractCreationHandler {
 	public const REASON_CREATION_FAILED = 'creation_failed';
 
 	/**
+	 * Operation label of the new contract's lock while checkout builds it.
+	 */
+	public const OPERATION = 'checkout';
+
+	/**
 	 * Logger source tag.
 	 */
 	private const LOG_SOURCE = 'woocommerce-subscriptions-lite';
@@ -126,8 +134,9 @@ final class ContractCreationHandler {
 			return; // No subscription line on the order.
 		}
 
-		// Idempotency: a repeat paid-status transition (e.g. processing -> completed)
-		// must neither double-create a contract nor duplicate a deferral note.
+		// Idempotency fast path: a repeat paid-status transition (e.g. processing -> completed)
+		// must neither double-create a contract nor duplicate a deferral note. Two signals
+		// racing past it are told apart by the order's creation key.
 		if ( '' !== (string) $order->get_meta( self::CREATION_DEFERRED_META )
 			|| [] !== Contracts::find_by_origin_order( $order_id ) ) {
 			return;
@@ -140,6 +149,12 @@ final class ContractCreationHandler {
 
 		try {
 			$contract = $this->create_contract( $order, $outcome['plan'] );
+		} catch ( DuplicateContractException $e ) {
+			wc_get_logger()->info(
+				sprintf( 'ContractCreationHandler: the contract for order %d was already created (contract %d).', $order_id, $e->get_existing_contract_id() ),
+				[ 'source' => self::LOG_SOURCE ]
+			);
+			return;
 		} catch ( Throwable $e ) {
 			$this->log_error( sprintf( 'failed to create a contract for order %d: %s', $order_id, $e->getMessage() ) );
 			try {
@@ -204,9 +219,11 @@ final class ContractCreationHandler {
 	}
 
 	/**
-	 * Create the contract for a paid order on `$plan`: a draft with the mapped fields,
-	 * then cycle 1 (billed by the order), then activation with the first renewal date.
-	 * Activation comes last, so a failure part-way leaves a draft that is never due.
+	 * Create the contract for a paid order on `$plan`: a draft with the mapped fields, locked
+	 * from birth under the order's creation key (`order:{id}`), then cycle 1 (billed by the
+	 * order), then activation with the first renewal date, all with that lock. Activation
+	 * comes last, so a failure part-way leaves a draft that is never due; the lock is released
+	 * on every path, so a stuck draft is not locked.
 	 *
 	 * The first renewal date comes from {@see BillingTerms::get_first_renewal_from()}, the
 	 * same parse that decides whether a plan is billable.
@@ -214,6 +231,7 @@ final class ContractCreationHandler {
 	 * @param WC_Order $order The paid order.
 	 * @param PlanView $plan  The order's selling plan.
 	 * @return ContractView|null The active contract; null when it was deleted before activation.
+	 * @throws DuplicateContractException When the order's contract was already created.
 	 * @throws LogicException When cycle 1 of the new contract already exists. Any other
 	 *                        failure (an unparseable billing payload, a failed engine
 	 *                        write) propagates as thrown.
@@ -235,9 +253,10 @@ final class ContractCreationHandler {
 
 		$totals = $this->get_recurring_totals( $order, $plan_lines );
 
-		$contract = Contracts::create(
+		$lock = Contracts::create_locked(
 			[
 				'extension_slug'       => Package::EXTENSION_SLUG,
+				'creation_key'         => self::creation_key( $order ),
 				'status'               => ContractStatus::DRAFT,
 				'customer_id'          => $order->get_customer_id() > 0 ? $order->get_customer_id() : null,
 				'currency'             => $order->get_currency(),
@@ -256,20 +275,58 @@ final class ContractCreationHandler {
 					'billing'  => $this->map_address( $order, 'billing' ),
 					'shipping' => $this->map_address( $order, 'shipping' ),
 				],
-			]
+			],
+			self::OPERATION
 		);
 
+		try {
+			$activated = HeldLocks::with(
+				$lock,
+				static function ( ContractLock $lock ) use ( $order, $start, $next, $totals ): ?ContractView {
+					return self::activate( $lock, $order, $start, $next, $totals['billing_total'] );
+				}
+			);
+		} finally {
+			HeldLocks::release( $lock );
+		}
+
+		// Read after the release, so the view does not report the checkout lock.
+		return null === $activated ? null : Contracts::get( $lock->get_contract_id() );
+	}
+
+	/**
+	 * The creation key of an order's contract: one contract per paid order.
+	 *
+	 * @param WC_Order $order The order.
+	 */
+	public static function creation_key( WC_Order $order ): string {
+		return 'order:' . $order->get_id();
+	}
+
+	/**
+	 * Cycle 1 and activation of a just-created draft, under its lock.
+	 *
+	 * @param ContractLock      $lock          The new contract's lock.
+	 * @param WC_Order          $order         The paid order.
+	 * @param DateTimeImmutable $start         Contract start.
+	 * @param DateTimeImmutable $next          First renewal date.
+	 * @param string            $billing_total Recurring total.
+	 * @throws LogicException When cycle 1 of the new contract already exists.
+	 */
+	private static function activate( ContractLock $lock, WC_Order $order, DateTimeImmutable $start, DateTimeImmutable $next, string $billing_total ): ?ContractView {
+		$contract_id = $lock->get_contract_id();
 		$first_cycle = Contracts::add_cycle(
-			$contract->get_id(),
+			$contract_id,
 			[
 				'status'         => CycleStatus::BILLED,
 				'count'          => 1,
 				'order_id'       => $order->get_id(),
 				'starts_at_gmt'  => $start,
 				'ends_at_gmt'    => $next,
-				'expected_total' => $totals['billing_total'],
+				'expected_total' => $billing_total,
 				'currency'       => $order->get_currency(),
-			]
+			],
+			$lock
 		);
 		if ( null === $first_cycle ) {
 			// The draft is new, so its first position cannot be taken: fail like any other write.
@@ -277,11 +334,12 @@ final class ContractCreationHandler {
 		}
 
 		return Contracts::update(
-			$contract->get_id(),
+			$contract_id,
 			[
 				'status'           => ContractStatus::ACTIVE,
 				'next_payment_gmt' => $next,
-			]
+			],
+			$lock
 		);
 	}
 

@@ -15,6 +15,7 @@ declare( strict_types=1 );
 namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Checkout;
 
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\DuplicateContractException;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Plans;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\PlanView;
@@ -189,6 +190,7 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 		$contracts = Contracts::find_by_origin_order( $order->get_id() );
 		$this->assertCount( 1, $contracts );
 		$this->assertSame( 'draft', $contracts[0]->get_status() );
+		$this->assertNull( $contracts[0]->get_lock_state(), 'The stuck draft is not left locked.' );
 		$this->assertNull( $contracts[0]->get_next_payment_gmt(), 'A draft is never armed.' );
 		$this->assertSame( [], Contracts::get_cycles( $contracts[0]->get_id() ) );
 
@@ -467,5 +469,69 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 			has_action( 'woocommerce_order_status_changed' ),
 			'Contract creation is bound to the order reaching a paid status.'
 		);
+	}
+
+	public function test_the_contract_carries_the_order_creation_key_and_is_left_unlocked(): void {
+		global $wpdb;
+
+		$customer_id = $this->create_customer();
+		$plan        = $this->make_plan();
+		$order       = $this->create_subscription_order( $customer_id );
+		$this->apply_and_stamp( $order, $plan );
+
+		$order->update_status( 'processing' );
+
+		$contracts = Contracts::find_by_origin_order( $order->get_id() );
+		$this->assertCount( 1, $contracts );
+		$this->assertNull( $contracts[0]->get_lock_state() );
+		$table = SchemaInstaller::get_table_name( SchemaInstaller::TABLE_CONTRACTS );
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		$key = $wpdb->get_var( $wpdb->prepare( "SELECT creation_key FROM {$table} WHERE id = %d", $contracts[0]->get_id() ) );
+		$this->assertSame( 'order:' . $order->get_id(), $key );
+	}
+
+	public function test_a_second_creation_for_the_same_order_is_a_duplicate(): void {
+		$customer_id = $this->create_customer();
+		$plan        = $this->make_plan();
+		$order       = $this->create_subscription_order( $customer_id );
+		$this->apply_and_stamp( $order, $plan );
+		$first = ( new ContractCreationHandler() )->create_contract( $order, $plan );
+		$this->assertInstanceOf( ContractView::class, $first );
+
+		try {
+			( new ContractCreationHandler() )->create_contract( $order, $plan );
+			$this->fail( 'Expected DuplicateContractException.' );
+		} catch ( DuplicateContractException $e ) {
+			$this->assertSame( $first->get_id(), $e->get_existing_contract_id() );
+		}
+
+		$this->assertCount( 1, Contracts::list_for_customer( $customer_id ) );
+	}
+
+	/**
+	 * Two paid signals that both pass the origin-order fast path (simulated by hiding the
+	 * first contract from that lookup): the creation key makes the second a quiet no-op.
+	 */
+	public function test_a_paid_signal_racing_past_the_fast_path_creates_no_second_contract(): void {
+		$customer_id = $this->create_customer();
+		$plan        = $this->make_plan();
+		$order       = $this->create_subscription_order( $customer_id );
+		$this->apply_and_stamp( $order, $plan );
+		$order->update_status( 'processing' );
+
+		$hide = static function ( string $query ): string {
+			return str_replace( 'WHERE origin_order_id = ', 'WHERE 1 = 0 AND origin_order_id = ', $query );
+		};
+		add_filter( 'query', $hide );
+		try {
+			( new ContractCreationHandler() )->create_contracts_for_order( $order->get_id() );
+		} finally {
+			remove_filter( 'query', $hide );
+		}
+
+		$this->assertCount( 1, Contracts::list_for_customer( $customer_id ) );
+		$this->assertSame( '', $this->deferral_reason( wc_get_order( $order->get_id() ) ), 'No deferral.' );
+		$notes = wp_list_pluck( wc_get_order_notes( [ 'order_id' => $order->get_id() ] ), 'content' );
+		$this->assertSame( [], preg_grep( '/subscription/i', $notes ), 'No subscription note.' );
 	}
 }
