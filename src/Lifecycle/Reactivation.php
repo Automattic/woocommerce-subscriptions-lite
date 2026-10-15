@@ -14,10 +14,11 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Lifecycle;
 
 use DateTimeImmutable;
 use DateTimeZone;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\ContractLock;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\ContractLockedException;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
-use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ContractPlans;
 use Automattic\WooCommerce\SubscriptionsLite\Pricing\BillingTerms;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\UnpaidRenewal;
@@ -30,17 +31,46 @@ defined( 'ABSPATH' ) || exit;
 final class Reactivation {
 
 	/**
-	 * Reactivate an on-hold contract. The anchor is the next payment when one was set
-	 * while held (hold clears it, so it was set deliberately), else the hold anchor.
+	 * Operation label of the reactivation's contract lock.
+	 */
+	public const OPERATION = 'reactivate';
+
+	/**
+	 * Reactivate an on-hold contract under its lock; every check reads after acquiring. The
+	 * anchor is the next payment when one was set while held (hold clears it, so it was set
+	 * deliberately), else the hold anchor.
 	 *
 	 * @param int                    $contract_id Contract id.
 	 * @param DateTimeImmutable|null $now         The current moment; the UTC wall clock when omitted.
 	 * @return ContractView|null The reactivated contract, or null when it does not exist or is not Lite's.
 	 * @throws LifecycleNotAllowedException If the contract is not on hold, or a renewal payment is outstanding.
+	 * @throws ContractLockedException If another operation holds the contract's lock.
 	 */
 	public function reactivate( int $contract_id, ?DateTimeImmutable $now = null ): ?ContractView {
+		if ( ! Hold::is_lite_contract( $contract_id ) ) {
+			return null;
+		}
+
+		return HeldLocks::run(
+			$contract_id,
+			self::OPERATION,
+			function ( ContractLock $lock ) use ( $contract_id, $now ): ?ContractView {
+				return $this->reactivate_locked( $contract_id, $now, $lock );
+			}
+		);
+	}
+
+	/**
+	 * The locked section of {@see self::reactivate()}.
+	 *
+	 * @param int                    $contract_id Contract id.
+	 * @param DateTimeImmutable|null $now         The current moment, or null.
+	 * @param ContractLock           $lock        The held lock.
+	 * @throws LifecycleNotAllowedException If the contract is not on hold, or a renewal payment is outstanding.
+	 */
+	private function reactivate_locked( int $contract_id, ?DateTimeImmutable $now, ContractLock $lock ): ?ContractView {
 		$contract = Contracts::get( $contract_id );
-		if ( null === $contract || Package::EXTENSION_SLUG !== $contract->get_extension_slug() ) {
+		if ( null === $contract ) {
 			return null;
 		}
 
@@ -64,16 +94,18 @@ final class Reactivation {
 			[
 				'status'           => ContractStatus::ACTIVE,
 				'next_payment_gmt' => $next_payment,
-			]
+			],
+			$lock
 		);
 		if ( null === $reactivated_contract ) {
 			return null;
 		}
 
-		HoldAnchor::clear( $contract_id );
+		HoldAnchor::clear( $contract_id, $lock );
 
 		/**
-		 * Fires after a held contract is reactivated (re-armed, or unscheduled when it had no anchor).
+		 * Fires after a held contract is reactivated (re-armed, or unscheduled when it had no
+		 * anchor). Runs under the contract lock.
 		 *
 		 * @param ContractView $reactivated_contract The reactivated contract.
 		 */
