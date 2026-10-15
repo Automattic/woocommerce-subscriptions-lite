@@ -16,6 +16,7 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Lifecycle;
 
 use WP_Error;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\ContractActions;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\ContractLockedException;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 use Automattic\WooCommerce\SubscriptionsLite\Contracts\CustomerVisibility;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
@@ -131,7 +132,8 @@ final class CustomerActions {
 
 	/**
 	 * Run a lifecycle flow and map its outcome: a missing contract is a 404, a status the flow
-	 * rejects a 409.
+	 * rejects a 409, and another operation holding the contract's lock a 409 the portal shows
+	 * (its retry advice comes from the portal's error suffix).
 	 *
 	 * @param callable( int ): ?ContractView $flow        Lifecycle flow method.
 	 * @param int                            $contract_id Contract id.
@@ -144,6 +146,12 @@ final class CustomerActions {
 			return new WP_Error(
 				'woocommerce_subscriptions_lite_action_not_allowed',
 				__( 'That action is not available for this subscription right now.', 'woocommerce-subscriptions-lite' ),
+				[ 'status' => 409 ]
+			);
+		} catch ( ContractLockedException $e ) {
+			return new WP_Error(
+				'woocommerce_subscriptions_lite_contract_locked',
+				__( 'Another change to this subscription is in progress.', 'woocommerce-subscriptions-lite' ),
 				[ 'status' => 409 ]
 			);
 		}
