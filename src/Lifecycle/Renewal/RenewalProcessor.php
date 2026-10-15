@@ -114,7 +114,8 @@ final class RenewalProcessor {
 	 * @throws ContractLockedException If another operation holds the contract's lock.
 	 */
 	public function renew_now( int $contract_id ): ?WC_Order {
-		if ( null === Contracts::get( $contract_id ) ) {
+		// Checked before locking: a foreign or missing contract is not Lite's to lock.
+		if ( ! Hold::is_lite_contract( $contract_id ) ) {
 			return null;
 		}
 

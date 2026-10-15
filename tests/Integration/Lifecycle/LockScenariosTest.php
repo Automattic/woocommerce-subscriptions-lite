@@ -345,7 +345,16 @@ final class LockScenariosTest extends LiteIntegrationTestCase {
 		$lock = $this->hold_lock( $contract_id, 'cancel' );
 		$order->payment_complete();
 		$this->assertSame( CycleStatus::PENDING, $this->head( $contract_id )->get_status() );
-		$this->assertNotFalse( as_has_scheduled_action( Settlement::RETRY_HOOK, [ 'order_id' => $order->get_id() ], Settlement::RETRY_GROUP ) );
+		$this->assertNotFalse(
+			as_has_scheduled_action(
+				Settlement::RETRY_HOOK,
+				[
+					'order_id' => $order->get_id(),
+					'paid'     => true,
+				],
+				Settlement::RETRY_GROUP
+			)
+		);
 
 		$lock->release();
 		do_action( Settlement::RETRY_HOOK, $order->get_id() );
@@ -355,7 +364,7 @@ final class LockScenariosTest extends LiteIntegrationTestCase {
 	}
 
 	/**
-	 * The scheduled moments of the pending settlement actions for an order.
+	 * The scheduled moments of the pending charge guards (unpaid settlement actions) for an order.
 	 *
 	 * @param int $order_id Order id.
 	 * @return array<int, int> Unix timestamps.
@@ -364,7 +373,10 @@ final class LockScenariosTest extends LiteIntegrationTestCase {
 		$actions = as_get_scheduled_actions(
 			[
 				'hook'   => Settlement::RETRY_HOOK,
-				'args'   => [ 'order_id' => $order_id ],
+				'args'   => [
+					'order_id' => $order_id,
+					'paid'     => false,
+				],
 				'group'  => Settlement::RETRY_GROUP,
 				'status' => \ActionScheduler_Store::STATUS_PENDING,
 			]

@@ -628,6 +628,15 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 		$this->assertSame( 0, $this->charge_count() );
 	}
 
+	public function test_renew_now_never_locks_another_extensions_contract(): void {
+		$foreign = $this->seed_contract( [ 'extension_slug' => 'another-extension' ] );
+		$lock    = $this->hold_lock( $foreign, 'foreign' );
+
+		$this->assertNull( ( new RenewalProcessor() )->renew_now( $foreign ), 'Not a lock conflict: not Lite\'s contract.' );
+		$this->assertSame( 'foreign', $this->get_contract( $foreign )->get_lock_state()['operation'] ?? null );
+		$lock->release();
+	}
+
 	public function test_renew_now_retries_an_unpaid_renewal_on_hold(): void {
 		$this->support_engine_charges( 'cod', 'failed' );
 		$contract_id = $this->make_contract();
@@ -655,7 +664,6 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 		$retries = as_get_scheduled_actions(
 			[
 				'hook'         => Settlement::RETRY_HOOK,
-				'args'         => [ 'order_id' => $order->get_id() ],
 				'group'        => Settlement::RETRY_GROUP,
 				'status'       => \ActionScheduler_Store::STATUS_PENDING,
 				'date'         => as_get_datetime_object( time() + ContractLock::TTL_SECONDS ),

@@ -424,14 +424,22 @@ final class SettlementTest extends LiteIntegrationTestCase {
 	 * @return array<int, int> Action ids.
 	 */
 	private function pending_retries( int $order_id ): array {
-		return as_get_scheduled_actions(
+		$actions = as_get_scheduled_actions(
 			[
-				'hook'   => Settlement::RETRY_HOOK,
-				'args'   => [ 'order_id' => $order_id ],
-				'group'  => Settlement::RETRY_GROUP,
-				'status' => \ActionScheduler_Store::STATUS_PENDING,
-			],
-			'ids'
+				'hook'     => Settlement::RETRY_HOOK,
+				'group'    => Settlement::RETRY_GROUP,
+				'status'   => \ActionScheduler_Store::STATUS_PENDING,
+				'per_page' => -1,
+			]
+		);
+
+		return array_keys(
+			array_filter(
+				$actions,
+				static function ( $action ) use ( $order_id ): bool {
+					return ( $action->get_args()['order_id'] ?? null ) === $order_id;
+				}
+			)
 		);
 	}
 
@@ -569,5 +577,39 @@ final class SettlementTest extends LiteIntegrationTestCase {
 		do_action( Settlement::RETRY_HOOK, $order->get_id() );
 
 		$this->assertSame( CycleStatus::BILLED, $this->head( $contract_id )->get_status() );
+	}
+
+	public function test_a_retry_carries_whether_the_order_was_paid(): void {
+		[ $contract_id, $order ] = $this->seed_renewal();
+		$this->hold_lock( $contract_id, 'hold' );
+		$this->pay( $order );
+
+		( new Settlement() )->handle_order( $order->get_id() );
+
+		$actions = as_get_scheduled_actions(
+			[
+				'hook'   => Settlement::RETRY_HOOK,
+				'args'   => [
+					'order_id' => $order->get_id(),
+					'paid'     => true,
+				],
+				'status' => \ActionScheduler_Store::STATUS_PENDING,
+			],
+			'ids'
+		);
+		$this->assertCount( 1, $actions );
+	}
+
+	public function test_a_paid_order_deleted_before_its_retry_fails_nothing_and_logs_a_warning(): void {
+		[ $contract_id, $order ] = $this->seed_renewal();
+		$order_id                = $order->get_id();
+		$order->delete( true );
+		$this->capture_log();
+
+		( new Settlement() )->retry( $order_id, true );
+
+		$this->assertSame( CycleStatus::PENDING, $this->head( $contract_id )->get_status(), 'The cycle is not failed.' );
+		$this->assertSame( ContractStatus::ACTIVE, $this->get_contract( $contract_id )->get_status(), 'The contract is not held.' );
+		$this->assertTrue( $this->has_logged( 'was paid and then deleted before its settlement' ) );
 	}
 }

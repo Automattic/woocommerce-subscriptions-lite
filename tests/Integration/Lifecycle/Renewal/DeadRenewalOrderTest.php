@@ -14,6 +14,7 @@ use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\CycleView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\CycleStatus;
+use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\SchemaInstaller;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\RowActionController;
 use Automattic\WooCommerce\SubscriptionsLite\CustomerPortal\EngineDataProvider;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\HoldAnchor;
@@ -295,5 +296,79 @@ final class DeadRenewalOrderTest extends LiteIntegrationTestCase {
 
 		$this->assertSame( CycleStatus::BILLED, $this->head( $contract_id )->get_status() );
 		$this->assertSame( ContractStatus::ACTIVE, $this->get_contract( $contract_id )->get_status() );
+	}
+
+	/**
+	 * Notes on an order asking for a refund of this payment.
+	 *
+	 * @param int $order_id Order id.
+	 */
+	private function sole_refund_notes( int $order_id ): array {
+		return array_values(
+			array_filter(
+				wp_list_pluck( wc_get_order_notes( [ 'order_id' => $order_id ] ), 'content' ),
+				static function ( $note ): bool {
+					return false !== strpos( (string) $note, 'Refund this payment' );
+				}
+			)
+		);
+	}
+
+	public function test_a_replaced_order_paid_after_its_renewal_is_gone_is_flagged_for_a_refund(): void {
+		[ , $order ] = $this->replace_a_cancelled_renewal( 'failed' );
+		$replaced    = wc_get_order( $order->get_id() );
+		$replaced->update_meta_data( Settlement::REPLACED_CYCLE_META, '987654' );
+		$replaced->save();
+
+		$replaced->payment_complete();
+		wc_get_order( $order->get_id() )->update_status( 'completed' );
+
+		$notes = $this->sole_refund_notes( $order->get_id() );
+		$this->assertCount( 1, $notes, 'Flagged once.' );
+		$this->assertStringContainsString( 'no longer exists', $notes[0] );
+	}
+
+	public function test_a_replaced_order_paid_after_its_renewal_was_cancelled_is_flagged_for_a_refund(): void {
+		[ $contract_id, $order, $replacement_id ] = $this->replace_a_cancelled_renewal( 'failed' );
+		Contracts::transition_cycle(
+			$this->head( $contract_id )->get_id(),
+			[
+				'from_status' => CycleStatus::FAILED,
+				'to_status'   => CycleStatus::CANCELLED,
+			]
+		);
+
+		wc_get_order( $order->get_id() )->payment_complete();
+
+		$notes = $this->sole_refund_notes( $order->get_id() );
+		$this->assertCount( 1, $notes );
+		$this->assertStringContainsString( 'status: cancelled', $notes[0] );
+		$this->assertSame( $replacement_id, $this->head( $contract_id )->get_order_id() );
+	}
+
+	/**
+	 * A relink that loses its compare-and-set (only a writer outside Lite's lock can cause it,
+	 * simulated by a query filter) flags the late payment instead of settling it.
+	 */
+	public function test_a_replaced_order_paid_late_whose_relink_fails_is_flagged_for_a_refund(): void {
+		[ $contract_id, $order, $replacement_id ] = $this->replace_a_cancelled_renewal( 'failed' );
+		$cycles                                   = SchemaInstaller::get_table_name( SchemaInstaller::TABLE_CYCLES );
+		$relink                                   = 'order_id = ' . $order->get_id() . ',';
+		$lose                                     = static function ( string $query ) use ( $cycles, $relink ): string {
+			return 0 === strpos( $query, "UPDATE {$cycles} SET" ) && false !== strpos( $query, $relink ) ? $query . ' AND 1 = 0' : $query;
+		};
+		add_filter( 'query', $lose );
+		try {
+			wc_get_order( $order->get_id() )->payment_complete();
+		} finally {
+			remove_filter( 'query', $lose );
+		}
+
+		$notes = $this->sole_refund_notes( $order->get_id() );
+		$this->assertCount( 1, $notes );
+		$this->assertStringContainsString( 'could not be moved back', $notes[0] );
+		$head = $this->head( $contract_id );
+		$this->assertSame( $replacement_id, $head->get_order_id(), 'The replacement keeps the renewal.' );
+		$this->assertSame( CycleStatus::FAILED, $head->get_status() );
 	}
 }

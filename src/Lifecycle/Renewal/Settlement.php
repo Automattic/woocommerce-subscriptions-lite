@@ -67,7 +67,7 @@ final class Settlement {
 
 	/**
 	 * Action Scheduler hook that retries a settlement refused by another operation's lock.
-	 * Its single argument is the order id.
+	 * Its arguments are the order id and whether the order was paid when it was scheduled.
 	 */
 	public const RETRY_HOOK = 'woocommerce_subscriptions_lite_settle_order';
 
@@ -137,17 +137,19 @@ final class Settlement {
 		add_action( 'wp_trash_post', [ $instance, 'handle_removed_post' ] );
 		add_action( 'before_delete_post', [ $instance, 'handle_removed_post' ] );
 		add_filter( 'woocommerce_valid_order_statuses_for_cancel', [ $instance, 'statuses_for_customer_cancel' ], 10, 2 );
-		add_action( self::RETRY_HOOK, [ $instance, 'retry' ] );
+		add_action( self::RETRY_HOOK, [ $instance, 'retry' ], 10, 2 );
 	}
 
 	/**
 	 * Action Scheduler entry point for a refused settlement: settle the order when it still
-	 * exists, else fail the cycles still linked to its id as dead (it was deleted unpaid). A
-	 * retry refused again schedules the next one; the lock it waits for expires on its own.
+	 * exists, else fail the cycles still linked to its id as dead (it was deleted unpaid). An
+	 * order that was paid and then deleted fails nothing: a warning is logged. A retry refused
+	 * again schedules the next one; the lock it waits for expires on its own.
 	 *
 	 * @param mixed $order_id Order id.
+	 * @param mixed $paid     Whether the order was paid when the retry was scheduled.
 	 */
-	public function retry( $order_id ): void {
+	public function retry( $order_id, $paid = false ): void {
 		if ( ! is_numeric( $order_id ) ) {
 			return;
 		}
@@ -158,10 +160,21 @@ final class Settlement {
 			return;
 		}
 
+		if ( true === $paid ) {
+			wc_get_logger()->warning(
+				sprintf( 'Settlement: renewal order %d was paid and then deleted before its settlement; its renewal is left as it is. Check the payment and the subscription.', $order_id ),
+				[
+					'source'   => Package::EXTENSION_SLUG,
+					'order_id' => $order_id,
+				]
+			);
+			return;
+		}
+
 		try {
 			$this->settle_deleted( $order_id );
 		} catch ( ContractLockedException $e ) {
-			$this->schedule_retry( $order_id, $e );
+			$this->schedule_retry( $order_id, $e, false );
 		} catch ( Throwable $e ) {
 			$this->log_failure( sprintf( 'Settlement: settling deleted renewal order %d failed: %s', $order_id, $e->getMessage() ), $order_id );
 		}
@@ -173,8 +186,9 @@ final class Settlement {
 	 *
 	 * @param int                     $order_id Order id.
 	 * @param ContractLockedException $conflict The lock conflict.
+	 * @param bool                    $paid     Whether the order is paid.
 	 */
-	private function schedule_retry( int $order_id, ContractLockedException $conflict ): void {
+	private function schedule_retry( int $order_id, ContractLockedException $conflict, bool $paid ): void {
 		wc_get_logger()->info(
 			sprintf( 'Settlement: renewal order %d waits for the %s operation on contract %d; its settlement is retried.', $order_id, (string) $conflict->get_operation(), $conflict->get_contract_id() ),
 			[
@@ -184,7 +198,13 @@ final class Settlement {
 			]
 		);
 
-		self::schedule_settlement( [ 'order_id' => $order_id ], self::RETRY_DELAY_SECONDS );
+		self::schedule_settlement(
+			[
+				'order_id' => $order_id,
+				'paid'     => $paid,
+			],
+			self::RETRY_DELAY_SECONDS
+		);
 	}
 
 	/**
@@ -196,7 +216,13 @@ final class Settlement {
 	 * @param int $order_id The renewal order about to be charged.
 	 */
 	public static function guard_charge( int $order_id ): void {
-		self::schedule_settlement( [ 'order_id' => $order_id ], ContractLock::TTL_SECONDS + self::RETRY_DELAY_SECONDS );
+		self::schedule_settlement(
+			[
+				'order_id' => $order_id,
+				'paid'     => false,
+			],
+			ContractLock::TTL_SECONDS + self::RETRY_DELAY_SECONDS
+		);
 	}
 
 	/**
@@ -282,7 +308,7 @@ final class Settlement {
 		try {
 			$this->settle_deleted( $order->get_id() );
 		} catch ( ContractLockedException $e ) {
-			$this->schedule_retry( $order->get_id(), $e );
+			$this->schedule_retry( $order->get_id(), $e, false );
 		} catch ( Throwable $e ) {
 			$this->log_failure( sprintf( 'Settlement: settling removed renewal order %d failed: %s', $order->get_id(), $e->getMessage() ), $order->get_id() );
 		}
@@ -330,7 +356,7 @@ final class Settlement {
 		try {
 			$this->settle( $order );
 		} catch ( ContractLockedException $e ) {
-			$this->schedule_retry( $order->get_id(), $e );
+			$this->schedule_retry( $order->get_id(), $e, $order->is_paid() );
 		} catch ( Throwable $e ) {
 			$this->log_failure( sprintf( 'Settlement: settling renewal order %d failed: %s', $order->get_id(), $e->getMessage() ), $order->get_id() );
 		}
@@ -670,8 +696,8 @@ final class Settlement {
 	 * to it, the unpaid replacement is stamped as replaced and cancelled, and the payment
 	 * settles. Otherwise the replacement keeps the renewal and this order is flagged once for
 	 * a refund (note and warning): once the replacement paid, while its charge awaits
-	 * confirmation (it may still complete), or when the relink fails. Runs under the lock of
-	 * the contract named on the order.
+	 * confirmation (it may still complete), when the relink fails, or when the renewal is gone
+	 * or can no longer be billed. Runs under the lock of the contract named on the order.
 	 *
 	 * @param WC_Order               $order The paid replaced order.
 	 * @param DateTimeImmutable|null $now   The current moment.
@@ -704,6 +730,12 @@ final class Settlement {
 		$cycle_id = (int) $order->get_meta( self::REPLACED_CYCLE_META );
 		$cycle    = $cycle_id <= 0 ? null : self::find_cycle( $contract_id, $cycle_id );
 		if ( null === $cycle ) {
+			self::flag_for_refund(
+				$order,
+				$contract_id,
+				__( 'This renewal order was paid after another order replaced it, and its renewal no longer exists. Refund this payment.', 'woocommerce-subscriptions-lite' ),
+				sprintf( 'Settlement: renewal order %d was paid after it was replaced, and its cycle %d no longer exists; a refund is needed.', $order->get_id(), $cycle_id )
+			);
 			return;
 		}
 
@@ -748,22 +780,24 @@ final class Settlement {
 			return;
 		}
 
-		if ( null === $replacement_id || $replacement_id === $order->get_id() ) {
+		if ( $replacement_id === $order->get_id() ) {
 			return;
 		}
 
-		if ( CycleStatus::BILLED === $cycle->get_status() ) {
+		if ( null !== $replacement_id && CycleStatus::BILLED === $cycle->get_status() ) {
 			/* translators: %d: order number. */
 			$note    = sprintf( __( 'This renewal order was paid after order #%d replaced it and paid the same renewal. Refund one of the two payments.', 'woocommerce-subscriptions-lite' ), $replacement_id );
 			$message = sprintf( 'Settlement: renewal order %d was paid after order %d replaced it and paid the same renewal; a refund is needed.', $order->get_id(), $replacement_id );
-		} elseif ( $in_flight ) {
+		} elseif ( null !== $replacement_id && $in_flight ) {
 			// The replacement's charge may still complete: it keeps the renewal, so at most one
 			// payment settles it and the other is flagged here rather than cancelled unseen.
 			/* translators: %d: order number. */
 			$note    = sprintf( __( 'This renewal order was paid after order #%d replaced it, while that order\'s payment was still awaiting confirmation. If that payment completes, refund one of the two payments.', 'woocommerce-subscriptions-lite' ), $replacement_id );
 			$message = sprintf( 'Settlement: renewal order %d was paid after order %d replaced it while that order\'s payment was in flight; a refund is likely needed.', $order->get_id(), $replacement_id );
 		} else {
-			return;
+			/* translators: %s: renewal (cycle) status. */
+			$note    = sprintf( __( 'This renewal order was paid, but its renewal can no longer be billed (status: %s). Refund this payment.', 'woocommerce-subscriptions-lite' ), $cycle->get_status() );
+			$message = sprintf( 'Settlement: renewal order %d was paid after it was replaced, for cycle %d, which is %s; a refund is needed.', $order->get_id(), $cycle_id, $cycle->get_status() );
 		}
 
 		self::flag_for_refund( $order, $contract_id, $note, $message );
