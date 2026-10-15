@@ -22,6 +22,7 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration;
 
+use Automattic\WooCommerce\SubscriptionsEngine\Api\ContractLock;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Payments;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Plans;
@@ -566,23 +567,54 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 	}
 
 	/**
-	 * Run one engine due-dispatch batch once the dispatch claims taken at `$now` have expired.
-	 * Claims are measured on the database clock, so the session clock is moved past the claim
-	 * along with the scan moment, then restored.
+	 * Run one engine due-dispatch batch once every lock taken now has expired: the database
+	 * clock (which lock expiry is measured on) and the scan moment both move past the lock TTL.
 	 *
 	 * @param DateTimeImmutable $now The moment the earlier batch ran.
 	 * @return int The number of contracts whose owner was notified.
 	 */
-	protected function run_due_dispatch_after_claims_expire( DateTimeImmutable $now ): int {
+	protected function run_due_dispatch_after_locks_expire( DateTimeImmutable $now ): int {
+		$this->expire_held_locks();
+
+		return $this->run_due_dispatch( $now->modify( sprintf( '+%d seconds', ContractLock::TTL_SECONDS + 60 ) ) );
+	}
+
+	/**
+	 * Acquire the contract's lock in the test, as a concurrent operation would hold it.
+	 *
+	 * @param int    $contract_id Contract id.
+	 * @param string $operation   Operation label.
+	 */
+	protected function hold_lock( int $contract_id, string $operation = 'test' ): ContractLock {
+		return Contracts::lock( $contract_id, $operation );
+	}
+
+	/**
+	 * Pin the session's database clock at `$moment`, so locks are live or expired as of then.
+	 * The clock is restored after the test.
+	 *
+	 * @param DateTimeImmutable $moment The database's now.
+	 */
+	protected function expire_lock_at( DateTimeImmutable $moment ): void {
 		global $wpdb;
 
-		$later = $now->modify( sprintf( '+%d seconds', DueDispatcher::CLAIM_TTL_SECONDS + 60 ) );
-		$wpdb->query( $wpdb->prepare( 'SET timestamp = %d', $later->getTimestamp() ) ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+		$wpdb->query( $wpdb->prepare( 'SET timestamp = %d', $moment->getTimestamp() ) ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+	}
 
-		try {
-			return $this->run_due_dispatch( $later );
-		} finally {
-			$wpdb->query( 'SET timestamp = DEFAULT' ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
-		}
+	/**
+	 * Move the database clock past the TTL of every lock taken until now.
+	 */
+	protected function expire_held_locks(): void {
+		$this->expire_lock_at( new DateTimeImmutable( sprintf( '+%d seconds', ContractLock::TTL_SECONDS + 60 ), new DateTimeZone( 'UTC' ) ) );
+	}
+
+	/**
+	 * Restore the database clock after a test that pinned it.
+	 */
+	public function tear_down(): void {
+		global $wpdb;
+
+		$wpdb->query( 'SET timestamp = DEFAULT' ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+		parent::tear_down();
 	}
 }
