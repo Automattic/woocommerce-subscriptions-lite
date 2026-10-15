@@ -470,6 +470,22 @@ final class SettlementTest extends LiteIntegrationTestCase {
 		$this->assertSame( CycleStatus::PENDING, $this->head( $contract_id )->get_status() );
 	}
 
+	public function test_a_running_retry_refused_again_schedules_the_next_one(): void {
+		[ $contract_id, $order ] = $this->seed_renewal();
+		$this->hold_lock( $contract_id, 'hold' );
+		$this->pay( $order );
+		( new Settlement() )->handle_order( $order->get_id() );
+		$running = $this->pending_retries( $order->get_id() );
+		\ActionScheduler::store()->log_execution( (int) $running[0] );
+
+		( new Settlement() )->retry( $order->get_id() );
+
+		$next = $this->pending_retries( $order->get_id() );
+		$this->assertCount( 1, $next, 'The running retry does not count as pending.' );
+		$this->assertNotSame( $running, $next );
+		$this->assertSame( CycleStatus::PENDING, $this->head( $contract_id )->get_status() );
+	}
+
 	public function test_an_unpaid_renewal_order_deleted_under_another_lock_fails_its_cycle_on_the_retry(): void {
 		[ $contract_id, $order ] = $this->seed_renewal();
 		$lock                    = $this->hold_lock( $contract_id, 'renewal' );

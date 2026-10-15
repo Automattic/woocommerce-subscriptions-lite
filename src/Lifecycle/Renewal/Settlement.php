@@ -46,6 +46,7 @@ use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\HoldAnchor;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Hold;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ContractPlans;
+use ActionScheduler_Store;
 use DateTimeImmutable;
 use DateTimeZone;
 use Throwable;
@@ -141,7 +142,7 @@ final class Settlement {
 	/**
 	 * Action Scheduler entry point for a refused settlement: settle the order when it still
 	 * exists, else fail the cycles still linked to its id as dead (it was deleted unpaid). A
-	 * retry refused again schedules the next one.
+	 * retry refused again schedules the next one; the lock it waits for expires on its own.
 	 *
 	 * @param mixed $order_id Order id.
 	 */
@@ -173,8 +174,6 @@ final class Settlement {
 	 * @param ContractLockedException $conflict The lock conflict.
 	 */
 	private function schedule_retry( int $order_id, ContractLockedException $conflict ): void {
-		$args = [ 'order_id' => $order_id ];
-
 		wc_get_logger()->info(
 			sprintf( 'Settlement: renewal order %d waits for the %s operation on contract %d; its settlement is retried.', $order_id, (string) $conflict->get_operation(), $conflict->get_contract_id() ),
 			[
@@ -184,11 +183,32 @@ final class Settlement {
 			]
 		);
 
-		if ( false !== as_has_scheduled_action( self::RETRY_HOOK, $args, self::RETRY_GROUP ) ) {
+		self::schedule_settlement( [ 'order_id' => $order_id ], self::RETRY_DELAY_SECONDS );
+	}
+
+	/**
+	 * Schedule a settlement action unless one with the same arguments is pending. Only pending
+	 * actions count: a running retry refused again must schedule the next one.
+	 *
+	 * @param array<string, mixed> $args          Action arguments.
+	 * @param int                  $delay_seconds Seconds from now.
+	 */
+	private static function schedule_settlement( array $args, int $delay_seconds ): void {
+		$pending = as_get_scheduled_actions(
+			[
+				'hook'     => self::RETRY_HOOK,
+				'args'     => $args,
+				'group'    => self::RETRY_GROUP,
+				'status'   => ActionScheduler_Store::STATUS_PENDING,
+				'per_page' => 1,
+			],
+			'ids'
+		);
+		if ( [] !== $pending ) {
 			return;
 		}
 
-		as_schedule_single_action( time() + self::RETRY_DELAY_SECONDS, self::RETRY_HOOK, $args, self::RETRY_GROUP, true );
+		as_schedule_single_action( time() + $delay_seconds, self::RETRY_HOOK, $args, self::RETRY_GROUP );
 	}
 
 	/**
