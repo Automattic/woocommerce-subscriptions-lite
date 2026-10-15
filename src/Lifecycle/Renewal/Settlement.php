@@ -19,6 +19,12 @@
  *   never renews for free. The merchant can restore the order or use Renew now, which
  *   builds a new one.
  *
+ * Every settlement runs under the contract lock: the one this request already holds (a
+ * gateway status change inside a renewal charge) or its own. The contract and cycle are
+ * re-read after acquiring. When another operation holds the lock, the settlement is retried
+ * through Action Scheduler ({@see self::RETRY_HOOK}), so a paid order is never left
+ * unrecorded. A paid order that ends linked to no payable cycle is flagged for a refund.
+ *
  * @package Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal
  */
 
@@ -27,12 +33,15 @@ declare( strict_types=1 );
 namespace Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal;
 
 use Automattic\WooCommerce\Enums\OrderStatus;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\ContractLock;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\ContractLockedException;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\CycleView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\CycleStatus;
 use Automattic\WooCommerce\SubscriptionsLite\Pricing\BillingTerms;
+use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\HeldLocks;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\HoldAnchor;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Hold;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
@@ -48,6 +57,27 @@ defined( 'ABSPATH' ) || exit;
  * Renewal order settlement.
  */
 final class Settlement {
+
+	/**
+	 * Operation label of a settlement's own contract lock.
+	 */
+	public const OPERATION = 'settlement';
+
+	/**
+	 * Action Scheduler hook that retries a settlement refused by another operation's lock.
+	 * Its single argument is the order id.
+	 */
+	public const RETRY_HOOK = 'woocommerce_subscriptions_lite_settle_order';
+
+	/**
+	 * Action Scheduler group of the retry.
+	 */
+	public const RETRY_GROUP = 'woocommerce-subscriptions-lite';
+
+	/**
+	 * Seconds before a refused settlement is retried.
+	 */
+	public const RETRY_DELAY_SECONDS = 60;
 
 	/**
 	 * Failure reason recorded on a cycle whose renewal order failed.
@@ -70,7 +100,7 @@ final class Settlement {
 	public const REPLACED_CONTRACT_META = '_wcsl_replaced_contract_id';
 
 	/**
-	 * Order meta set once a replaced order's late payment was flagged for a refund.
+	 * Order meta set once a paid order that bills no cycle was flagged for a refund.
 	 */
 	private const REFUND_FLAGGED_META = '_wcsl_late_payment_flagged';
 
@@ -105,6 +135,76 @@ final class Settlement {
 		add_action( 'wp_trash_post', [ $instance, 'handle_removed_post' ] );
 		add_action( 'before_delete_post', [ $instance, 'handle_removed_post' ] );
 		add_filter( 'woocommerce_valid_order_statuses_for_cancel', [ $instance, 'statuses_for_customer_cancel' ], 10, 2 );
+		add_action( self::RETRY_HOOK, [ $instance, 'retry' ] );
+	}
+
+	/**
+	 * Action Scheduler entry point for a refused settlement: settle the order when it still
+	 * exists, else fail the cycles still linked to its id as dead (it was deleted unpaid). A
+	 * retry refused again schedules the next one.
+	 *
+	 * @param mixed $order_id Order id.
+	 */
+	public function retry( $order_id ): void {
+		if ( ! is_numeric( $order_id ) ) {
+			return;
+		}
+
+		$order_id = (int) $order_id;
+		if ( wc_get_order( $order_id ) instanceof WC_Order ) {
+			$this->handle_order( $order_id );
+			return;
+		}
+
+		try {
+			$this->settle_deleted( $order_id );
+		} catch ( ContractLockedException $e ) {
+			$this->schedule_retry( $order_id, $e );
+		} catch ( Throwable $e ) {
+			$this->log_failure( sprintf( 'Settlement: settling deleted renewal order %d failed: %s', $order_id, $e->getMessage() ), $order_id );
+		}
+	}
+
+	/**
+	 * Schedule a retry of the order's settlement, once: an action already pending for it covers
+	 * this conflict too.
+	 *
+	 * @param int                     $order_id Order id.
+	 * @param ContractLockedException $conflict The lock conflict.
+	 */
+	private function schedule_retry( int $order_id, ContractLockedException $conflict ): void {
+		$args = [ 'order_id' => $order_id ];
+
+		wc_get_logger()->info(
+			sprintf( 'Settlement: renewal order %d waits for the %s operation on contract %d; its settlement is retried.', $order_id, (string) $conflict->get_operation(), $conflict->get_contract_id() ),
+			[
+				'source'      => Package::EXTENSION_SLUG,
+				'contract_id' => $conflict->get_contract_id(),
+				'order_id'    => $order_id,
+			]
+		);
+
+		if ( false !== as_has_scheduled_action( self::RETRY_HOOK, $args, self::RETRY_GROUP ) ) {
+			return;
+		}
+
+		as_schedule_single_action( time() + self::RETRY_DELAY_SECONDS, self::RETRY_HOOK, $args, self::RETRY_GROUP, true );
+	}
+
+	/**
+	 * Log a settlement failure under the Lite source.
+	 *
+	 * @param string $message  Message.
+	 * @param int    $order_id Order id.
+	 */
+	private function log_failure( string $message, int $order_id ): void {
+		wc_get_logger()->error(
+			$message,
+			[
+				'source'   => Package::EXTENSION_SLUG,
+				'order_id' => $order_id,
+			]
+		);
 	}
 
 	/**
@@ -132,7 +232,8 @@ final class Settlement {
 
 	/**
 	 * Hook entry point for a renewal order about to be trashed or deleted: an unpaid one dies
-	 * like a cancelled one. A failure is logged, not rethrown.
+	 * like a cancelled one. A lock conflict schedules a retry (which finds the order trashed,
+	 * or gone); any other failure is logged, not rethrown.
 	 *
 	 * @param mixed $order_id Order id.
 	 */
@@ -143,24 +244,43 @@ final class Settlement {
 		}
 
 		try {
-			$match = $this->find_lite_cycle( $order->get_id() );
-			if ( null !== $match ) {
-				$this->settle_dead( $match['contract'], $match['cycle'] );
-			}
+			$this->settle_deleted( $order->get_id() );
+		} catch ( ContractLockedException $e ) {
+			$this->schedule_retry( $order->get_id(), $e );
 		} catch ( Throwable $e ) {
-			wc_get_logger()->error(
-				sprintf( 'Settlement: settling removed renewal order %d failed: %s', $order->get_id(), $e->getMessage() ),
-				[
-					'source'   => Package::EXTENSION_SLUG,
-					'order_id' => $order->get_id(),
-				]
-			);
+			$this->log_failure( sprintf( 'Settlement: settling removed renewal order %d failed: %s', $order->get_id(), $e->getMessage() ), $order->get_id() );
 		}
 	}
 
 	/**
-	 * Hook entry point: settle the order with this id. A failure is logged, not rethrown, so
-	 * the order status change that triggered it still completes; a due renewal that finds the
+	 * Fail every open Lite cycle linked to an unpaid order that is removed or gone, each under
+	 * its contract's lock.
+	 *
+	 * @param int $order_id Order id.
+	 * @throws ContractLockedException If another operation holds a contract's lock.
+	 */
+	private function settle_deleted( int $order_id ): void {
+		$match = $this->find_lite_cycle( $order_id );
+		if ( null === $match ) {
+			return;
+		}
+
+		HeldLocks::run(
+			$match['contract']->get_id(),
+			self::OPERATION,
+			function ( ContractLock $lock ) use ( $order_id ): void {
+				$locked = $this->find_lite_cycle( $order_id );
+				if ( null !== $locked ) {
+					$this->settle_dead( $locked['contract'], $locked['cycle'], $lock );
+				}
+			}
+		);
+	}
+
+	/**
+	 * Hook entry point: settle the order with this id. Another operation holding the
+	 * contract's lock schedules a retry; any other failure is logged, not rethrown, so the
+	 * order status change that triggered it still completes; a due renewal that finds the
 	 * cycle settled re-applies the contract write ({@see RenewalProcessor}).
 	 *
 	 * @param mixed $order_id Order id.
@@ -173,22 +293,21 @@ final class Settlement {
 
 		try {
 			$this->settle( $order );
+		} catch ( ContractLockedException $e ) {
+			$this->schedule_retry( $order->get_id(), $e );
 		} catch ( Throwable $e ) {
-			wc_get_logger()->error(
-				sprintf( 'Settlement: settling renewal order %d failed: %s', $order->get_id(), $e->getMessage() ),
-				[
-					'source'   => Package::EXTENSION_SLUG,
-					'order_id' => $order->get_id(),
-				]
-			);
+			$this->log_failure( sprintf( 'Settlement: settling renewal order %d failed: %s', $order->get_id(), $e->getMessage() ), $order->get_id() );
 		}
 	}
 
 	/**
-	 * Settle a Lite renewal order from its current status; any other order is ignored.
+	 * Settle a Lite renewal order from its current status; any other order is ignored. The
+	 * cycle lookup only locates the contract: the decision reads the contract and the cycle
+	 * again under its lock.
 	 *
 	 * @param WC_Order               $order The order (re-read, so a stale object is fine).
 	 * @param DateTimeImmutable|null $now   The current moment; the UTC wall clock when omitted.
+	 * @throws ContractLockedException If another operation holds the contract's lock.
 	 */
 	public function settle( WC_Order $order, ?DateTimeImmutable $now = null ): void {
 		$fresh_order = wc_get_order( $order->get_id() );
@@ -206,14 +325,42 @@ final class Settlement {
 
 		$utc_now = ( $now ?? new DateTimeImmutable( 'now', new DateTimeZone( 'UTC' ) ) )->setTimezone( new DateTimeZone( 'UTC' ) );
 
-		if ( $fresh_order->is_paid() ) {
-			$this->settle_paid( $fresh_order, $match['contract'], $match['cycle'], $utc_now );
-		} elseif ( $fresh_order->has_status( OrderStatus::FAILED ) ) {
-			$this->settle_failed( $fresh_order, $match['contract'], $match['cycle'], $utc_now );
-		} elseif ( $fresh_order->has_status( OrderStatus::ON_HOLD ) ) {
-			$this->settle_in_progress( $match['contract'], $match['cycle'] );
-		} elseif ( self::is_dead( $fresh_order ) ) {
-			$this->settle_dead( $match['contract'], $match['cycle'] );
+		HeldLocks::run(
+			$match['contract']->get_id(),
+			self::OPERATION,
+			function ( ContractLock $lock ) use ( $fresh_order, $utc_now, $now ): void {
+				$this->settle_locked( $fresh_order, $utc_now, $now, $lock );
+			}
+		);
+	}
+
+	/**
+	 * The locked section of {@see self::settle()}: re-read the cycle and contract, then
+	 * settle from the order's status.
+	 *
+	 * @param WC_Order               $order   The fresh order.
+	 * @param DateTimeImmutable      $utc_now The current moment (UTC).
+	 * @param DateTimeImmutable|null $now     The caller's moment, for a replaced-order settlement.
+	 * @param ContractLock           $lock    The held lock.
+	 */
+	private function settle_locked( WC_Order $order, DateTimeImmutable $utc_now, ?DateTimeImmutable $now, ContractLock $lock ): void {
+		$match = $this->find_lite_cycle( $order->get_id() );
+		if ( null === $match || $match['contract']->get_id() !== $lock->get_contract_id() ) {
+			// The order was relinked away while unlocked: settle it as a replaced order.
+			if ( $order->is_paid() ) {
+				$this->settle_replaced_paid( $order, $now );
+			}
+			return;
+		}
+
+		if ( $order->is_paid() ) {
+			$this->settle_paid( $order, $match['contract'], $match['cycle'], $utc_now, $lock );
+		} elseif ( $order->has_status( OrderStatus::FAILED ) ) {
+			$this->settle_failed( $order, $match['contract'], $match['cycle'], $utc_now, $lock );
+		} elseif ( $order->has_status( OrderStatus::ON_HOLD ) ) {
+			$this->settle_in_progress( $match['contract'], $match['cycle'], $lock );
+		} elseif ( self::is_dead( $order ) ) {
+			$this->settle_dead( $match['contract'], $match['cycle'], $lock );
 		}
 	}
 
@@ -223,32 +370,43 @@ final class Settlement {
 	 * write that was cut short (a held, manual or async renewal has no due moment, so the due
 	 * scan never would) and then fires the paid action, which the cut-short attempt never
 	 * reached. The action is therefore delivered at least once: concurrent duplicate signals
-	 * that both see the write missing can both fire it.
+	 * that both see the write missing can both fire it. A paid order whose cycle can no longer
+	 * be billed (cancelled) is flagged for a refund.
 	 *
 	 * @param WC_Order          $order    The paid order.
 	 * @param ContractView      $contract The contract.
 	 * @param CycleView         $cycle    The cycle the order bills.
 	 * @param DateTimeImmutable $now      The current moment (UTC).
+	 * @param ContractLock      $lock     The held lock.
 	 */
-	private function settle_paid( WC_Order $order, ContractView $contract, CycleView $cycle, DateTimeImmutable $now ): void {
+	private function settle_paid( WC_Order $order, ContractView $contract, CycleView $cycle, DateTimeImmutable $now, ContractLock $lock ): void {
 		if ( CycleStatus::BILLED === $cycle->get_status() ) {
 			if ( $order->get_id() !== $cycle->get_order_id() || ! self::is_head( $cycle ) || self::contract_records_payment( $contract, $cycle ) ) {
 				return;
 			}
-		} elseif ( ! in_array( $cycle->get_status(), self::PAYABLE_CYCLE_STATUSES, true )
-			|| ! Contracts::transition_cycle(
-				$cycle->get_id(),
-				$cycle->get_status(),
-				CycleStatus::BILLED,
-				[
-					'order_id' => $order->get_id(),
-					'reason'   => null,
-				]
-			) ) {
+		} elseif ( ! in_array( $cycle->get_status(), self::PAYABLE_CYCLE_STATUSES, true ) ) {
+			self::flag_for_refund(
+				$order,
+				$contract->get_id(),
+				/* translators: %s: renewal (cycle) status. */
+				sprintf( __( 'This renewal order was paid, but its renewal can no longer be billed (status: %s). Refund this payment.', 'woocommerce-subscriptions-lite' ), $cycle->get_status() ),
+				sprintf( 'Settlement: renewal order %d was paid for cycle %d, which is %s; a refund is needed.', $order->get_id(), $cycle->get_id(), $cycle->get_status() )
+			);
+			return;
+		} elseif ( ! Contracts::transition_cycle(
+			$cycle->get_id(),
+			[
+				'from_status' => $cycle->get_status(),
+				'to_status'   => CycleStatus::BILLED,
+				'order_id'    => $order->get_id(),
+				'reason'      => null,
+			],
+			$lock
+		) ) {
 			return;
 		}
 
-		$this->record_payment( $order, $contract, $cycle, $now );
+		$this->record_payment( $order, $contract, $cycle, $now, $lock );
 
 		$settled = $this->read_settled( $contract->get_id(), $cycle->get_id(), $order->get_id() );
 		if ( null === $settled ) {
@@ -258,7 +416,7 @@ final class Settlement {
 		/**
 		 * Fires after a Lite renewal order was paid and its cycle billed. Delivered at least
 		 * once: completing a cut-short settlement fires it, and concurrent duplicate signals
-		 * can both do so.
+		 * can both do so. Runs under the contract lock.
 		 *
 		 * @param ContractView $contract The contract after the payment was recorded.
 		 * @param CycleView    $cycle    The billed cycle.
@@ -276,15 +434,16 @@ final class Settlement {
 	 * @param ContractView      $contract The contract.
 	 * @param CycleView         $cycle    The billed cycle.
 	 * @param DateTimeImmutable $now      The current moment (UTC).
+	 * @param ContractLock      $lock     The held lock.
 	 */
-	private function record_payment( WC_Order $order, ContractView $contract, CycleView $cycle, DateTimeImmutable $now ): void {
+	private function record_payment( WC_Order $order, ContractView $contract, CycleView $cycle, DateTimeImmutable $now, ContractLock $lock ): void {
 		$date_paid    = $order->get_date_paid();
 		$last_payment = null === $date_paid ? $now : new DateTimeImmutable( '@' . $date_paid->getTimestamp() );
 		$contract_id  = $contract->get_id();
 		$status       = $contract->get_status();
 
 		if ( ! in_array( $status, [ ContractStatus::ACTIVE, ContractStatus::ON_HOLD ], true ) ) {
-			Contracts::update( $contract_id, [ 'last_payment_gmt' => $last_payment ] );
+			Contracts::update( $contract_id, [ 'last_payment_gmt' => $last_payment ], $lock );
 			return;
 		}
 
@@ -296,9 +455,9 @@ final class Settlement {
 		if ( ContractStatus::ON_HOLD === $status && null !== HoldAnchor::read( $contract_id ) ) {
 			// A customer hold absorbs a late payment: it resumes from the period after this one.
 			if ( null !== $next ) {
-				HoldAnchor::store( $contract_id, $next->format( 'Y-m-d H:i:s' ) );
+				HoldAnchor::store( $contract_id, $next->format( 'Y-m-d H:i:s' ), $lock );
 			}
-			Contracts::update( $contract_id, [ 'last_payment_gmt' => $last_payment ] );
+			Contracts::update( $contract_id, [ 'last_payment_gmt' => $last_payment ], $lock );
 			return;
 		}
 
@@ -308,9 +467,10 @@ final class Settlement {
 				'status'           => ContractStatus::ACTIVE,
 				'next_payment_gmt' => $next,
 				'last_payment_gmt' => $last_payment,
-			]
+			],
+			$lock
 		);
-		HoldAnchor::clear( $contract_id );
+		HoldAnchor::clear( $contract_id, $lock );
 	}
 
 	/**
@@ -359,10 +519,11 @@ final class Settlement {
 	 * @param ContractView      $contract The contract.
 	 * @param CycleView         $cycle    The cycle the order bills.
 	 * @param DateTimeImmutable $now      The current moment (UTC).
+	 * @param ContractLock      $lock     The held lock.
 	 */
-	private function settle_failed( WC_Order $order, ContractView $contract, CycleView $cycle, DateTimeImmutable $now ): void {
+	private function settle_failed( WC_Order $order, ContractView $contract, CycleView $cycle, DateTimeImmutable $now, ContractLock $lock ): void {
 		if ( ! in_array( $cycle->get_status(), self::OPEN_CYCLE_STATUSES, true )
-			|| ! Contracts::transition_cycle( $cycle->get_id(), $cycle->get_status(), CycleStatus::FAILED, [ 'reason' => self::REASON_PAYMENT_FAILED ] ) ) {
+			|| ! self::fail_cycle( $cycle, self::REASON_PAYMENT_FAILED, $lock ) ) {
 			return;
 		}
 
@@ -378,7 +539,8 @@ final class Settlement {
 		}
 
 		/**
-		 * Fires after a Lite renewal order failed and its cycle was marked failed.
+		 * Fires after a Lite renewal order failed and its cycle was marked failed. Runs under
+		 * the contract lock.
 		 *
 		 * @param ContractView $contract The contract after the failure was recorded.
 		 * @param CycleView    $cycle    The failed cycle.
@@ -394,11 +556,23 @@ final class Settlement {
 	 *
 	 * @param ContractView $contract The contract.
 	 * @param CycleView    $cycle    The cycle the order bills.
+	 * @param ContractLock $lock     The held lock.
 	 */
-	private function settle_in_progress( ContractView $contract, CycleView $cycle ): void {
-		if ( CycleStatus::PENDING === $cycle->get_status()
-			&& Contracts::transition_cycle( $cycle->get_id(), CycleStatus::PENDING, CycleStatus::PROCESSING ) ) {
-			Contracts::update( $contract->get_id(), [ 'next_payment_gmt' => null ] );
+	private function settle_in_progress( ContractView $contract, CycleView $cycle, ContractLock $lock ): void {
+		if ( CycleStatus::PENDING !== $cycle->get_status() ) {
+			return;
+		}
+
+		$processing = Contracts::transition_cycle(
+			$cycle->get_id(),
+			[
+				'from_status' => CycleStatus::PENDING,
+				'to_status'   => CycleStatus::PROCESSING,
+			],
+			$lock
+		);
+		if ( $processing ) {
+			Contracts::update( $contract->get_id(), [ 'next_payment_gmt' => null ], $lock );
 		}
 	}
 
@@ -409,16 +583,36 @@ final class Settlement {
 	 *
 	 * @param ContractView $contract The contract.
 	 * @param CycleView    $cycle    The cycle the order bills.
+	 * @param ContractLock $lock     The held lock.
 	 */
-	private function settle_dead( ContractView $contract, CycleView $cycle ): void {
+	private function settle_dead( ContractView $contract, CycleView $cycle, ContractLock $lock ): void {
 		if ( ! in_array( $cycle->get_status(), self::OPEN_CYCLE_STATUSES, true )
-			|| ! Contracts::transition_cycle( $cycle->get_id(), $cycle->get_status(), CycleStatus::FAILED, [ 'reason' => self::REASON_ORDER_CANCELLED ] ) ) {
+			|| ! self::fail_cycle( $cycle, self::REASON_ORDER_CANCELLED, $lock ) ) {
 			return;
 		}
 
 		if ( in_array( $contract->get_status(), [ ContractStatus::ACTIVE, ContractStatus::ON_HOLD ], true ) ) {
 			Hold::system_hold( $contract->get_id() );
 		}
+	}
+
+	/**
+	 * Move an open cycle to failed with `$reason`.
+	 *
+	 * @param CycleView    $cycle  The open cycle.
+	 * @param string       $reason Failure reason.
+	 * @param ContractLock $lock   The held lock.
+	 */
+	private static function fail_cycle( CycleView $cycle, string $reason, ContractLock $lock ): bool {
+		return Contracts::transition_cycle(
+			$cycle->get_id(),
+			[
+				'from_status' => $cycle->get_status(),
+				'to_status'   => CycleStatus::FAILED,
+				'reason'      => $reason,
+			],
+			$lock
+		);
 	}
 
 	/**
@@ -438,19 +632,42 @@ final class Settlement {
 	 * A replaced renewal order was paid after all. While its renewal is still unpaid and the
 	 * replacement's charge is not in flight, it takes the renewal back: the cycle is relinked
 	 * to it, the unpaid replacement is stamped as replaced and cancelled, and the payment
-	 * settles. Otherwise the replacement keeps the renewal and this order gets one note and a
-	 * warning is logged, so the merchant refunds one payment: once the replacement paid, or
-	 * while its charge awaits confirmation (it may still complete).
+	 * settles. Otherwise the replacement keeps the renewal and this order is flagged once for
+	 * a refund (note and warning): once the replacement paid, while its charge awaits
+	 * confirmation (it may still complete), or when the relink fails. Runs under the lock of
+	 * the contract named on the order.
 	 *
 	 * @param WC_Order               $order The paid replaced order.
 	 * @param DateTimeImmutable|null $now   The current moment.
+	 * @throws ContractLockedException If another operation holds the contract's lock.
 	 */
 	private function settle_replaced_paid( WC_Order $order, ?DateTimeImmutable $now ): void {
 		$contract_id = (int) $order->get_meta( self::REPLACED_CONTRACT_META );
-		$cycle_id    = (int) $order->get_meta( self::REPLACED_CYCLE_META );
-		$contract    = $contract_id > 0 ? Contracts::get( $contract_id ) : null;
-		$cycle       = null === $contract || $cycle_id <= 0 ? null : self::find_cycle( $contract_id, $cycle_id );
-		if ( null === $cycle || Package::EXTENSION_SLUG !== $contract->get_extension_slug() ) {
+		if ( $contract_id <= 0 || ! Hold::is_lite_contract( $contract_id ) ) {
+			return;
+		}
+
+		HeldLocks::run(
+			$contract_id,
+			self::OPERATION,
+			function ( ContractLock $lock ) use ( $order, $now, $contract_id ): void {
+				$this->settle_replaced_paid_locked( $order, $now, $contract_id, $lock );
+			}
+		);
+	}
+
+	/**
+	 * The locked section of {@see self::settle_replaced_paid()}.
+	 *
+	 * @param WC_Order               $order       The paid replaced order.
+	 * @param DateTimeImmutable|null $now         The current moment.
+	 * @param int                    $contract_id Contract id named on the order.
+	 * @param ContractLock           $lock        The held lock.
+	 */
+	private function settle_replaced_paid_locked( WC_Order $order, ?DateTimeImmutable $now, int $contract_id, ContractLock $lock ): void {
+		$cycle_id = (int) $order->get_meta( self::REPLACED_CYCLE_META );
+		$cycle    = $cycle_id <= 0 ? null : self::find_cycle( $contract_id, $cycle_id );
+		if ( null === $cycle ) {
 			return;
 		}
 
@@ -460,7 +677,22 @@ final class Settlement {
 			|| ( $replacement instanceof WC_Order && $replacement->has_status( OrderStatus::ON_HOLD ) );
 
 		if ( in_array( $cycle->get_status(), self::PAYABLE_CYCLE_STATUSES, true ) && ! $in_flight ) {
-			if ( ! Contracts::transition_cycle( $cycle_id, $cycle->get_status(), $cycle->get_status(), [ 'order_id' => $order->get_id() ] ) ) {
+			$relinked = Contracts::transition_cycle(
+				$cycle_id,
+				[
+					'from_status' => $cycle->get_status(),
+					'to_status'   => $cycle->get_status(),
+					'order_id'    => $order->get_id(),
+				],
+				$lock
+			);
+			if ( ! $relinked ) {
+				self::flag_for_refund(
+					$order,
+					$contract_id,
+					__( 'This renewal order was paid after another order replaced it, and the renewal could not be moved back to it. Refund this payment.', 'woocommerce-subscriptions-lite' ),
+					sprintf( 'Settlement: renewal order %d was paid after it was replaced and could not be relinked to cycle %d; a refund is needed.', $order->get_id(), $cycle_id )
+				);
 				return;
 			}
 
@@ -476,7 +708,7 @@ final class Settlement {
 			return;
 		}
 
-		if ( null === $replacement_id || $replacement_id === $order->get_id() || '' !== (string) $order->get_meta( self::REFUND_FLAGGED_META ) ) {
+		if ( null === $replacement_id || $replacement_id === $order->get_id() ) {
 			return;
 		}
 
@@ -494,11 +726,28 @@ final class Settlement {
 			return;
 		}
 
+		self::flag_for_refund( $order, $contract_id, $note, $message );
+	}
+
+	/**
+	 * Flag a paid order that bills no cycle for a refund: one order note, the flag meta and a
+	 * warning. Idempotent on the flag.
+	 *
+	 * @param WC_Order $order       The paid order.
+	 * @param int      $contract_id Contract id, for the log.
+	 * @param string   $note        Order note for the merchant.
+	 * @param string   $log_message Warning logged.
+	 */
+	private static function flag_for_refund( WC_Order $order, int $contract_id, string $note, string $log_message ): void {
+		if ( '' !== (string) $order->get_meta( self::REFUND_FLAGGED_META ) ) {
+			return;
+		}
+
 		$order->add_order_note( $note );
 		$order->update_meta_data( self::REFUND_FLAGGED_META, '1' );
 		$order->save();
 		wc_get_logger()->warning(
-			$message,
+			$log_message,
 			[
 				'source'      => Package::EXTENSION_SLUG,
 				'contract_id' => $contract_id,

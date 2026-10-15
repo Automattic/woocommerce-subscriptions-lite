@@ -69,7 +69,7 @@ final class DeadRenewalOrderTest extends LiteIntegrationTestCase {
 		);
 		if ( ContractStatus::ON_HOLD === $status ) {
 			// Held for the renewal payment, not by the customer: no hold anchor.
-			HoldAnchor::clear( $contract_id );
+			$this->store_hold_anchor( $contract_id, null );
 		}
 
 		return [ $contract_id, $customer_id, $order ];

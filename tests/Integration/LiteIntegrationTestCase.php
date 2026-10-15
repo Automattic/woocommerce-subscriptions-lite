@@ -36,6 +36,7 @@ use Automattic\WooCommerce\SubscriptionsLite\Cart\CartPlanHooks;
 use Automattic\WooCommerce\SubscriptionsLite\Checkout\ContractCreationHandler;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Cancellation;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Hold;
+use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\HoldAnchor;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\RenewalOrderBuilder;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\RenewalProcessor;
@@ -606,6 +607,21 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 	 */
 	protected function expire_held_locks(): void {
 		$this->expire_lock_at( new DateTimeImmutable( sprintf( '+%d seconds', ContractLock::TTL_SECONDS + 60 ), new DateTimeZone( 'UTC' ) ) );
+	}
+
+	/**
+	 * Seed a contract's hold anchor (or remove it when null) as an unlocked write.
+	 *
+	 * @param int         $contract_id Contract id.
+	 * @param string|null $anchor      GMT anchor, or null.
+	 */
+	protected function store_hold_anchor( int $contract_id, ?string $anchor ): void {
+		if ( null === $anchor ) {
+			Contracts::delete_meta( $contract_id, HoldAnchor::META_KEY );
+			return;
+		}
+
+		Contracts::update_meta( $contract_id, HoldAnchor::META_KEY, $anchor );
 	}
 
 	/**
