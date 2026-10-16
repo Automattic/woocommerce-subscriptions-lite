@@ -293,7 +293,7 @@ final class CancellationTest extends LiteIntegrationTestCase {
 		$received   = $this->capture_action( $action );
 		$meta_table = SchemaInstaller::get_table_name( SchemaInstaller::TABLE_CONTRACT_META );
 		$break      = static function ( string $query ) use ( $meta_table ): string {
-			return 1 === preg_match( "/^DELETE m FROM `?{$meta_table}`? /", $query ) ? 'SELECT broken syntax (' : $query;
+			return 1 === preg_match( "/^DELETE FROM `?{$meta_table}`? WHERE /", $query ) ? 'SELECT broken syntax (' : $query;
 		};
 		add_filter( 'query', $break );
 
