@@ -608,7 +608,6 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 		$data = $result->get_error_data();
 		$this->assertSame( $contract_id, $data['contract_id'] ?? null );
 		$this->assertSame( $operation, $data['operation'] ?? null );
-		$this->assertInstanceOf( DateTimeImmutable::class, $data['locked_until'] ?? null );
 	}
 
 	/**

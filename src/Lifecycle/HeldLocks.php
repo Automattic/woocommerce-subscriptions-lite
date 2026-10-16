@@ -14,7 +14,6 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Lifecycle;
 
-use DateTimeImmutable;
 use Throwable;
 use WP_Error;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\ContractLock;
@@ -126,7 +125,7 @@ final class HeldLocks {
 		// Null state: the holder released between the two reads; still a conflict, unlabelled.
 		$state = $contract->get_lock_state();
 
-		return self::build_conflict( $contract_id, $state['operation'] ?? null, $state['locked_until'] ?? null );
+		return self::build_conflict( $contract_id, $state['operation'] ?? null );
 	}
 
 	/**
@@ -145,24 +144,22 @@ final class HeldLocks {
 			]
 		);
 
-		return self::build_conflict( $refused->get_contract_id(), $refused->get_operation(), $refused->get_locked_until() );
+		return self::build_conflict( $refused->get_contract_id(), $refused->get_operation() );
 	}
 
 	/**
 	 * A `woocommerce_subscriptions_lite_contract_locked` error naming the holder's operation.
 	 *
-	 * @param int                    $contract_id  Contract id.
-	 * @param string|null            $operation    The holder's operation label, or null when unknown.
-	 * @param DateTimeImmutable|null $locked_until The holder's lock expiry (UTC), or null when unknown.
+	 * @param int         $contract_id Contract id.
+	 * @param string|null $operation   The holder's operation label, or null when unknown.
 	 */
-	private static function build_conflict( int $contract_id, ?string $operation, ?DateTimeImmutable $locked_until ): WP_Error {
+	private static function build_conflict( int $contract_id, ?string $operation ): WP_Error {
 		return new WP_Error(
 			self::CONFLICT_CODE,
 			StatusLabels::get_lock_conflict_message( $contract_id, $operation ),
 			[
-				'contract_id'  => $contract_id,
-				'operation'    => $operation,
-				'locked_until' => $locked_until,
+				'contract_id' => $contract_id,
+				'operation'   => $operation,
 			]
 		);
 	}

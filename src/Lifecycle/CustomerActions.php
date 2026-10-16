@@ -133,7 +133,7 @@ final class CustomerActions {
 	/**
 	 * Run a lifecycle flow and map its outcome: a missing contract is a 404, a status the flow
 	 * rejects a 409, and a lock conflict (lost acquire or refused write) a 409 the portal shows
-	 * (its retry advice comes from the portal's error suffix).
+	 * (its retry advice comes from the portal's error suffix), with only its code and message.
 	 *
 	 * @param callable( int ): (ContractView|WP_Error|null) $flow        Lifecycle flow method.
 	 * @param int                                           $contract_id Contract id.
@@ -153,8 +153,7 @@ final class CustomerActions {
 		}
 
 		if ( $result instanceof WP_Error ) {
-			$result->add_data( [ 'status' => 409 ] + (array) $result->get_error_data() );
-			return $result;
+			return new WP_Error( $result->get_error_code(), $result->get_error_message(), [ 'status' => 409 ] );
 		}
 
 		if ( null === $result ) {
