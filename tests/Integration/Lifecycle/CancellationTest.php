@@ -162,6 +162,7 @@ final class CancellationTest extends LiteIntegrationTestCase {
 			$this->assertSame( '2099-01-01 00:00:00', $stored->get_next_payment_gmt(), 'Nothing was written.' );
 			$this->assertCount( 0, $received, 'The action does not fire.' );
 		}
+		$this->assert_lock_released( $contract_id );
 	}
 
 	/**
@@ -253,6 +254,7 @@ final class CancellationTest extends LiteIntegrationTestCase {
 			$this->assertSame( ContractStatus::EXPIRED, $this->get_contract( $contract_id )->get_status() );
 			$this->assertCount( 0, $received, 'The cancelled action does not fire.' );
 		}
+		$this->assert_lock_released( $contract_id );
 	}
 
 	/**
@@ -272,6 +274,7 @@ final class CancellationTest extends LiteIntegrationTestCase {
 			$this->assertSame( 'legacy-paused', $stored->get_status() );
 			$this->assertSame( '2099-01-01 00:00:00', $stored->get_next_payment_gmt(), 'Nothing was written.' );
 		}
+		$this->assert_lock_released( $contract_id );
 	}
 
 	/**
@@ -392,12 +395,16 @@ final class CancellationTest extends LiteIntegrationTestCase {
 	 * @dataProvider provide_cancel_modes
 	 *
 	 * @param string $method Cancellation method under test.
+	 * @param string $action Action the method fires.
+	 * @param string $status Status the method writes.
 	 */
-	public function test_cancel_leaves_the_contract_unlocked( string $method ): void {
+	public function test_cancel_leaves_the_contract_unlocked( string $method, string $action, string $status ): void {
 		$contract_id = $this->seed_contract();
 
-		( new Cancellation() )->$method( $contract_id );
+		$cancelled = ( new Cancellation() )->$method( $contract_id );
 
-		$this->assertNull( $this->get_contract( $contract_id )->get_lock_state() );
+		$this->assertInstanceOf( ContractView::class, $cancelled );
+		$this->assertSame( $status, $cancelled->get_status() );
+		$this->assert_lock_released( $contract_id );
 	}
 }

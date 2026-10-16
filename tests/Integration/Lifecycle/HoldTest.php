@@ -150,6 +150,7 @@ final class HoldTest extends LiteIntegrationTestCase {
 		$stored = $this->get_contract( $contract_id );
 		$this->assertSame( ContractStatus::ACTIVE, $stored->get_status() );
 		$this->assertSame( '2099-01-01 00:00:00', $stored->get_next_payment_gmt(), 'The next-due moment was not disarmed.' );
+		$this->assert_lock_released( $contract_id );
 	}
 
 	/**
@@ -170,6 +171,7 @@ final class HoldTest extends LiteIntegrationTestCase {
 			$this->assertSame( '2099-01-01 00:00:00', $stored->get_next_payment_gmt(), 'Nothing was written.' );
 			$this->assertSame( $before, did_action( 'woocommerce_subscriptions_lite_contract_held' ) );
 		}
+		$this->assert_lock_released( $contract_id );
 	}
 
 	/**
@@ -198,6 +200,7 @@ final class HoldTest extends LiteIntegrationTestCase {
 			$this->assertSame( 'legacy-paused', $stored->get_status() );
 			$this->assertSame( '2099-01-01 00:00:00', $stored->get_next_payment_gmt() );
 		}
+		$this->assert_lock_released( $contract_id );
 	}
 
 	public function test_hold_returns_null_for_a_missing_contract(): void {

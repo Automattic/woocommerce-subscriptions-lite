@@ -612,6 +612,16 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Assert the contract's lock is released and no longer registered as held.
+	 *
+	 * @param int $contract_id Contract id.
+	 */
+	protected function assert_lock_released( int $contract_id ): void {
+		$this->assertNull( $this->get_contract( $contract_id )->get_lock_state(), 'The lock is released.' );
+		$this->assertNull( HeldLocks::get( $contract_id ), 'The lock is unregistered.' );
+	}
+
+	/**
 	 * Pin the session's database clock at `$moment`, so locks are live or expired as of then.
 	 * The clock is restored after the test.
 	 *

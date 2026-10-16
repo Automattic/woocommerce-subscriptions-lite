@@ -361,6 +361,7 @@ final class CustomerActionsTest extends LiteIntegrationTestCase {
 
 		$this->assertSame( 500, $response->get_status() );
 		$this->assertSame( ContractStatus::ACTIVE, $this->get_contract( $contract_id )->get_status() );
+		$this->assert_lock_released( $contract_id );
 	}
 
 	/**

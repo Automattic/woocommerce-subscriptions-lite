@@ -383,6 +383,6 @@ final class ReactivationTest extends LiteIntegrationTestCase {
 		$stored = $this->get_contract( $contract_id );
 		$this->assertSame( ContractStatus::CANCELLED, $stored->get_status() );
 		$this->assertNull( $stored->get_next_payment_gmt() );
-		$this->assertNull( $stored->get_lock_state() );
+		$this->assert_lock_released( $contract_id );
 	}
 }
