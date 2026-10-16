@@ -142,7 +142,7 @@ final class SettlementTest extends LiteIntegrationTestCase {
 	 */
 	private function link_foreign_cycle( WC_Order $order ): int {
 		$foreign_id = $this->seed_contract( [ 'extension_slug' => 'another-extension' ] );
-		Contracts::add_cycle(
+		$this->add_cycle_with_lock(
 			$foreign_id,
 			[
 				'status'         => CycleStatus::PENDING,
@@ -317,7 +317,7 @@ final class SettlementTest extends LiteIntegrationTestCase {
 				'created_via' => RenewalOrderBuilder::CREATED_VIA,
 			]
 		);
-		Contracts::add_cycle(
+		$this->add_cycle_with_lock(
 			$contract_id,
 			[
 				'status'         => CycleStatus::PENDING,
@@ -582,7 +582,8 @@ final class SettlementTest extends LiteIntegrationTestCase {
 
 	public function test_a_paid_order_whose_cycle_was_cancelled_is_flagged_for_a_refund_once(): void {
 		[ $contract_id, $order ] = $this->seed_renewal();
-		Contracts::transition_cycle(
+		$this->transition_cycle_with_lock(
+			$contract_id,
 			$this->head( $contract_id )->get_id(),
 			[
 				'from_status' => CycleStatus::PENDING,

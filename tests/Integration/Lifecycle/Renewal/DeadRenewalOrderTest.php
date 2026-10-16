@@ -331,7 +331,8 @@ final class DeadRenewalOrderTest extends LiteIntegrationTestCase {
 
 	public function test_a_replaced_order_paid_after_its_renewal_was_cancelled_is_flagged_for_a_refund(): void {
 		[ $contract_id, $order, $replacement_id ] = $this->replace_a_cancelled_renewal( 'failed' );
-		Contracts::transition_cycle(
+		$this->transition_cycle_with_lock(
+			$contract_id,
 			$this->head( $contract_id )->get_id(),
 			[
 				'from_status' => CycleStatus::FAILED,

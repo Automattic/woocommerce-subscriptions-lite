@@ -200,7 +200,7 @@ final class RenewalOrderBogoTest extends LiteIntegrationTestCase {
 	 * @param int $contract_id Contract id.
 	 */
 	private function renew( int $contract_id ): WC_Order {
-		$cycle = Contracts::add_cycle(
+		$cycle = $this->add_cycle_with_lock(
 			$contract_id,
 			[
 				'status'         => CycleStatus::PENDING,

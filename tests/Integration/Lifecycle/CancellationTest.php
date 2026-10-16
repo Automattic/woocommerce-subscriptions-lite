@@ -335,7 +335,7 @@ final class CancellationTest extends LiteIntegrationTestCase {
 	 */
 	public function test_cancel_leaves_a_pending_cycle_untouched(): void {
 		$contract_id = $this->seed_contract();
-		Contracts::add_cycle(
+		$this->add_cycle_with_lock(
 			$contract_id,
 			[
 				'starts_at_gmt' => '2026-01-01 00:00:00',

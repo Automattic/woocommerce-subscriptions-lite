@@ -363,7 +363,7 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 	public function test_a_pending_cycle_without_an_order_is_resumed_by_the_next_lock_holder(): void {
 		$this->support_engine_charges( 'cod' );
 		$contract_id = $this->make_contract();
-		$cycle       = Contracts::add_cycle(
+		$cycle       = $this->add_cycle_with_lock(
 			$contract_id,
 			[
 				'status'         => CycleStatus::PENDING,

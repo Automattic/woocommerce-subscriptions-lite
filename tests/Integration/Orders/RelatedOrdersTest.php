@@ -62,7 +62,7 @@ final class RelatedOrdersTest extends LiteIntegrationTestCase {
 
 	public function test_an_order_serving_several_cycles_is_listed_once(): void {
 		[ $contract_id, $origin_id, $renewal_ids ] = $this->contract_with_renewals( 1 );
-		Contracts::add_cycle(
+		$this->add_cycle_with_lock(
 			$contract_id,
 			[
 				'status'         => CycleStatus::BILLED,
@@ -95,7 +95,7 @@ final class RelatedOrdersTest extends LiteIntegrationTestCase {
 
 	public function test_a_window_short_of_orders_still_reports_the_next_window(): void {
 		[ $contract_id, $origin_id, $renewal_ids ] = $this->contract_with_renewals( 1 );
-		Contracts::add_cycle(
+		$this->add_cycle_with_lock(
 			$contract_id,
 			[
 				'status'         => CycleStatus::PENDING,

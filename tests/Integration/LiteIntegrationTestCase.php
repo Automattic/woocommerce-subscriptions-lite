@@ -27,6 +27,7 @@ use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Payments;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Plans;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\View\CycleView;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\PlanView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\CycleStatus;
@@ -441,7 +442,7 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 			'currency'       => 'USD',
 			'order_id'       => $order_id,
 		];
-		Contracts::add_cycle( $contract_id, $cycle_args );
+		$this->add_cycle_with_lock( $contract_id, $cycle_args );
 
 		return $order;
 	}
@@ -607,6 +608,37 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 		$this->assertNotNull( $lock, 'The lock is free.' );
 
 		return $lock;
+	}
+
+	/**
+	 * Append a cycle under a test lock on the contract, released right after.
+	 *
+	 * @param int                  $contract_id Contract id.
+	 * @param array<string, mixed> $args        Cycle fields.
+	 */
+	protected function add_cycle_with_lock( int $contract_id, array $args ): ?CycleView {
+		$lock = $this->hold_lock( $contract_id );
+		try {
+			return Contracts::add_cycle( $contract_id, $args, $lock );
+		} finally {
+			$lock->release();
+		}
+	}
+
+	/**
+	 * Transition a cycle under a test lock on its contract, released right after.
+	 *
+	 * @param int                  $contract_id The cycle's contract id.
+	 * @param int                  $cycle_id    Cycle id.
+	 * @param array<string, mixed> $args        Transition arguments.
+	 */
+	protected function transition_cycle_with_lock( int $contract_id, int $cycle_id, array $args ): bool {
+		$lock = $this->hold_lock( $contract_id );
+		try {
+			return Contracts::transition_cycle( $cycle_id, $args, $lock );
+		} finally {
+			$lock->release();
+		}
 	}
 
 	/**
