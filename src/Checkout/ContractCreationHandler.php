@@ -419,7 +419,7 @@ final class ContractCreationHandler {
 		$totals = $this->get_recurring_totals( $order, $plan_lines );
 
 		self::schedule_resume( $order->get_id(), ContractLock::TTL_SECONDS + ScheduledActions::LOCK_RETRY_DELAY_SECONDS );
-		$created = Contracts::create_locked(
+		$created = Contracts::create(
 			[
 				'extension_slug'       => Package::EXTENSION_SLUG,
 				'creation_key'         => self::get_creation_key( $order ),
@@ -442,7 +442,7 @@ final class ContractCreationHandler {
 					'shipping' => $this->map_address( $order, 'shipping' ),
 				],
 			],
-			self::OPERATION
+			[ 'operation' => self::OPERATION ]
 		);
 
 		if ( null === $created ) {

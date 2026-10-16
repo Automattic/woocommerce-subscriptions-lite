@@ -547,7 +547,7 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 		$plan        = $this->make_plan();
 		$order       = $this->create_subscription_order( $customer_id );
 		$this->apply_and_stamp( $order, $plan );
-		$created  = Contracts::create_locked(
+		$created  = Contracts::create(
 			[
 				'extension_slug'  => Package::EXTENSION_SLUG,
 				'creation_key'    => 'order:' . $order->get_id(),
@@ -558,7 +558,7 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 				'origin_order_id' => $order->get_id(),
 				'billing_total'   => '19.99',
 			],
-			ContractCreationHandler::OPERATION
+			[ 'operation' => ContractCreationHandler::OPERATION ]
 		);
 		$draft_id = $created['contract']->get_id();
 
@@ -754,7 +754,7 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 		$plan        = $this->make_plan();
 		$order       = $this->create_subscription_order( $customer_id );
 		$this->apply_and_stamp( $order, $plan );
-		$created  = Contracts::create_locked(
+		$created  = Contracts::create(
 			[
 				'extension_slug'  => Package::EXTENSION_SLUG,
 				'creation_key'    => 'order:' . $order->get_id(),
@@ -765,7 +765,7 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 				'origin_order_id' => $order->get_id(),
 				'billing_total'   => '19.99',
 			],
-			ContractCreationHandler::OPERATION
+			[ 'operation' => ContractCreationHandler::OPERATION ]
 		);
 		$draft_id = $created['contract']->get_id();
 		Contracts::update( $draft_id, [ 'status' => ContractStatus::CANCELLED ], $created['lock'] );

@@ -183,7 +183,7 @@ final class RowActionControllerTest extends LiteIntegrationTestCase {
 	}
 
 	public function test_a_draft_offers_cancel_and_the_real_cancel_resolves_it(): void {
-		$draft = Contracts::create( [ 'extension_slug' => Package::EXTENSION_SLUG ] );
+		$draft = $this->create_released_contract( [ 'extension_slug' => Package::EXTENSION_SLUG ] );
 		$id    = $draft->get_id();
 
 		ob_start();

@@ -324,7 +324,7 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 	 * @return int Contract id.
 	 */
 	protected function seed_contract( array $args = [] ): int {
-		$contract = Contracts::create(
+		$contract = $this->create_released_contract(
 			array_merge(
 				[
 					'extension_slug'   => Package::EXTENSION_SLUG,
@@ -340,6 +340,20 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 		);
 
 		return $contract->get_id();
+	}
+
+	/**
+	 * Create a contract through the engine facade and release the lock its creation holds.
+	 *
+	 * @param array<string, mixed> $args Contract fields.
+	 * @return ContractView The contract as read after the release.
+	 */
+	protected function create_released_contract( array $args ): ContractView {
+		$created = Contracts::create( $args );
+		$this->assertNotNull( $created );
+		$created['lock']->release();
+
+		return $this->get_contract( $created['contract']->get_id() );
 	}
 
 	/**
