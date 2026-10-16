@@ -39,7 +39,7 @@ final class StatusLabelsTest extends LiteIntegrationTestCase {
 	}
 
 	public function test_lock_operation_label_reads_a_scheduled_renewal_as_a_renewal(): void {
-		$this->assertSame( 'renewal', StatusLabels::get_lock_operation_label( 'due' ) );
+		$this->assertSame( 'renewal', StatusLabels::get_lock_operation_label( 'engine_due_dispatch' ) );
 		$this->assertSame( 'renewal', StatusLabels::get_lock_operation_label( RenewalProcessor::OPERATION ) );
 	}
 

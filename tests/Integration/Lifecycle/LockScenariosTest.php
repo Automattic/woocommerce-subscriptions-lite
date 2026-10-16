@@ -226,7 +226,7 @@ final class LockScenariosTest extends LiteIntegrationTestCase {
 
 		$this->assertSame( 1, $this->run_due_dispatch( $this->now() ) );
 
-		$this->assert_lock_conflict( $conflict, $contract_id, 'due' );
+		$this->assert_lock_conflict( $conflict, $contract_id, 'engine_due_dispatch' );
 		$contract = $this->get_contract( $contract_id );
 		$this->assertSame( ContractStatus::ON_HOLD, $contract->get_status() );
 		$this->assertNull( $contract->get_next_payment_gmt(), 'The handler cleared the due moment and nothing re-armed it.' );
@@ -283,7 +283,7 @@ final class LockScenariosTest extends LiteIntegrationTestCase {
 		$this->assertSame( 0, $this->run_due_dispatch( $now ), 'The handler died.' );
 		$this->assertSame( CycleStatus::PENDING, $this->head( $contract_id )->get_status() );
 		$this->assertTrue( $this->renewal_orders()[0]->is_paid(), 'Charged but not recorded.' );
-		$this->assertSame( 'due', $this->get_contract( $contract_id )->get_lock_state()['operation'] ?? null, 'The lock is kept.' );
+		$this->assertSame( 'engine_due_dispatch', $this->get_contract( $contract_id )->get_lock_state()['operation'] ?? null, 'The lock is kept.' );
 		$this->assertSame( 0, $this->run_due_dispatch( $now ), 'Closed while the lock lives.' );
 		$resume();
 

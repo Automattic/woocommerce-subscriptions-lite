@@ -83,7 +83,7 @@ final class StatusLabels {
 	 */
 	public static function get_lock_operation_label( string $operation ): string {
 		switch ( $operation ) {
-			case 'due': // The engine dispatcher's label: a scheduled renewal.
+			case 'engine_due_dispatch': // The engine dispatcher's label: a scheduled renewal.
 			case RenewalProcessor::OPERATION:
 				return __( 'renewal', 'woocommerce-subscriptions-lite' );
 			case Settlement::OPERATION:

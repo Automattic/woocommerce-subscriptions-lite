@@ -109,7 +109,7 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 		$run_at = '' === $now ? $this->from_now( '' ) : $now;
 
 		// As the due dispatcher runs it: under the contract lock, the contract read after acquiring.
-		$lock = $this->hold_lock( $contract_id, 'due' );
+		$lock = $this->hold_lock( $contract_id, 'engine_due_dispatch' );
 		HeldLocks::register( $lock );
 		try {
 			return ( new RenewalProcessor() )->renew( $this->get_contract( $contract_id ), $this->utc( $this->due_at ), $this->utc( $run_at ), $manual, $lock );
@@ -272,11 +272,11 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 	public function test_renew_now_while_another_operation_holds_the_lock_returns_the_conflict_and_writes_nothing(): void {
 		$this->support_engine_charges( 'cod' );
 		$contract_id = $this->make_contract();
-		$this->hold_lock( $contract_id, 'due' );
+		$this->hold_lock( $contract_id, 'engine_due_dispatch' );
 
 		$conflict = ( new RenewalProcessor() )->renew_now( $contract_id );
 
-		$this->assert_lock_conflict( $conflict, $contract_id, 'due' );
+		$this->assert_lock_conflict( $conflict, $contract_id, 'engine_due_dispatch' );
 
 		$this->assertSame( 0, $this->charge_count() );
 		$this->assertSame( [], $this->renewal_order_ids() );

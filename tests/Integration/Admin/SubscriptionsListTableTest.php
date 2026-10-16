@@ -105,7 +105,7 @@ final class SubscriptionsListTableTest extends LiteIntegrationTestCase {
 		$customer = $this->create_customer();
 		$locked   = $this->create_contract( $customer );
 		$this->create_contract( $customer );
-		$lock = $this->hold_lock( $locked, 'due' );
+		$lock = $this->hold_lock( $locked, 'engine_due_dispatch' );
 
 		try {
 			$table = $this->prepared_table();

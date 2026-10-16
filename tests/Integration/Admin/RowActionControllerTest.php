@@ -317,7 +317,7 @@ final class RowActionControllerTest extends LiteIntegrationTestCase {
 	public function test_renew_now_under_another_operations_lock_reports_the_operation_in_progress(): void {
 		$this->support_engine_charges( 'cod' );
 		$contract_id = $this->create_contract( $this->create_customer(), [ 'payment_method' => 'cod' ] );
-		$this->hold_lock( $contract_id, 'due' );
+		$this->hold_lock( $contract_id, 'engine_due_dispatch' );
 		$controller = new RowActionController(
 			null,
 			static fn (): bool => true,

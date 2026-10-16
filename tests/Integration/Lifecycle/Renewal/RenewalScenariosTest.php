@@ -233,7 +233,7 @@ final class RenewalScenariosTest extends LiteIntegrationTestCase {
 		$this->assertSame( 0, $this->run_due_dispatch( $now ), 'The handler failed, so the dispatcher keeps the lock.' );
 		$this->assertSame( CycleStatus::BILLED, $this->head( $contract_id )->get_status() );
 		$this->assertEquals( $due_before, $this->next_payment( $contract_id ), 'The contract write was lost.' );
-		$this->assertSame( 'due', $this->get_contract( $contract_id )->get_lock_state()['operation'] ?? null );
+		$this->assertSame( 'engine_due_dispatch', $this->get_contract( $contract_id )->get_lock_state()['operation'] ?? null );
 		$this->assertSame( 0, $this->run_due_dispatch( $now ), 'Not redispatched while the lock lives.' );
 		$resume();
 

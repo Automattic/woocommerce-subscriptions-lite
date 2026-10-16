@@ -35,7 +35,7 @@ final class ContractDueHandlerTest extends LiteIntegrationTestCase {
 	private function context( int $contract_id, string $due_at = '2026-02-15 00:00:00' ): array {
 		return [
 			'due_at' => new DateTimeImmutable( $due_at, new DateTimeZone( 'UTC' ) ),
-			'lock'   => $this->hold_lock( $contract_id, 'due' ),
+			'lock'   => $this->hold_lock( $contract_id, 'engine_due_dispatch' ),
 		];
 	}
 
@@ -108,9 +108,9 @@ final class ContractDueHandlerTest extends LiteIntegrationTestCase {
 
 		( new ContractDueHandler() )->handle( $this->get_contract( $contract_id ), $context );
 
-		$this->assertSame( [ 'due' ], $refused, 'An unlocked write from a callback is refused while the lock is held.' );
+		$this->assertSame( [ 'engine_due_dispatch' ], $refused, 'An unlocked write from a callback is refused while the lock is held.' );
 		$this->assertNull( $this->get_contract( $contract_id )->get_end_gmt() );
-		$this->assertSame( 'due', $this->get_contract( $contract_id )->get_lock_state()['operation'] ?? null, 'The handler leaves the release to the dispatcher.' );
+		$this->assertSame( 'engine_due_dispatch', $this->get_contract( $contract_id )->get_lock_state()['operation'] ?? null, 'The handler leaves the release to the dispatcher.' );
 		$this->assertNull( HeldLocks::get( $contract_id ) );
 	}
 

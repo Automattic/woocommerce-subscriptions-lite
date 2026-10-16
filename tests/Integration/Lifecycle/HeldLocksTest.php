@@ -33,19 +33,19 @@ final class HeldLocksTest extends LiteIntegrationTestCase {
 
 	public function test_unregister_keeps_the_lock_held(): void {
 		$contract_id = $this->seed_contract();
-		$lock        = $this->hold_lock( $contract_id, 'due' );
+		$lock        = $this->hold_lock( $contract_id, 'engine_due_dispatch' );
 
 		HeldLocks::register( $lock );
 		HeldLocks::unregister( $lock );
 
 		$this->assertNull( HeldLocks::get( $contract_id ) );
-		$this->assertSame( 'due', $this->get_contract( $contract_id )->get_lock_state()['operation'] ?? null );
+		$this->assertSame( 'engine_due_dispatch', $this->get_contract( $contract_id )->get_lock_state()['operation'] ?? null );
 		$lock->release();
 	}
 
 	public function test_unregister_leaves_another_registered_lock_in_place(): void {
 		$contract_id = $this->seed_contract();
-		$first       = $this->hold_lock( $contract_id, 'due' );
+		$first       = $this->hold_lock( $contract_id, 'engine_due_dispatch' );
 		$first->release();
 		$second = $this->hold_lock( $contract_id, 'hold' );
 
