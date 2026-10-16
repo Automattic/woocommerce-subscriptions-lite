@@ -105,7 +105,7 @@ final class SubscriptionsListTableTest extends LiteIntegrationTestCase {
 		$customer = $this->create_customer();
 		$locked   = $this->create_contract( $customer );
 		$this->create_contract( $customer );
-		$lock = $this->hold_lock( $locked );
+		$lock = $this->hold_lock( $locked, 'due' );
 
 		try {
 			$table = $this->prepared_table();
@@ -117,7 +117,7 @@ final class SubscriptionsListTableTest extends LiteIntegrationTestCase {
 		foreach ( $table->items as $item ) {
 			$cell = $table->column_status( $item );
 			if ( $locked === (int) $item->get_id() ) {
-				$this->assertStringContainsString( 'In progress', $cell );
+				$this->assertStringContainsString( 'In progress (renewal)', $cell );
 			} else {
 				$this->assertStringNotContainsString( 'In progress', $cell );
 			}

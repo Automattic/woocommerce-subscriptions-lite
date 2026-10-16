@@ -77,12 +77,13 @@ final class StatusLabels {
 
 	/**
 	 * Lower-case label for the operation holding a contract's lock, for inline use.
-	 * Unknown labels (other extensions, the engine's own) are humanized.
+	 * Unknown labels (other extensions) read as a generic "update".
 	 *
 	 * @param string $operation Lock operation label.
 	 */
 	public static function get_lock_operation_label( string $operation ): string {
 		switch ( $operation ) {
+			case 'due': // The engine dispatcher's label: a scheduled renewal.
 			case RenewalProcessor::OPERATION:
 				return __( 'renewal', 'woocommerce-subscriptions-lite' );
 			case Settlement::OPERATION:
@@ -96,7 +97,7 @@ final class StatusLabels {
 			case Reactivation::OPERATION:
 				return __( 'reactivation', 'woocommerce-subscriptions-lite' );
 			default:
-				return strtolower( self::humanize( $operation ) );
+				return __( 'update', 'woocommerce-subscriptions-lite' );
 		}
 	}
 

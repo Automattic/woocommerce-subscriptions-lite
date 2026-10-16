@@ -329,7 +329,7 @@ final class RowActionControllerTest extends LiteIntegrationTestCase {
 		$result = $controller->handle_renew_now( [ 'contract_id' => $contract_id ] );
 
 		$this->assertSame( RowActionResult::INFO, $result->type() );
-		$this->assertSame( sprintf( 'Another change to subscription #%d is in progress (due). Try again shortly.', $contract_id ), $result->message() );
+		$this->assertSame( sprintf( 'Another change to subscription #%d is in progress (renewal). Try again shortly.', $contract_id ), $result->message() );
 		$this->assertSame( [], $this->logged, 'A conflict is not an error.' );
 		$this->assertSame( 0, $this->charge_count() );
 		$this->assertCount( 1, Contracts::get_cycles( $contract_id ), 'Nothing renewed.' );

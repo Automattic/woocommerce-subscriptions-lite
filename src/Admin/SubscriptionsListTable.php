@@ -330,9 +330,14 @@ final class SubscriptionsListTable extends WP_List_Table {
 		}
 
 		return $badge . sprintf(
-			'<br /><span class="description wc-subs-lite-lock-indicator" title="%1$s">%2$s</span>',
-			esc_attr( StatusLabels::get_lock_operation_label( $lock['operation'] ) ),
-			esc_html__( 'In progress', 'woocommerce-subscriptions-lite' )
+			'<br /><span class="description wc-subs-lite-lock-indicator">%s</span>',
+			esc_html(
+				sprintf(
+					/* translators: %s: operation label (e.g. "renewal"). */
+					__( 'In progress (%s)', 'woocommerce-subscriptions-lite' ),
+					StatusLabels::get_lock_operation_label( $lock['operation'] )
+				)
+			)
 		);
 	}
 
