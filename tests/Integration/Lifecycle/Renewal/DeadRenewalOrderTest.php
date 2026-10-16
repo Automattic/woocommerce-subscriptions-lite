@@ -10,6 +10,7 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Lifecycle\Renewal;
 
+use Automattic\WooCommerce\Enums\OrderStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\CycleView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
@@ -321,7 +322,7 @@ final class DeadRenewalOrderTest extends LiteIntegrationTestCase {
 		$replaced->save();
 
 		$replaced->payment_complete();
-		wc_get_order( $order->get_id() )->update_status( 'completed' );
+		wc_get_order( $order->get_id() )->update_status( OrderStatus::COMPLETED );
 
 		$notes = $this->sole_refund_notes( $order->get_id() );
 		$this->assertCount( 1, $notes, 'Flagged once.' );

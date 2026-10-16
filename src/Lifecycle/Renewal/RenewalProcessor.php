@@ -341,8 +341,8 @@ final class RenewalProcessor {
 				$contract,
 				$cycle,
 				$order,
-				$lock,
-				__( 'Renewal order created for manual payment: the payment method cannot be charged automatically. The subscription is on hold until the customer pays this order.', 'woocommerce-subscriptions-lite' )
+				__( 'Renewal order created for manual payment: the payment method cannot be charged automatically. The subscription is on hold until the customer pays this order.', 'woocommerce-subscriptions-lite' ),
+				$lock
 			);
 			return;
 		}
@@ -357,10 +357,10 @@ final class RenewalProcessor {
 				$contract,
 				$cycle,
 				$charged,
-				$lock,
 				$handed_over
 					? __( 'Renewal payment not completed yet: the payment gateway did not report an outcome. The subscription is on hold until this order is paid.', 'woocommerce-subscriptions-lite' )
-					: __( 'Renewal payment not completed: the payment gateway reported an error. Check the payment gateway logs before taking a payment again. The subscription is on hold until this order is paid.', 'woocommerce-subscriptions-lite' )
+					: __( 'Renewal payment not completed: the payment gateway reported an error. Check the payment gateway logs before taking a payment again. The subscription is on hold until this order is paid.', 'woocommerce-subscriptions-lite' ),
+				$lock
 			);
 			return;
 		}
@@ -377,10 +377,10 @@ final class RenewalProcessor {
 	 * @param ContractView $contract The contract.
 	 * @param CycleView    $cycle    The cycle the order bills.
 	 * @param WC_Order     $order    The pending renewal order.
-	 * @param ContractLock $lock     The held lock.
 	 * @param string       $note     Order note saying why the order awaits payment.
+	 * @param ContractLock $lock     The held lock.
 	 */
-	private function leave_for_payment( ContractView $contract, CycleView $cycle, WC_Order $order, ContractLock $lock, string $note ): void {
+	private function leave_for_payment( ContractView $contract, CycleView $cycle, WC_Order $order, string $note, ContractLock $lock ): void {
 		$order->add_order_note( $note );
 		$pending = Contracts::transition_cycle(
 			$cycle->get_id(),

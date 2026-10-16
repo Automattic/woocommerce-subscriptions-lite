@@ -12,6 +12,7 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Lifecycle;
 
+use Automattic\WooCommerce\Enums\OrderStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\CycleView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
@@ -25,7 +26,6 @@ use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\RenewalOrderBuild
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\RenewalProcessor;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\Settlement;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
-use Automattic\WooCommerce\SubscriptionsLite\Utilities\ScheduledActions;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
 use DateTimeImmutable;
 use DateTimeZone;
@@ -146,7 +146,7 @@ final class LockScenariosTest extends LiteIntegrationTestCase {
 	private function interrupt_billing_writes(): callable {
 		$cycles    = SchemaInstaller::get_table_name( SchemaInstaller::TABLE_CYCLES );
 		$interrupt = static function ( $query ) use ( $cycles ) {
-			if ( is_string( $query ) && 1 === preg_match( "/^UPDATE `?{$cycles}`? /", $query ) && false !== strpos( $query, "'billed'" ) ) {
+			if ( is_string( $query ) && 1 === preg_match( "/^UPDATE `?{$cycles}`? /", $query ) && false !== strpos( $query, "'" . CycleStatus::BILLED . "'" ) ) {
 				throw new RuntimeException( 'The request died.' );
 			}
 			return $query;
@@ -254,10 +254,10 @@ final class LockScenariosTest extends LiteIntegrationTestCase {
 			return $hidden;
 		};
 
-		$order->update_status( 'processing' );
+		$order->update_status( OrderStatus::PROCESSING );
 		add_filter( 'query', $hide );
 		try {
-			$order->update_status( 'completed' );
+			$order->update_status( OrderStatus::COMPLETED );
 		} finally {
 			remove_filter( 'query', $hide );
 		}
@@ -352,7 +352,7 @@ final class LockScenariosTest extends LiteIntegrationTestCase {
 					'order_id' => $order->get_id(),
 					'paid'     => true,
 				],
-				ScheduledActions::GROUP
+				'woocommerce-subscriptions-lite'
 			)
 		);
 
@@ -377,7 +377,7 @@ final class LockScenariosTest extends LiteIntegrationTestCase {
 					'order_id' => $order_id,
 					'paid'     => false,
 				],
-				'group'  => ScheduledActions::GROUP,
+				'group'  => 'woocommerce-subscriptions-lite',
 				'status' => \ActionScheduler_Store::STATUS_PENDING,
 			]
 		);

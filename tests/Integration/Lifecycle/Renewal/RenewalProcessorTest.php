@@ -9,6 +9,7 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Lifecycle\Renewal;
 
+use Automattic\WooCommerce\Enums\OrderStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\ContractLock;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Payments;
@@ -22,7 +23,6 @@ use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\HeldLocks;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\RenewalOrderBuilder;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\RenewalProcessor;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\Settlement;
-use Automattic\WooCommerce\SubscriptionsLite\Utilities\ScheduledActions;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
 use DateTimeImmutable;
 use DateTimeZone;
@@ -652,7 +652,7 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 		$retries = as_get_scheduled_actions(
 			[
 				'hook'         => 'woocommerce_subscriptions_lite_settle_order',
-				'group'        => ScheduledActions::GROUP,
+				'group'        => 'woocommerce-subscriptions-lite',
 				'status'       => \ActionScheduler_Store::STATUS_PENDING,
 				'date'         => as_get_datetime_object( time() + ContractLock::TTL_SECONDS ),
 				'date_compare' => '<',
@@ -683,7 +683,7 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 			$contract_id,
 			$customer_id,
 			[
-				'status'       => 'processing',
+				'status'       => OrderStatus::PROCESSING,
 				'cycle_status' => CycleStatus::PENDING,
 			]
 		);
@@ -717,7 +717,7 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 			$contract_id,
 			$customer_id,
 			[
-				'status'       => 'on-hold',
+				'status'       => OrderStatus::ON_HOLD,
 				'cycle_status' => CycleStatus::PENDING,
 			]
 		);

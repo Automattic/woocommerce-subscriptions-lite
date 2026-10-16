@@ -14,6 +14,7 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Checkout;
 
+use Automattic\WooCommerce\Enums\OrderStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Plans;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
@@ -481,7 +482,7 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 		$order       = $this->create_subscription_order( $customer_id );
 		$this->apply_and_stamp( $order, $plan );
 
-		$order->update_status( 'processing' );
+		$order->update_status( OrderStatus::PROCESSING );
 
 		$contracts = Contracts::find_by_origin_order( $order->get_id() );
 		$this->assertCount( 1, $contracts );
@@ -516,7 +517,7 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 			[
 				'hook'   => 'woocommerce_subscriptions_lite_resume_checkout',
 				'args'   => [ 'order_id' => $order_id ],
-				'group'  => ScheduledActions::GROUP,
+				'group'  => 'woocommerce-subscriptions-lite',
 				'status' => \ActionScheduler_Store::STATUS_PENDING,
 			],
 			'ids'
@@ -561,7 +562,7 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 		);
 		$draft_id = $created['contract']->get_id();
 
-		$order->update_status( 'processing' );
+		$order->update_status( OrderStatus::PROCESSING );
 		do_action( 'woocommerce_subscriptions_lite_resume_checkout', $order->get_id() );
 
 		$draft = $this->get_contract( $draft_id );
@@ -571,7 +572,7 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 		$this->assertCount( 1, $this->pending_resumes( $order->get_id() ), 'Resumed later, once.' );
 
 		$this->expire_held_locks();
-		$order->update_status( 'completed' );
+		$order->update_status( OrderStatus::COMPLETED );
 
 		$contract = $this->get_contract( $draft_id );
 		$this->assertSame( ContractStatus::ACTIVE, $contract->get_status() );
@@ -597,11 +598,11 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 
 		$contracts = SchemaInstaller::get_table_name( SchemaInstaller::TABLE_CONTRACTS );
 		$die       = static function ( string $query ) use ( $contracts ): string {
-			return 0 === strpos( $query, "UPDATE `{$contracts}`" ) && false !== strpos( $query, "'active'" ) ? '' : $query;
+			return 0 === strpos( $query, "UPDATE `{$contracts}`" ) && false !== strpos( $query, "'" . ContractStatus::ACTIVE . "'" ) ? '' : $query;
 		};
 		add_filter( 'query', $die );
 		try {
-			$order->update_status( 'processing' );
+			$order->update_status( OrderStatus::PROCESSING );
 		} finally {
 			remove_filter( 'query', $die );
 		}
@@ -628,7 +629,7 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 		$order       = $this->create_subscription_order( $customer_id );
 		$this->apply_and_stamp( $order, $plan );
 
-		$order->update_status( 'processing' );
+		$order->update_status( OrderStatus::PROCESSING );
 		$this->assertSame( [], $this->pending_resumes( $order->get_id() ) );
 
 		do_action( 'woocommerce_subscriptions_lite_resume_checkout', $order->get_id() );
@@ -638,9 +639,9 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 	}
 
 	/**
-	 * A creation that keeps failing before the draft is written is resumed at most
-	 * MAX_RESUME_ATTEMPTS times, then the chain stops with one final note; a later paid status
-	 * change still creates the contract and clears the count.
+	 * A creation that keeps failing before the draft is written is resumed at most three times
+	 * (the attempt cap), then the chain stops with one final note; a later paid status change
+	 * still creates the contract and clears the count.
 	 */
 	public function test_a_persistently_failing_resume_stops_after_the_cap_and_a_later_success_still_works(): void {
 		$customer_id = $this->create_customer();
@@ -655,10 +656,10 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 		$final     = 'still could not be created after several automatic attempts';
 		add_filter( 'query', $fail );
 		try {
-			$order->update_status( 'processing' );
+			$order->update_status( OrderStatus::PROCESSING );
 			$this->assertCount( 1, $this->pending_resumes( $order->get_id() ) );
 
-			for ( $run = 1; $run < ContractCreationHandler::MAX_RESUME_ATTEMPTS; $run++ ) {
+			for ( $run = 1; $run < 3; $run++ ) {
 				do_action( 'woocommerce_subscriptions_lite_resume_checkout', $order->get_id() );
 				$this->assertCount( 1, $this->pending_resumes( $order->get_id() ), "Rescheduled after failed run {$run}." );
 			}
@@ -674,12 +675,12 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 		}
 		$this->assertSame( [], Contracts::find_by_origin_order( $order->get_id() ) );
 
-		$order->update_status( 'completed' );
+		$order->update_status( OrderStatus::COMPLETED );
 
 		$created = Contracts::find_by_origin_order( $order->get_id() );
 		$this->assertCount( 1, $created );
 		$this->assertSame( ContractStatus::ACTIVE, $created[0]->get_status() );
-		$this->assertSame( '', (string) wc_get_order( $order->get_id() )->get_meta( ContractCreationHandler::RESUME_ATTEMPTS_META ), 'A success clears the count.' );
+		$this->assertSame( '', (string) wc_get_order( $order->get_id() )->get_meta( '_wcsl_resume_attempts' ), 'A success clears the count.' );
 		$this->assertSame( [], $this->pending_resumes( $order->get_id() ) );
 	}
 
@@ -695,19 +696,19 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 		};
 		add_filter( 'query', $fail );
 		try {
-			$order->update_status( 'processing' );
+			$order->update_status( OrderStatus::PROCESSING );
 			do_action( 'woocommerce_subscriptions_lite_resume_checkout', $order->get_id() );
 		} finally {
 			remove_filter( 'query', $fail );
 		}
-		$this->assertSame( '1', (string) wc_get_order( $order->get_id() )->get_meta( ContractCreationHandler::RESUME_ATTEMPTS_META ) );
+		$this->assertSame( '1', (string) wc_get_order( $order->get_id() )->get_meta( '_wcsl_resume_attempts' ) );
 
 		do_action( 'woocommerce_subscriptions_lite_resume_checkout', $order->get_id() );
 
 		$created = Contracts::find_by_origin_order( $order->get_id() );
 		$this->assertCount( 1, $created );
 		$this->assertSame( ContractStatus::ACTIVE, $created[0]->get_status() );
-		$this->assertSame( '', (string) wc_get_order( $order->get_id() )->get_meta( ContractCreationHandler::RESUME_ATTEMPTS_META ) );
+		$this->assertSame( '', (string) wc_get_order( $order->get_id() )->get_meta( '_wcsl_resume_attempts' ) );
 		$this->assertSame( [], $this->pending_resumes( $order->get_id() ) );
 	}
 
@@ -724,15 +725,15 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 
 		$contracts = SchemaInstaller::get_table_name( SchemaInstaller::TABLE_CONTRACTS );
 		$fail      = static function ( string $query ) use ( $contracts ): string {
-			return 0 === strpos( $query, "UPDATE `{$contracts}`" ) && false !== strpos( $query, "'active'" ) ? '' : $query;
+			return 0 === strpos( $query, "UPDATE `{$contracts}`" ) && false !== strpos( $query, "'" . ContractStatus::ACTIVE . "'" ) ? '' : $query;
 		};
 		add_filter( 'query', $fail );
 		try {
-			$order->update_status( 'processing' );
+			$order->update_status( OrderStatus::PROCESSING );
 			$drafts = Contracts::find_by_origin_order( $order->get_id() );
 			$this->assertSame( ContractStatus::DRAFT, $drafts[0]->get_status(), 'Cut short at activation.' );
 
-			for ( $run = 1; $run < ContractCreationHandler::MAX_RESUME_ATTEMPTS; $run++ ) {
+			for ( $run = 1; $run < 3; $run++ ) {
 				ScheduledActions::unschedule( 'woocommerce_subscriptions_lite_resume_checkout', $args );
 				do_action( 'woocommerce_subscriptions_lite_resume_checkout', $order->get_id() );
 				$this->assertCount( 1, $this->pending_resumes( $order->get_id() ), "Rescheduled after failed run {$run}." );
@@ -770,7 +771,7 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 		Contracts::update( $draft_id, [ 'status' => ContractStatus::CANCELLED ], $created['lock'] );
 		$created['lock']->release();
 
-		$order->update_status( 'processing' );
+		$order->update_status( OrderStatus::PROCESSING );
 		do_action( 'woocommerce_subscriptions_lite_resume_checkout', $order->get_id() );
 
 		$this->assertSame( ContractStatus::CANCELLED, $this->get_contract( $draft_id )->get_status() );
@@ -787,11 +788,11 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 		$this->apply_and_stamp( $order, $plan );
 		$contracts = SchemaInstaller::get_table_name( SchemaInstaller::TABLE_CONTRACTS );
 		$fail      = static function ( string $query ) use ( $contracts ): string {
-			return 0 === strpos( $query, "UPDATE `{$contracts}`" ) && false !== strpos( $query, "'active'" ) ? '' : $query;
+			return 0 === strpos( $query, "UPDATE `{$contracts}`" ) && false !== strpos( $query, "'" . ContractStatus::ACTIVE . "'" ) ? '' : $query;
 		};
 		add_filter( 'query', $fail );
 		try {
-			$order->update_status( 'processing' );
+			$order->update_status( OrderStatus::PROCESSING );
 		} finally {
 			remove_filter( 'query', $fail );
 		}

@@ -89,12 +89,12 @@ final class ContractCreationHandler {
 	/**
 	 * Order meta counting failed runs of the resume action; cleared on activation.
 	 */
-	public const RESUME_ATTEMPTS_META = '_wcsl_resume_attempts';
+	private const RESUME_ATTEMPTS_META = '_wcsl_resume_attempts';
 
 	/**
 	 * Failed resume runs after which the resume action is no longer rescheduled.
 	 */
-	public const MAX_RESUME_ATTEMPTS = 3;
+	private const MAX_RESUME_ATTEMPTS = 3;
 
 	/**
 	 * Logger source tag.
@@ -102,22 +102,13 @@ final class ContractCreationHandler {
 	private const LOG_SOURCE = 'woocommerce-subscriptions-lite';
 
 	/**
-	 * Wire the handler on the order reaching a paid status.
-	 *
-	 * `woocommerce_order_status_changed` fires for every checkout surface (classic
-	 * and Blocks/Store API) and whenever an order *becomes* paid by any route: an
-	 * immediate gateway landing on processing/completed, a $0 order, or an offline
-	 * gateway (BACS, cheque) whose order sits on-hold until a merchant confirms the
-	 * payment later. `woocommerce_payment_complete` never fires for that offline
-	 * case, so it would silently drop those subscriptions. The `is_paid()` guard in
-	 * the callback filters this generic signal down to paid transitions (honouring a
-	 * store's custom paid statuses), and the idempotency guard makes the
-	 * processing -> completed double-fire safe.
+	 * Create the contract on every order status change (`is_paid()` filters it down to paid
+	 * ones; `woocommerce_payment_complete` never fires for offline gateways), and resume a
+	 * creation cut short on the resume action, whose argument is the order id.
 	 */
 	public static function register(): void {
 		$instance = new self();
 		add_action( 'woocommerce_order_status_changed', [ $instance, 'create_contracts_for_order' ], 10, 1 );
-		// Resumes an order's contract creation cut short; its argument is the order id.
 		add_action( 'woocommerce_subscriptions_lite_resume_checkout', [ $instance, 'resume_checkout' ] );
 	}
 
@@ -134,15 +125,12 @@ final class ContractCreationHandler {
 			return;
 		}
 		$order_id = (int) $order_id;
-		if ( $this->create_for_order( $order_id ) ) {
+		$order    = wc_get_order( $order_id );
+		if ( ! $order instanceof WC_Order || $this->create_for_order( $order ) ) {
 			return;
 		}
 
 		try {
-			$order = wc_get_order( $order_id );
-			if ( ! $order instanceof WC_Order ) {
-				return;
-			}
 			$attempts = (int) $order->get_meta( self::RESUME_ATTEMPTS_META ) + 1;
 			$order->update_meta_data( self::RESUME_ATTEMPTS_META, (string) $attempts );
 			$order->save();
@@ -167,20 +155,24 @@ final class ContractCreationHandler {
 	 * @param int $order_id The id of the order whose status changed.
 	 */
 	public function create_contracts_for_order( int $order_id ): void {
-		$this->create_for_order( $order_id );
+		$order = wc_get_order( $order_id );
+		if ( $order instanceof WC_Order ) {
+			$this->create_for_order( $order );
+		}
 	}
 
 	/**
 	 * Create the order's contract, or resume a Lite draft of it; a no-op unless the order is paid.
 	 *
-	 * @param int $order_id Order id.
+	 * @param WC_Order $order The order.
 	 * @return bool False when a creation or resume failed (a lock refusal is not a failure).
 	 */
-	private function create_for_order( int $order_id ): bool {
-		$order = wc_get_order( $order_id );
-		if ( ! $order instanceof WC_Order || ! $order->is_paid() || RenewalOrderBuilder::CREATED_VIA === $order->get_created_via() ) {
+	private function create_for_order( WC_Order $order ): bool {
+		if ( ! $order->is_paid() || RenewalOrderBuilder::CREATED_VIA === $order->get_created_via() ) {
 			return true;
 		}
+
+		$order_id = $order->get_id();
 
 		$outcome = $this->classify_order( $order );
 		if ( null === $outcome['reason'] && ! $outcome['plan'] instanceof PlanView ) {
@@ -290,10 +282,11 @@ final class ContractCreationHandler {
 	 * @param WC_Order $order       The paid order.
 	 * @param int      $contract_id The draft.
 	 * @param PlanView $plan        The order's selling plan.
-	 * @return bool False when its lock is live (or the draft is gone): resume it later.
+	 * @return bool False when its lock is not acquired (held by another operation, or the draft
+	 *              was deleted): resume it later. True once the draft is resumed or is no draft.
 	 */
 	private function resume_draft( WC_Order $order, int $contract_id, PlanView $plan ): bool {
-		[ $start, $next ] = self::first_period( $order, $plan );
+		[ $start, $next ] = self::get_first_period( $order, $plan );
 
 		$lock     = HeldLocks::get( $contract_id );
 		$acquired = null === $lock;
@@ -310,7 +303,7 @@ final class ContractCreationHandler {
 				return true;
 			}
 
-			$activated = self::activate( $lock, $order, $start, $next, (string) $draft->get_billing_total() );
+			$activated = self::activate( $order, $start, $next, (string) $draft->get_billing_total(), $lock );
 		} finally {
 			if ( $acquired ) {
 				HeldLocks::release( $lock );
@@ -421,7 +414,7 @@ final class ContractCreationHandler {
 			}
 		}
 
-		[ $start, $next ] = self::first_period( $order, $plan );
+		[ $start, $next ] = self::get_first_period( $order, $plan );
 
 		$totals = $this->get_recurring_totals( $order, $plan_lines );
 
@@ -459,7 +452,7 @@ final class ContractCreationHandler {
 		$lock = $created['lock'];
 		HeldLocks::register( $lock );
 		try {
-			$activated = self::activate( $lock, $order, $start, $next, $totals['billing_total'] );
+			$activated = self::activate( $order, $start, $next, $totals['billing_total'], $lock );
 		} finally {
 			HeldLocks::release( $lock );
 		}
@@ -478,7 +471,7 @@ final class ContractCreationHandler {
 	 * @param PlanView $plan  The order's selling plan.
 	 * @return array{0: DateTimeImmutable, 1: DateTimeImmutable}
 	 */
-	private static function first_period( WC_Order $order, PlanView $plan ): array {
+	private static function get_first_period( WC_Order $order, PlanView $plan ): array {
 		$paid  = $order->get_date_paid();
 		$start = null !== $paid
 			? new DateTimeImmutable( '@' . $paid->getTimestamp() )
@@ -499,14 +492,14 @@ final class ContractCreationHandler {
 	/**
 	 * Cycle 1 (unless the draft already has it) and activation of a draft, under its lock.
 	 *
-	 * @param ContractLock      $lock          The new contract's lock.
 	 * @param WC_Order          $order         The paid order.
 	 * @param DateTimeImmutable $start         Contract start.
 	 * @param DateTimeImmutable $next          First renewal date.
 	 * @param string            $billing_total Recurring total.
+	 * @param ContractLock      $lock          The new contract's lock.
 	 * @return ContractView|null The active contract, as written under the lock; null when it is gone.
 	 */
-	private static function activate( ContractLock $lock, WC_Order $order, DateTimeImmutable $start, DateTimeImmutable $next, string $billing_total ): ?ContractView {
+	private static function activate( WC_Order $order, DateTimeImmutable $start, DateTimeImmutable $next, string $billing_total, ContractLock $lock ): ?ContractView {
 		$contract_id = $lock->get_contract_id();
 		// Null when cycle 1 exists: a resumed draft whose creation was cut short after it.
 		Contracts::add_cycle(

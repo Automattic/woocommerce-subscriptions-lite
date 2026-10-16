@@ -25,7 +25,7 @@ final class ScheduledActions {
 	/**
 	 * Action Scheduler group of every Lite action.
 	 */
-	public const GROUP = 'woocommerce-subscriptions-lite';
+	private const GROUP = 'woocommerce-subscriptions-lite';
 
 	/**
 	 * Seconds a recovery action waits past a lock: the retry delay after a refusal, and the
