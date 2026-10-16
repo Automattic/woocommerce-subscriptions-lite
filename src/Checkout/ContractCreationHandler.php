@@ -126,7 +126,11 @@ final class ContractCreationHandler {
 		}
 		$order_id = (int) $order_id;
 		$order    = wc_get_order( $order_id );
-		if ( ! $order instanceof WC_Order || $this->create_for_order( $order ) ) {
+		if ( ! $order instanceof WC_Order ) {
+			return;
+		}
+		$succeeded = $this->create_for_order( $order );
+		if ( $succeeded ) {
 			return;
 		}
 

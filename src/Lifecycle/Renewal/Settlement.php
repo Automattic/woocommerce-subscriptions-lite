@@ -355,7 +355,11 @@ final class Settlement {
 		$order_id    = $fresh_order->get_id();
 		$contract_id = self::find_lite_contract_id( $order_id );
 		if ( null === $contract_id ) {
-			return $fresh_order->is_paid() ? $this->settle_replaced_paid( $fresh_order, $now ) : null;
+			if ( ! $fresh_order->is_paid() ) {
+				return null;
+			}
+
+			return $this->settle_replaced_paid( $fresh_order, $now );
 		}
 
 		$utc_now  = ( $now ?? new DateTimeImmutable( 'now', new DateTimeZone( 'UTC' ) ) )->setTimezone( new DateTimeZone( 'UTC' ) );
@@ -377,7 +381,11 @@ final class Settlement {
 			$cycle = self::find_order_cycle( $order_id, $contract_id );
 			if ( null === $cycle ) {
 				// The order was relinked away before the lock: settle it as a replaced order.
-				return $fresh_order->is_paid() ? $this->settle_replaced_paid( $fresh_order, $now ) : null;
+				if ( ! $fresh_order->is_paid() ) {
+					return null;
+				}
+
+				return $this->settle_replaced_paid( $fresh_order, $now );
 			}
 
 			if ( $fresh_order->is_paid() ) {
@@ -424,17 +432,20 @@ final class Settlement {
 				$contract->get_id()
 			);
 			return;
-		} elseif ( ! Contracts::transition_cycle(
-			$cycle->get_id(),
-			[
-				'from_status' => $cycle->get_status(),
-				'to_status'   => CycleStatus::BILLED,
-				'order_id'    => $order->get_id(),
-				'reason'      => null,
-			],
-			$lock
-		) ) {
-			return;
+		} else {
+			$billed = Contracts::transition_cycle(
+				$cycle->get_id(),
+				[
+					'from_status' => $cycle->get_status(),
+					'to_status'   => CycleStatus::BILLED,
+					'order_id'    => $order->get_id(),
+					'reason'      => null,
+				],
+				$lock
+			);
+			if ( ! $billed ) {
+				return;
+			}
 		}
 
 		$this->record_payment( $order, $contract, $cycle, $now, $lock );
@@ -554,8 +565,11 @@ final class Settlement {
 	 * @param ContractLock      $lock     The held lock.
 	 */
 	private function settle_failed( WC_Order $order, ContractView $contract, CycleView $cycle, DateTimeImmutable $now, ContractLock $lock ): void {
-		if ( ! in_array( $cycle->get_status(), self::OPEN_CYCLE_STATUSES, true )
-			|| ! self::fail_cycle( $cycle, self::REASON_PAYMENT_FAILED, $lock ) ) {
+		if ( ! in_array( $cycle->get_status(), self::OPEN_CYCLE_STATUSES, true ) ) {
+			return;
+		}
+		$failed = self::fail_cycle( $cycle, self::REASON_PAYMENT_FAILED, $lock );
+		if ( ! $failed ) {
 			return;
 		}
 
@@ -619,8 +633,11 @@ final class Settlement {
 	 * @param ContractLock $lock     The held lock.
 	 */
 	private function settle_dead( ContractView $contract, CycleView $cycle, ContractLock $lock ): void {
-		if ( ! in_array( $cycle->get_status(), self::OPEN_CYCLE_STATUSES, true )
-			|| ! self::fail_cycle( $cycle, self::REASON_ORDER_CANCELLED, $lock ) ) {
+		if ( ! in_array( $cycle->get_status(), self::OPEN_CYCLE_STATUSES, true ) ) {
+			return;
+		}
+		$failed = self::fail_cycle( $cycle, self::REASON_ORDER_CANCELLED, $lock );
+		if ( ! $failed ) {
 			return;
 		}
 
