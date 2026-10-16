@@ -14,6 +14,7 @@ declare( strict_types=1 );
 namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Admin;
 
 use Automattic\WooCommerce\SubscriptionsLite\Admin\DetailRenderer;
+use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\RenewalProcessor;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
 
 /**
@@ -55,5 +56,42 @@ final class DetailRendererTest extends LiteIntegrationTestCase {
 		$this->assertArrayHasKey( 'wc-subs-lite-actions', $boxes['side']['high'] ?? [] );
 		$this->assertArrayHasKey( 'wc-subs-lite-schedule', $boxes['side']['default'] ?? [] );
 		$this->assertArrayHasKey( 'wc-subs-lite-customer', $boxes['side']['default'] ?? [] );
+	}
+
+	public function test_locked_contract_renders_the_in_progress_notice(): void {
+		$id   = $this->create_contract( $this->create_customer() );
+		$lock = $this->hold_lock( $id, RenewalProcessor::OPERATION );
+
+		try {
+			$html = $this->render_detail( $id );
+		} finally {
+			$lock->release();
+		}
+
+		$this->assertStringContainsString( 'wc-subs-lite-lock-notice', $html );
+		$this->assertStringContainsString( sprintf( 'Another change to subscription #%d is in progress (renewal). Try again after ', $id ), $html );
+	}
+
+	public function test_unlocked_contract_renders_no_in_progress_notice(): void {
+		$id = $this->create_contract( $this->create_customer() );
+
+		$html = $this->render_detail( $id );
+
+		$this->assertStringContainsString( 'Subscription #' . $id, $html );
+		$this->assertStringNotContainsString( 'wc-subs-lite-lock-notice', $html );
+	}
+
+	/**
+	 * Render the detail screen for a contract as an administrator.
+	 *
+	 * @param int $id Contract id.
+	 */
+	private function render_detail( int $id ): string {
+		wp_set_current_user( self::factory()->user->create( [ 'role' => 'administrator' ] ) );
+		set_current_screen( 'subscriptions_page_wc-subscriptions-lite' );
+
+		ob_start();
+		DetailRenderer::render( $id );
+		return (string) ob_get_clean();
 	}
 }

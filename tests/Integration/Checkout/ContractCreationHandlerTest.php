@@ -14,10 +14,13 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Checkout;
 
+use Automattic\WooCommerce\Enums\OrderStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Plans;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\PlanView;
+use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
+use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\CycleStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\PlanStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\PlanRepository;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\SchemaInstaller;
@@ -26,6 +29,7 @@ use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\RenewalOrderBuilder;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ApplicabilityStore;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ProductApplicability;
+use Automattic\WooCommerce\SubscriptionsLite\Utilities\ScheduledActions;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
 use WC_Order;
 use WC_Order_Item_Fee;
@@ -189,6 +193,7 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 		$contracts = Contracts::find_by_origin_order( $order->get_id() );
 		$this->assertCount( 1, $contracts );
 		$this->assertSame( 'draft', $contracts[0]->get_status() );
+		$this->assertNull( $contracts[0]->get_lock_state(), 'The stuck draft is not left locked.' );
 		$this->assertNull( $contracts[0]->get_next_payment_gmt(), 'A draft is never armed.' );
 		$this->assertSame( [], Contracts::get_cycles( $contracts[0]->get_id() ) );
 
@@ -467,5 +472,338 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 			has_action( 'woocommerce_order_status_changed' ),
 			'Contract creation is bound to the order reaching a paid status.'
 		);
+	}
+
+	public function test_the_contract_carries_the_order_creation_key_and_is_left_unlocked(): void {
+		global $wpdb;
+
+		$customer_id = $this->create_customer();
+		$plan        = $this->make_plan();
+		$order       = $this->create_subscription_order( $customer_id );
+		$this->apply_and_stamp( $order, $plan );
+
+		$order->update_status( OrderStatus::PROCESSING );
+
+		$contracts = Contracts::find_by_origin_order( $order->get_id() );
+		$this->assertCount( 1, $contracts );
+		$this->assertNull( $contracts[0]->get_lock_state() );
+		$table = SchemaInstaller::get_table_name( SchemaInstaller::TABLE_CONTRACTS );
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		$key = $wpdb->get_var( $wpdb->prepare( "SELECT creation_key FROM {$table} WHERE id = %d", $contracts[0]->get_id() ) );
+		$this->assertSame( 'order:' . $order->get_id(), $key );
+	}
+
+	public function test_a_second_creation_for_the_same_order_is_a_duplicate(): void {
+		$customer_id = $this->create_customer();
+		$plan        = $this->make_plan();
+		$order       = $this->create_subscription_order( $customer_id );
+		$this->apply_and_stamp( $order, $plan );
+		$first = ( new ContractCreationHandler() )->create_contract( $order, $plan );
+		$this->assertInstanceOf( ContractView::class, $first );
+
+		$this->assertNull( ( new ContractCreationHandler() )->create_contract( $order, $plan ), 'The creation key is taken.' );
+
+		$this->assertCount( 1, Contracts::list_for_customer( $customer_id ) );
+	}
+
+	/**
+	 * Pending resume actions for an order.
+	 *
+	 * @param int $order_id Order id.
+	 * @return array<int, int> Action ids.
+	 */
+	private function pending_resumes( int $order_id ): array {
+		return as_get_scheduled_actions(
+			[
+				'hook'   => 'woocommerce_subscriptions_lite_resume_checkout',
+				'args'   => [ 'order_id' => $order_id ],
+				'group'  => 'woocommerce-subscriptions-lite',
+				'status' => \ActionScheduler_Store::STATUS_PENDING,
+			],
+			'ids'
+		);
+	}
+
+	/**
+	 * Order notes containing `$needle`.
+	 *
+	 * @param WC_Order $order  The order.
+	 * @param string   $needle Text to look for.
+	 * @return array<int, string>
+	 */
+	private function notes_with( WC_Order $order, string $needle ): array {
+		$notes = wp_list_pluck( wc_get_order_notes( [ 'order_id' => $order->get_id() ] ), 'content' );
+
+		return array_values( array_filter( $notes, static fn( $note ) => false !== strpos( (string) $note, $needle ) ) );
+	}
+
+	/**
+	 * A creation that died right after the locked insert leaves a locked draft: a paid signal
+	 * meanwhile is refused and schedules a resume; once the lock expires, the next paid status
+	 * change resumes it to active with cycle 1.
+	 */
+	public function test_a_draft_left_by_a_creation_cut_short_is_resumed_once_its_lock_expires(): void {
+		$customer_id = $this->create_customer();
+		$plan        = $this->make_plan();
+		$order       = $this->create_subscription_order( $customer_id );
+		$this->apply_and_stamp( $order, $plan );
+		$created  = Contracts::create(
+			[
+				'extension_slug'  => Package::EXTENSION_SLUG,
+				'creation_key'    => 'order:' . $order->get_id(),
+				'status'          => ContractStatus::DRAFT,
+				'customer_id'     => $customer_id,
+				'currency'        => 'USD',
+				'selling_plan_id' => $plan->get_id(),
+				'origin_order_id' => $order->get_id(),
+				'billing_total'   => '19.99',
+			],
+			[ 'operation' => ContractCreationHandler::OPERATION ]
+		);
+		$draft_id = $created['contract']->get_id();
+
+		$order->update_status( OrderStatus::PROCESSING );
+		do_action( 'woocommerce_subscriptions_lite_resume_checkout', $order->get_id() );
+
+		$draft = $this->get_contract( $draft_id );
+		$this->assertSame( ContractStatus::DRAFT, $draft->get_status(), 'Refused while the creation may still run.' );
+		$this->assertSame( ContractCreationHandler::OPERATION, $draft->get_lock_state()['operation'] ?? null );
+		$this->assertSame( [], Contracts::get_cycles( $draft_id ) );
+		$this->assertCount( 1, $this->pending_resumes( $order->get_id() ), 'Resumed later, once.' );
+
+		$this->expire_held_locks();
+		$order->update_status( OrderStatus::COMPLETED );
+
+		$contract = $this->get_contract( $draft_id );
+		$this->assertSame( ContractStatus::ACTIVE, $contract->get_status() );
+		$this->assertSame( '2026-02-15 00:00:00', $contract->get_next_payment_gmt() );
+		$cycles = Contracts::get_cycles( $draft_id );
+		$this->assertCount( 1, $cycles );
+		$this->assertSame( CycleStatus::BILLED, $cycles[0]->get_status() );
+		$this->assertSame( $order->get_id(), $cycles[0]->get_order_id() );
+		$this->assertCount( 1, Contracts::find_by_origin_order( $order->get_id() ) );
+		$this->assertCount( 1, $this->notes_with( $order, 'activated after its creation was interrupted' ) );
+		$this->assertSame( [], $this->pending_resumes( $order->get_id() ), 'The resume is dropped once active.' );
+	}
+
+	/**
+	 * A creation that died after cycle 1 is activated by the resume action scheduled before
+	 * the draft was written, without a second cycle.
+	 */
+	public function test_the_resume_action_activates_a_draft_that_has_cycle_one(): void {
+		$customer_id = $this->create_customer();
+		$plan        = $this->make_plan();
+		$order       = $this->create_subscription_order( $customer_id );
+		$this->apply_and_stamp( $order, $plan );
+
+		$contracts = SchemaInstaller::get_table_name( SchemaInstaller::TABLE_CONTRACTS );
+		$die       = static function ( string $query ) use ( $contracts ): string {
+			return 0 === strpos( $query, "UPDATE `{$contracts}`" ) && false !== strpos( $query, "'" . ContractStatus::ACTIVE . "'" ) ? '' : $query;
+		};
+		add_filter( 'query', $die );
+		try {
+			$order->update_status( OrderStatus::PROCESSING );
+		} finally {
+			remove_filter( 'query', $die );
+		}
+
+		$drafts = Contracts::find_by_origin_order( $order->get_id() );
+		$this->assertCount( 1, $drafts );
+		$this->assertSame( ContractStatus::DRAFT, $drafts[0]->get_status() );
+		$this->assertCount( 1, Contracts::get_cycles( $drafts[0]->get_id() ), 'Cut short after cycle 1.' );
+		$this->assertCount( 1, $this->pending_resumes( $order->get_id() ), 'Scheduled before the draft was written.' );
+
+		do_action( 'woocommerce_subscriptions_lite_resume_checkout', $order->get_id() );
+
+		$contract = $this->get_contract( $drafts[0]->get_id() );
+		$this->assertSame( ContractStatus::ACTIVE, $contract->get_status() );
+		$this->assertSame( '2026-02-15 00:00:00', $contract->get_next_payment_gmt() );
+		$this->assertNull( $contract->get_lock_state() );
+		$this->assertCount( 1, Contracts::get_cycles( $drafts[0]->get_id() ), 'No second cycle.' );
+		$this->assertCount( 1, $this->notes_with( $order, 'activated after its creation was interrupted' ) );
+	}
+
+	public function test_a_successful_creation_leaves_no_resume_action_and_the_action_is_a_no_op(): void {
+		$customer_id = $this->create_customer();
+		$plan        = $this->make_plan();
+		$order       = $this->create_subscription_order( $customer_id );
+		$this->apply_and_stamp( $order, $plan );
+
+		$order->update_status( OrderStatus::PROCESSING );
+		$this->assertSame( [], $this->pending_resumes( $order->get_id() ) );
+
+		do_action( 'woocommerce_subscriptions_lite_resume_checkout', $order->get_id() );
+
+		$this->assertCount( 1, Contracts::find_by_origin_order( $order->get_id() ) );
+		$this->assertSame( [], $this->notes_with( $order, 'activated after its creation was interrupted' ) );
+	}
+
+	/**
+	 * A creation that keeps failing before the draft is written is resumed at most three times
+	 * (the attempt cap), then the chain stops with one final note; a later paid status change
+	 * still creates the contract and clears the count.
+	 */
+	public function test_a_persistently_failing_resume_stops_after_the_cap_and_a_later_success_still_works(): void {
+		$customer_id = $this->create_customer();
+		$plan        = $this->make_plan();
+		$order       = $this->create_subscription_order( $customer_id );
+		$this->apply_and_stamp( $order, $plan );
+
+		$contracts = SchemaInstaller::get_table_name( SchemaInstaller::TABLE_CONTRACTS );
+		$fail      = static function ( string $query ) use ( $contracts ): string {
+			return 0 === strpos( $query, "INSERT INTO `{$contracts}`" ) ? '' : $query;
+		};
+		$final     = 'still could not be created after several automatic attempts';
+		add_filter( 'query', $fail );
+		try {
+			$order->update_status( OrderStatus::PROCESSING );
+			$this->assertCount( 1, $this->pending_resumes( $order->get_id() ) );
+
+			for ( $run = 1; $run < 3; $run++ ) {
+				do_action( 'woocommerce_subscriptions_lite_resume_checkout', $order->get_id() );
+				$this->assertCount( 1, $this->pending_resumes( $order->get_id() ), "Rescheduled after failed run {$run}." );
+			}
+			do_action( 'woocommerce_subscriptions_lite_resume_checkout', $order->get_id() );
+			$this->assertSame( [], $this->pending_resumes( $order->get_id() ), 'Not rescheduled past the cap.' );
+			$this->assertCount( 1, $this->notes_with( $order, $final ) );
+
+			do_action( 'woocommerce_subscriptions_lite_resume_checkout', $order->get_id() ); // A stray run past the cap.
+			$this->assertSame( [], $this->pending_resumes( $order->get_id() ) );
+			$this->assertCount( 1, $this->notes_with( $order, $final ), 'One final note only.' );
+		} finally {
+			remove_filter( 'query', $fail );
+		}
+		$this->assertSame( [], Contracts::find_by_origin_order( $order->get_id() ) );
+
+		$order->update_status( OrderStatus::COMPLETED );
+
+		$created = Contracts::find_by_origin_order( $order->get_id() );
+		$this->assertCount( 1, $created );
+		$this->assertSame( ContractStatus::ACTIVE, $created[0]->get_status() );
+		$this->assertSame( '', (string) wc_get_order( $order->get_id() )->get_meta( '_wcsl_resume_attempts' ), 'A success clears the count.' );
+		$this->assertSame( [], $this->pending_resumes( $order->get_id() ) );
+	}
+
+	public function test_a_failed_resume_run_followed_by_a_successful_one_clears_the_count(): void {
+		$customer_id = $this->create_customer();
+		$plan        = $this->make_plan();
+		$order       = $this->create_subscription_order( $customer_id );
+		$this->apply_and_stamp( $order, $plan );
+
+		$contracts = SchemaInstaller::get_table_name( SchemaInstaller::TABLE_CONTRACTS );
+		$fail      = static function ( string $query ) use ( $contracts ): string {
+			return 0 === strpos( $query, "INSERT INTO `{$contracts}`" ) ? '' : $query;
+		};
+		add_filter( 'query', $fail );
+		try {
+			$order->update_status( OrderStatus::PROCESSING );
+			do_action( 'woocommerce_subscriptions_lite_resume_checkout', $order->get_id() );
+		} finally {
+			remove_filter( 'query', $fail );
+		}
+		$this->assertSame( '1', (string) wc_get_order( $order->get_id() )->get_meta( '_wcsl_resume_attempts' ) );
+
+		do_action( 'woocommerce_subscriptions_lite_resume_checkout', $order->get_id() );
+
+		$created = Contracts::find_by_origin_order( $order->get_id() );
+		$this->assertCount( 1, $created );
+		$this->assertSame( ContractStatus::ACTIVE, $created[0]->get_status() );
+		$this->assertSame( '', (string) wc_get_order( $order->get_id() )->get_meta( '_wcsl_resume_attempts' ) );
+		$this->assertSame( [], $this->pending_resumes( $order->get_id() ) );
+	}
+
+	/**
+	 * A draft whose activation keeps failing is resumed again after each failed run (the run
+	 * that fired is consumed, as Action Scheduler would), until the cap stops it with a note.
+	 */
+	public function test_a_draft_whose_activation_keeps_failing_is_rescheduled_until_the_cap(): void {
+		$customer_id = $this->create_customer();
+		$plan        = $this->make_plan();
+		$order       = $this->create_subscription_order( $customer_id );
+		$this->apply_and_stamp( $order, $plan );
+		$args = [ 'order_id' => $order->get_id() ];
+
+		$contracts = SchemaInstaller::get_table_name( SchemaInstaller::TABLE_CONTRACTS );
+		$fail      = static function ( string $query ) use ( $contracts ): string {
+			return 0 === strpos( $query, "UPDATE `{$contracts}`" ) && false !== strpos( $query, "'" . ContractStatus::ACTIVE . "'" ) ? '' : $query;
+		};
+		add_filter( 'query', $fail );
+		try {
+			$order->update_status( OrderStatus::PROCESSING );
+			$drafts = Contracts::find_by_origin_order( $order->get_id() );
+			$this->assertSame( ContractStatus::DRAFT, $drafts[0]->get_status(), 'Cut short at activation.' );
+
+			for ( $run = 1; $run < 3; $run++ ) {
+				ScheduledActions::unschedule( 'woocommerce_subscriptions_lite_resume_checkout', $args );
+				do_action( 'woocommerce_subscriptions_lite_resume_checkout', $order->get_id() );
+				$this->assertCount( 1, $this->pending_resumes( $order->get_id() ), "Rescheduled after failed run {$run}." );
+			}
+			ScheduledActions::unschedule( 'woocommerce_subscriptions_lite_resume_checkout', $args );
+			do_action( 'woocommerce_subscriptions_lite_resume_checkout', $order->get_id() );
+		} finally {
+			remove_filter( 'query', $fail );
+		}
+
+		$this->assertSame( [], $this->pending_resumes( $order->get_id() ), 'Not rescheduled past the cap.' );
+		$this->assertCount( 1, $this->notes_with( $order, 'still could not be created after several automatic attempts' ) );
+		$this->assertSame( ContractStatus::DRAFT, $this->get_contract( $drafts[0]->get_id() )->get_status() );
+	}
+
+	public function test_the_resume_leaves_a_cancelled_draft_alone(): void {
+		$customer_id = $this->create_customer();
+		$plan        = $this->make_plan();
+		$order       = $this->create_subscription_order( $customer_id );
+		$this->apply_and_stamp( $order, $plan );
+		$created  = Contracts::create(
+			[
+				'extension_slug'  => Package::EXTENSION_SLUG,
+				'creation_key'    => 'order:' . $order->get_id(),
+				'status'          => ContractStatus::DRAFT,
+				'customer_id'     => $customer_id,
+				'currency'        => 'USD',
+				'selling_plan_id' => $plan->get_id(),
+				'origin_order_id' => $order->get_id(),
+				'billing_total'   => '19.99',
+			],
+			[ 'operation' => ContractCreationHandler::OPERATION ]
+		);
+		$draft_id = $created['contract']->get_id();
+		Contracts::update( $draft_id, [ 'status' => ContractStatus::CANCELLED ], $created['lock'] );
+		$created['lock']->release();
+
+		$order->update_status( OrderStatus::PROCESSING );
+		do_action( 'woocommerce_subscriptions_lite_resume_checkout', $order->get_id() );
+
+		$this->assertSame( ContractStatus::CANCELLED, $this->get_contract( $draft_id )->get_status() );
+		$this->assertSame( [], Contracts::get_cycles( $draft_id ) );
+		$this->assertSame( [], $this->notes_with( $order, 'activated after its creation was interrupted' ) );
+		$this->assertSame( [], $this->pending_resumes( $order->get_id() ) );
+		$this->assertCount( 1, Contracts::find_by_origin_order( $order->get_id() ), 'No second contract.' );
+	}
+
+	public function test_a_draft_whose_order_no_longer_resolves_to_one_plan_is_logged_not_resumed(): void {
+		$customer_id = $this->create_customer();
+		$plan        = $this->make_plan();
+		$order       = $this->create_subscription_order( $customer_id );
+		$this->apply_and_stamp( $order, $plan );
+		$contracts = SchemaInstaller::get_table_name( SchemaInstaller::TABLE_CONTRACTS );
+		$fail      = static function ( string $query ) use ( $contracts ): string {
+			return 0 === strpos( $query, "UPDATE `{$contracts}`" ) && false !== strpos( $query, "'" . ContractStatus::ACTIVE . "'" ) ? '' : $query;
+		};
+		add_filter( 'query', $fail );
+		try {
+			$order->update_status( OrderStatus::PROCESSING );
+		} finally {
+			remove_filter( 'query', $fail );
+		}
+		$draft_id = Contracts::find_by_origin_order( $order->get_id() )[0]->get_id();
+		( new PlanRepository() )->delete( $plan->get_id(), Package::EXTENSION_SLUG );
+		$this->capture_log();
+
+		do_action( 'woocommerce_subscriptions_lite_resume_checkout', $order->get_id() );
+
+		$this->assertSame( ContractStatus::DRAFT, $this->get_contract( $draft_id )->get_status() );
+		$this->assertTrue( $this->has_logged( 'cannot be resumed: the order no longer resolves to one plan' ) );
+		$this->assertSame( [], $this->notes_with( $order, 'activated after its creation was interrupted' ) );
 	}
 }

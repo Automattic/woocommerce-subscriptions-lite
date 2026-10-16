@@ -151,7 +151,7 @@ final class RenewalScenariosTest extends LiteIntegrationTestCase {
 		$contract_id = $this->make_contract_paid( self::PAID_A_PERIOD_AGO );
 		$now         = $this->now();
 		// A second tick runs while the first is still charging: the contract is still due,
-		// so only the first tick's claim keeps it from being notified twice.
+		// so only the first tick's lock keeps it from being notified twice.
 		$overlapping = null;
 		add_action(
 			'woocommerce_subscriptions_engine_scheduled_payment_cod',
@@ -165,12 +165,12 @@ final class RenewalScenariosTest extends LiteIntegrationTestCase {
 		);
 
 		$this->assertSame( 1, $this->run_due_dispatch( $now ) );
-		$this->assertSame( 0, $overlapping, 'An overlapping tick loses the claim.' );
+		$this->assertSame( 0, $overlapping, 'An overlapping tick finds the contract locked.' );
 		$this->assertCount( 1, $this->renewal_orders() );
 		$this->assertSame( CycleStatus::PROCESSING, $this->head( $contract_id )->get_status() );
 		$this->assertNull( $this->get_contract( $contract_id )->get_next_payment_gmt(), 'The async charge takes the contract off the due scan.' );
 
-		$this->assertSame( 0, $this->run_due_dispatch_after_claims_expire( $now ), 'Not notified again once the claim expires.' );
+		$this->assertSame( 0, $this->run_due_dispatch_after_locks_expire( $now ), 'Not notified again once the lock is gone.' );
 		$this->assertSame( 1, $this->charge_count() );
 
 		$this->renewal_orders()[0]->payment_complete();
@@ -230,12 +230,14 @@ final class RenewalScenariosTest extends LiteIntegrationTestCase {
 		$now         = $this->now();
 		$resume      = $this->interrupt_schedule_writes();
 
-		$this->assertSame( 1, $this->run_due_dispatch( $now ) );
+		$this->assertSame( 0, $this->run_due_dispatch( $now ), 'The handler failed, so the dispatcher keeps the lock.' );
 		$this->assertSame( CycleStatus::BILLED, $this->head( $contract_id )->get_status() );
 		$this->assertEquals( $due_before, $this->next_payment( $contract_id ), 'The contract write was lost.' );
+		$this->assertSame( 'engine_due_dispatch', $this->get_contract( $contract_id )->get_lock_state()['operation'] ?? null );
+		$this->assertSame( 0, $this->run_due_dispatch( $now ), 'Not redispatched while the lock lives.' );
 		$resume();
 
-		$this->assertSame( 1, $this->run_due_dispatch_after_claims_expire( $now ) );
+		$this->assertSame( 1, $this->run_due_dispatch_after_locks_expire( $now ) );
 
 		$this->assertSame( 1, $this->charge_count() );
 		$this->assertCount( 1, $this->renewal_orders() );
@@ -256,7 +258,7 @@ final class RenewalScenariosTest extends LiteIntegrationTestCase {
 		$this->assertSame( ContractStatus::ACTIVE, $this->get_contract( $contract_id )->get_status(), 'The contract write was lost.' );
 		$resume();
 
-		$this->assertSame( 1, $this->run_due_dispatch_after_claims_expire( $now ) );
+		$this->assertSame( 1, $this->run_due_dispatch_after_locks_expire( $now ) );
 
 		$this->assertSame( 1, $this->charge_count() );
 		$contract = $this->get_contract( $contract_id );

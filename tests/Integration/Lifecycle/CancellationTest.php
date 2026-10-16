@@ -162,6 +162,7 @@ final class CancellationTest extends LiteIntegrationTestCase {
 			$this->assertSame( '2099-01-01 00:00:00', $stored->get_next_payment_gmt(), 'Nothing was written.' );
 			$this->assertCount( 0, $received, 'The action does not fire.' );
 		}
+		$this->assert_lock_released( $contract_id );
 	}
 
 	/**
@@ -253,6 +254,7 @@ final class CancellationTest extends LiteIntegrationTestCase {
 			$this->assertSame( ContractStatus::EXPIRED, $this->get_contract( $contract_id )->get_status() );
 			$this->assertCount( 0, $received, 'The cancelled action does not fire.' );
 		}
+		$this->assert_lock_released( $contract_id );
 	}
 
 	/**
@@ -272,6 +274,7 @@ final class CancellationTest extends LiteIntegrationTestCase {
 			$this->assertSame( 'legacy-paused', $stored->get_status() );
 			$this->assertSame( '2099-01-01 00:00:00', $stored->get_next_payment_gmt(), 'Nothing was written.' );
 		}
+		$this->assert_lock_released( $contract_id );
 	}
 
 	/**
@@ -290,7 +293,7 @@ final class CancellationTest extends LiteIntegrationTestCase {
 		$received   = $this->capture_action( $action );
 		$meta_table = SchemaInstaller::get_table_name( SchemaInstaller::TABLE_CONTRACT_META );
 		$break      = static function ( string $query ) use ( $meta_table ): string {
-			return 0 === strpos( $query, "DELETE FROM `{$meta_table}`" ) ? 'SELECT broken syntax (' : $query;
+			return 1 === preg_match( "/^DELETE FROM `?{$meta_table}`? WHERE /", $query ) ? 'SELECT broken syntax (' : $query;
 		};
 		add_filter( 'query', $break );
 
@@ -332,7 +335,7 @@ final class CancellationTest extends LiteIntegrationTestCase {
 	 */
 	public function test_cancel_leaves_a_pending_cycle_untouched(): void {
 		$contract_id = $this->seed_contract();
-		Contracts::add_cycle(
+		$this->add_cycle_with_lock(
 			$contract_id,
 			[
 				'starts_at_gmt' => '2026-01-01 00:00:00',
@@ -363,5 +366,45 @@ final class CancellationTest extends LiteIntegrationTestCase {
 		$this->assertTrue( Cancellation::can_cancel( ContractStatus::DRAFT ), 'A stuck draft can be cancelled.' );
 		$this->assertFalse( Cancellation::can_cancel( ContractStatus::CANCELLED ) );
 		$this->assertFalse( Cancellation::can_cancel( ContractStatus::EXPIRED ) );
+	}
+
+	/**
+	 * @dataProvider provide_cancel_modes
+	 *
+	 * @param string $method Cancellation method under test.
+	 * @param string $action Action the method fires.
+	 */
+	public function test_cancel_while_another_operation_holds_the_lock_returns_the_conflict_and_writes_nothing( string $method, string $action ): void {
+		$contract_id = $this->seed_contract();
+		( new Hold() )->hold( $contract_id );
+		$received = $this->capture_action( $action );
+		$this->hold_lock( $contract_id, 'renewal' );
+
+		$conflict = ( new Cancellation() )->$method( $contract_id );
+
+		$this->assert_lock_conflict( $conflict, $contract_id, 'renewal' );
+
+		$stored = $this->get_contract( $contract_id );
+		$this->assertSame( ContractStatus::ON_HOLD, $stored->get_status() );
+		$this->assertNull( $stored->get_end_gmt() );
+		$this->assertSame( '2099-01-01 00:00:00', $this->get_stored_anchor( $contract_id ) );
+		$this->assertCount( 0, $received );
+	}
+
+	/**
+	 * @dataProvider provide_cancel_modes
+	 *
+	 * @param string $method Cancellation method under test.
+	 * @param string $action Action the method fires.
+	 * @param string $status Status the method writes.
+	 */
+	public function test_cancel_leaves_the_contract_unlocked( string $method, string $action, string $status ): void {
+		$contract_id = $this->seed_contract();
+
+		$cancelled = ( new Cancellation() )->$method( $contract_id );
+
+		$this->assertInstanceOf( ContractView::class, $cancelled );
+		$this->assertSame( $status, $cancelled->get_status() );
+		$this->assert_lock_released( $contract_id );
 	}
 }

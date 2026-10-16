@@ -58,7 +58,7 @@ final class SubscriptionDataTest extends LiteIntegrationTestCase {
 	}
 
 	public function test_a_draft_without_customer_currency_or_payment_renders(): void {
-		$contract = Contracts::create( [ 'extension_slug' => Package::EXTENSION_SLUG ] );
+		$contract = $this->create_released_contract( [ 'extension_slug' => Package::EXTENSION_SLUG ] );
 
 		ob_start();
 		SubscriptionData::output( $contract );

@@ -15,6 +15,7 @@ use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\SchemaInstaller;
+use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\HeldLocks;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Hold;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\HoldAnchor;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\LifecycleNotAllowedException;
@@ -133,7 +134,7 @@ final class HoldTest extends LiteIntegrationTestCase {
 		$contract_id = $this->seed_contract();
 		$meta_table  = SchemaInstaller::get_table_name( SchemaInstaller::TABLE_CONTRACT_META );
 		$break       = static function ( string $query ) use ( $meta_table ): string {
-			return 0 === strpos( $query, "INSERT INTO `{$meta_table}`" ) ? 'SELECT broken syntax (' : $query;
+			return 1 === preg_match( "/^INSERT INTO `?{$meta_table}`? /", $query ) ? 'SELECT broken syntax (' : $query;
 		};
 		add_filter( 'query', $break );
 
@@ -149,6 +150,7 @@ final class HoldTest extends LiteIntegrationTestCase {
 		$stored = $this->get_contract( $contract_id );
 		$this->assertSame( ContractStatus::ACTIVE, $stored->get_status() );
 		$this->assertSame( '2099-01-01 00:00:00', $stored->get_next_payment_gmt(), 'The next-due moment was not disarmed.' );
+		$this->assert_lock_released( $contract_id );
 	}
 
 	/**
@@ -169,6 +171,7 @@ final class HoldTest extends LiteIntegrationTestCase {
 			$this->assertSame( '2099-01-01 00:00:00', $stored->get_next_payment_gmt(), 'Nothing was written.' );
 			$this->assertSame( $before, did_action( 'woocommerce_subscriptions_lite_contract_held' ) );
 		}
+		$this->assert_lock_released( $contract_id );
 	}
 
 	/**
@@ -197,6 +200,7 @@ final class HoldTest extends LiteIntegrationTestCase {
 			$this->assertSame( 'legacy-paused', $stored->get_status() );
 			$this->assertSame( '2099-01-01 00:00:00', $stored->get_next_payment_gmt() );
 		}
+		$this->assert_lock_released( $contract_id );
 	}
 
 	public function test_hold_returns_null_for_a_missing_contract(): void {
@@ -207,6 +211,64 @@ final class HoldTest extends LiteIntegrationTestCase {
 		$contract_id = $this->seed_contract( [ 'extension_slug' => 'another-extension' ] );
 
 		$this->assertNull( ( new Hold() )->hold( $contract_id ) );
-		$this->assertSame( ContractStatus::ACTIVE, $this->get_contract( $contract_id )->get_status() );
+		$contract = $this->get_contract( $contract_id );
+		$this->assertSame( ContractStatus::ACTIVE, $contract->get_status() );
+		$this->assertNull( $contract->get_lock_state(), 'The lock taken to read it is released.' );
+	}
+
+	public function test_hold_leaves_the_contract_unlocked(): void {
+		$contract_id = $this->seed_contract();
+
+		( new Hold() )->hold( $contract_id );
+
+		$this->assertNull( $this->get_contract( $contract_id )->get_lock_state() );
+	}
+
+	public function test_hold_while_another_operation_holds_the_lock_returns_the_conflict_and_writes_nothing(): void {
+		$contract_id = $this->seed_contract();
+		$this->hold_lock( $contract_id, 'renewal' );
+
+		$conflict = ( new Hold() )->hold( $contract_id );
+
+		$this->assert_lock_conflict( $conflict, $contract_id, 'renewal' );
+
+		$stored = $this->get_contract( $contract_id );
+		$this->assertSame( ContractStatus::ACTIVE, $stored->get_status() );
+		$this->assertSame( '2099-01-01 00:00:00', $stored->get_next_payment_gmt() );
+		$this->assertSame( '', $this->get_stored_anchor( $contract_id ) );
+	}
+
+	public function test_system_hold_writes_with_the_held_lock(): void {
+		$contract_id = $this->seed_contract();
+		( new Hold() )->hold( $contract_id );
+
+		$lock = $this->hold_lock( $contract_id, 'renewal' );
+		try {
+			Hold::system_hold( $lock, [ 'last_attempt_gmt' => '2026-02-15 00:00:00' ] );
+		} finally {
+			$lock->release();
+		}
+
+		$stored = $this->get_contract( $contract_id );
+		$this->assertSame( ContractStatus::ON_HOLD, $stored->get_status() );
+		$this->assertNull( $stored->get_next_payment_gmt() );
+		$this->assertSame( '2026-02-15 00:00:00', $stored->get_last_attempt_gmt() );
+		$this->assertSame( '', $this->get_stored_anchor( $contract_id ), 'The customer anchor is dropped.' );
+	}
+
+	public function test_a_held_action_listener_writes_with_the_held_lock(): void {
+		$contract_id = $this->seed_contract();
+		add_action(
+			'woocommerce_subscriptions_lite_contract_held',
+			static function ( ContractView $contract ): void {
+				Contracts::update_meta( $contract->get_id(), '_listener_note', 'held', null, HeldLocks::get( $contract->get_id() ) );
+			}
+		);
+
+		$held = ( new Hold() )->hold( $contract_id );
+
+		$this->assertSame( ContractStatus::ON_HOLD, $held->get_status() );
+		$this->assertSame( 'held', Contracts::get_meta( $contract_id, '_listener_note', true ) );
+		$this->assertNull( $this->get_contract( $contract_id )->get_lock_state() );
 	}
 }

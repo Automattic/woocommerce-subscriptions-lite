@@ -225,7 +225,7 @@ final class ReactivationTest extends LiteIntegrationTestCase {
 		);
 		$meta_table = SchemaInstaller::get_table_name( SchemaInstaller::TABLE_CONTRACT_META );
 		$break      = static function ( string $query ) use ( $meta_table ): string {
-			return 0 === strpos( $query, "DELETE FROM `{$meta_table}`" ) ? 'SELECT broken syntax (' : $query;
+			return 1 === preg_match( "/^DELETE FROM `?{$meta_table}`? WHERE /", $query ) ? 'SELECT broken syntax (' : $query;
 		};
 		add_filter( 'query', $break );
 
@@ -240,6 +240,7 @@ final class ReactivationTest extends LiteIntegrationTestCase {
 		$stored = $this->get_contract( $contract_id );
 		$this->assertSame( ContractStatus::ACTIVE, $stored->get_status() );
 		$this->assertSame( '2099-01-01 00:00:00', $stored->get_next_payment_gmt() );
+		$this->assertSame( '2099-01-01 00:00:00', $this->get_stored_anchor( $contract_id ), 'The anchor is left behind.' );
 	}
 
 	/**
@@ -339,5 +340,49 @@ final class ReactivationTest extends LiteIntegrationTestCase {
 
 		$this->assertNull( ( new Reactivation() )->reactivate( $contract_id ) );
 		$this->assertSame( ContractStatus::ON_HOLD, $this->get_contract( $contract_id )->get_status() );
+	}
+
+	public function test_reactivation_while_another_operation_holds_the_lock_returns_the_conflict_and_stays_on_hold(): void {
+		$contract_id = $this->seed_held_contract( null, $this->make_monthly_plan_id(), '2099-01-01 00:00:00' );
+		$this->hold_lock( $contract_id, 'cancel' );
+
+		$conflict = ( new Reactivation() )->reactivate( $contract_id, $this->utc( '2026-02-01 00:00:00' ) );
+
+		$this->assert_lock_conflict( $conflict, $contract_id, 'cancel' );
+
+		$stored = $this->get_contract( $contract_id );
+		$this->assertSame( ContractStatus::ON_HOLD, $stored->get_status() );
+		$this->assertNull( $stored->get_next_payment_gmt() );
+		$this->assertSame( '2099-01-01 00:00:00', $this->get_stored_anchor( $contract_id ) );
+	}
+
+	/**
+	 * Reactivate racing a cancel: the cancel holds the lock and writes, then releases; the
+	 * reactivation reads after acquiring, sees the cancel and refuses, so nothing re-arms.
+	 */
+	public function test_reactivation_after_a_concurrent_cancel_reads_the_cancelled_status(): void {
+		$contract_id = $this->seed_held_contract( null, $this->make_monthly_plan_id(), '2099-01-01 00:00:00' );
+		$cancel_lock = $this->hold_lock( $contract_id, 'cancel' );
+		Contracts::update(
+			$contract_id,
+			[
+				'status'           => ContractStatus::CANCELLED,
+				'next_payment_gmt' => null,
+			],
+			$cancel_lock
+		);
+		$cancel_lock->release();
+
+		try {
+			( new Reactivation() )->reactivate( $contract_id, $this->utc( '2026-02-01 00:00:00' ) );
+			$this->fail( 'Expected LifecycleNotAllowedException.' );
+		} catch ( LifecycleNotAllowedException $e ) {
+			$this->assertStringContainsString( 'on-hold', $e->getMessage() );
+		}
+
+		$stored = $this->get_contract( $contract_id );
+		$this->assertSame( ContractStatus::CANCELLED, $stored->get_status() );
+		$this->assertNull( $stored->get_next_payment_gmt() );
+		$this->assert_lock_released( $contract_id );
 	}
 }

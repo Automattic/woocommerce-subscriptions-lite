@@ -9,6 +9,8 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Lifecycle\Renewal;
 
+use Automattic\WooCommerce\Enums\OrderStatus;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\ContractLock;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Payments;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\CycleView;
@@ -17,8 +19,10 @@ use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\CycleStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\SchemaInstaller;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\RowActionController;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\RowActionResult;
+use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\HeldLocks;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\RenewalOrderBuilder;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\RenewalProcessor;
+use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\Settlement;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
 use DateTimeImmutable;
 use DateTimeZone;
@@ -104,7 +108,14 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 	private function renew( int $contract_id, string $now = '', bool $manual = false ): ?WC_Order {
 		$run_at = '' === $now ? $this->from_now( '' ) : $now;
 
-		return ( new RenewalProcessor() )->renew( $this->get_contract( $contract_id ), $this->utc( $this->due_at ), $this->utc( $run_at ), $manual );
+		// As the due dispatcher runs it: under the contract lock, the contract read after acquiring.
+		$lock = $this->hold_lock( $contract_id, 'engine_due_dispatch' );
+		HeldLocks::register( $lock );
+		try {
+			return ( new RenewalProcessor() )->renew( $this->get_contract( $contract_id ), $this->utc( $this->due_at ), $this->utc( $run_at ), $manual, $lock );
+		} finally {
+			HeldLocks::release( $lock );
+		}
 	}
 
 	/**
@@ -258,32 +269,25 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 		$this->assertSame( ContractStatus::ACTIVE, $this->get_contract( $contract_id )->get_status() );
 	}
 
-	public function test_a_cycle_held_by_another_run_is_left_alone(): void {
+	public function test_renew_now_while_another_operation_holds_the_lock_returns_the_conflict_and_writes_nothing(): void {
 		$this->support_engine_charges( 'cod' );
 		$contract_id = $this->make_contract();
-		Contracts::add_cycle(
-			$contract_id,
-			[
-				'status'         => CycleStatus::PENDING,
-				'count'          => 2,
-				'starts_at_gmt'  => $this->due_at,
-				'ends_at_gmt'    => $this->period_end,
-				'expected_total' => '19.99',
-				'currency'       => 'USD',
-				'claim_seconds'  => 900,
-			]
-		);
+		$this->hold_lock( $contract_id, 'engine_due_dispatch' );
 
-		$this->assertNull( $this->renew( $contract_id ) );
+		$conflict = ( new RenewalProcessor() )->renew_now( $contract_id );
+
+		$this->assert_lock_conflict( $conflict, $contract_id, 'engine_due_dispatch' );
+
 		$this->assertSame( 0, $this->charge_count() );
 		$this->assertSame( [], $this->renewal_order_ids() );
+		$this->assertCount( 1, Contracts::get_cycles( $contract_id ), 'No cycle appended.' );
 	}
 
 	public function test_a_lost_order_link_deletes_the_draft_and_charges_nothing(): void {
 		$this->support_engine_charges( 'cod' );
 		$contract_id = $this->make_contract();
 		$this->capture_log();
-		// Another actor moves the cycle while this run builds its order.
+		// Code reached under the run's lock moves the cycle while the run builds its order.
 		$draft_id = 0;
 		add_action(
 			'woocommerce_after_order_object_save',
@@ -291,7 +295,14 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 				if ( $order instanceof WC_Order && RenewalOrderBuilder::CREATED_VIA === $order->get_created_via() ) {
 					$draft_id = $order->get_id();
 					$head     = Contracts::get_cycles( $contract_id, 1 )[0];
-					Contracts::transition_cycle( $head->get_id(), CycleStatus::PENDING, CycleStatus::CANCELLED );
+					Contracts::transition_cycle(
+						$head->get_id(),
+						[
+							'from_status' => CycleStatus::PENDING,
+							'to_status'   => CycleStatus::CANCELLED,
+						],
+						HeldLocks::get( $contract_id )
+					);
 				}
 			}
 		);
@@ -313,7 +324,7 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 		$contract_id  = $this->make_contract();
 		$cycles_table = SchemaInstaller::get_table_name( SchemaInstaller::TABLE_CYCLES );
 		$raced        = false;
-		// Another run appends cycle 2 between this run's head read and its own append.
+		// A writer under the same lock appends cycle 2 between this run's head read and its own append.
 		add_filter(
 			'query',
 			function ( $query ) use ( $contract_id, $cycles_table, &$raced ) {
@@ -328,8 +339,8 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 							'ends_at_gmt'    => $this->period_end,
 							'expected_total' => '19.99',
 							'currency'       => 'USD',
-							'claim_seconds'  => 900,
-						]
+						],
+						HeldLocks::get( $contract_id )
 					);
 				}
 				return $query;
@@ -349,12 +360,10 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 		$this->assertCount( 2, Contracts::get_cycles( $contract_id ), 'Only the other run appended.' );
 	}
 
-	public function test_an_expired_pending_cycle_without_an_order_is_resumed(): void {
-		global $wpdb;
-
+	public function test_a_pending_cycle_without_an_order_is_resumed_by_the_next_lock_holder(): void {
 		$this->support_engine_charges( 'cod' );
 		$contract_id = $this->make_contract();
-		$cycle       = Contracts::add_cycle(
+		$cycle       = $this->add_cycle_with_lock(
 			$contract_id,
 			[
 				'status'         => CycleStatus::PENDING,
@@ -363,11 +372,9 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 				'ends_at_gmt'    => $this->period_end,
 				'expected_total' => '19.99',
 				'currency'       => 'USD',
-				'claim_seconds'  => 900,
 			]
 		);
-		// The run that appended it died before building the order; its claim ran out.
-		$wpdb->update( SchemaInstaller::get_table_name( SchemaInstaller::TABLE_CYCLES ), [ 'claimed_until' => '2000-01-01 00:00:00' ], [ 'id' => $cycle->get_id() ] ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+		// The run that appended it died before building the order; its lock ran out.
 
 		$order = $this->renew( $contract_id );
 
@@ -609,6 +616,15 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 		$this->assertSame( 0, $this->charge_count() );
 	}
 
+	public function test_renew_now_on_another_extensions_locked_contract_is_not_a_conflict(): void {
+		$foreign = $this->seed_contract( [ 'extension_slug' => 'another-extension' ] );
+		$lock    = $this->hold_lock( $foreign, 'foreign' );
+
+		$this->assertNull( ( new RenewalProcessor() )->renew_now( $foreign ), 'Not a lock conflict: not Lite\'s contract.' );
+		$this->assertSame( 'foreign', $this->get_contract( $foreign )->get_lock_state()['operation'] ?? null );
+		$lock->release();
+	}
+
 	public function test_renew_now_retries_an_unpaid_renewal_on_hold(): void {
 		$this->support_engine_charges( 'cod', 'failed' );
 		$contract_id = $this->make_contract();
@@ -621,5 +637,147 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 		$this->assertInstanceOf( WC_Order::class, $order );
 		$this->assertSame( $failed->get_id(), $order->get_id() );
 		$this->assertSame( ContractStatus::ACTIVE, $this->get_contract( $contract_id )->get_status() );
+	}
+
+	public function test_a_charge_settled_by_the_gateway_status_change_uses_the_held_lock(): void {
+		$this->support_engine_charges( 'cod' );
+		$contract_id = $this->make_contract();
+		$this->capture_log();
+
+		$order = $this->renew( $contract_id );
+
+		$this->assertInstanceOf( WC_Order::class, $order );
+		$this->assertSame( CycleStatus::BILLED, $this->head( $contract_id )->get_status() );
+		$this->assertSame( $this->period_end, $this->get_contract( $contract_id )->get_next_payment_gmt() );
+		$retries = as_get_scheduled_actions(
+			[
+				'hook'         => 'woocommerce_subscriptions_lite_settle_order',
+				'group'        => 'woocommerce-subscriptions-lite',
+				'status'       => \ActionScheduler_Store::STATUS_PENDING,
+				'date'         => as_get_datetime_object( time() + ContractLock::TTL_SECONDS ),
+				'date_compare' => '<',
+			],
+			'ids'
+		);
+		$this->assertSame( [], $retries, 'No settlement retry: only the charge settlement is pending.' );
+		$this->assertFalse( $this->has_logged( 'Settlement: settling renewal order' ) );
+		$this->assertNull( $this->get_contract( $contract_id )->get_lock_state() );
+	}
+
+	/**
+	 * A run charged the order and died before settling; the next lock holder resumes the
+	 * pending head, finds its order paid and settles without a second charge.
+	 */
+	public function test_a_resumed_pending_head_with_a_paid_order_settles_without_charging(): void {
+		$this->support_engine_charges( 'cod' );
+		$customer_id = $this->create_customer();
+		$contract_id = $this->create_contract(
+			$customer_id,
+			[
+				'payment_method' => 'cod',
+				'date_paid'      => $this->paid_at,
+			]
+		);
+		$this->unhook_settlement();
+		$paid = $this->create_renewal_order(
+			$contract_id,
+			$customer_id,
+			[
+				'status'       => OrderStatus::PROCESSING,
+				'cycle_status' => CycleStatus::PENDING,
+			]
+		);
+		$this->assertTrue( $paid->is_paid() );
+
+		$order = $this->renew( $contract_id );
+
+		$this->assertInstanceOf( WC_Order::class, $order );
+		$this->assertSame( $paid->get_id(), $order->get_id() );
+		$this->assertSame( 0, $this->charge_count() );
+		$this->assertSame( CycleStatus::BILLED, $this->head( $contract_id )->get_status() );
+		$this->assertCount( 1, $this->renewal_order_ids() );
+	}
+
+	/**
+	 * A run whose asynchronous charge was handed over died before settlement moved the cycle
+	 * to processing: the next lock holder settles the in-flight order instead of charging it.
+	 */
+	public function test_a_resumed_pending_head_with_a_charge_in_flight_is_not_charged_again(): void {
+		$this->support_engine_charges( 'cod' );
+		$customer_id = $this->create_customer();
+		$contract_id = $this->create_contract(
+			$customer_id,
+			[
+				'payment_method' => 'cod',
+				'date_paid'      => $this->paid_at,
+			]
+		);
+		$this->unhook_settlement();
+		$in_flight = $this->create_renewal_order(
+			$contract_id,
+			$customer_id,
+			[
+				'status'       => OrderStatus::ON_HOLD,
+				'cycle_status' => CycleStatus::PENDING,
+			]
+		);
+
+		$order = $this->renew( $contract_id );
+
+		$this->assertInstanceOf( WC_Order::class, $order );
+		$this->assertSame( $in_flight->get_id(), $order->get_id() );
+		$this->assertSame( 0, $this->charge_count() );
+		$this->assertSame( CycleStatus::PROCESSING, $this->head( $contract_id )->get_status() );
+		$this->assertNull( $this->get_contract( $contract_id )->get_next_payment_gmt(), 'Off the due scan until the charge reports.' );
+	}
+
+	/**
+	 * Under the lock the cycle cannot move, so a lost compare-and-set in leave_for_payment()
+	 * is an anomaly: logged, and the contract is not held.
+	 */
+	public function test_a_lost_pending_check_when_leaving_an_order_for_payment_holds_nothing(): void {
+		$this->spy_charge_attempts( 'cod' );
+		$contract_id = $this->make_contract();
+		$this->capture_log();
+		add_action(
+			'woocommerce_order_note_added',
+			static function ( $note_id ) use ( $contract_id ): void {
+				$note = get_comment( (int) $note_id );
+				$head = Contracts::get_cycles( $contract_id, 1 )[0];
+				if ( $note instanceof \WP_Comment && false !== strpos( $note->comment_content, 'manual payment' ) && CycleStatus::PENDING === $head->get_status() ) {
+					Contracts::transition_cycle(
+						$head->get_id(),
+						[
+							'from_status' => CycleStatus::PENDING,
+							'to_status'   => CycleStatus::CANCELLED,
+						],
+						HeldLocks::get( $contract_id )
+					);
+				}
+			}
+		);
+
+		$this->assertInstanceOf( WC_Order::class, $this->renew( $contract_id ) );
+
+		$this->assertTrue( $this->has_logged( 'is no longer pending on order' ) );
+		$this->assertSame( CycleStatus::CANCELLED, $this->head( $contract_id )->get_status() );
+		$this->assertSame( ContractStatus::ACTIVE, $this->get_contract( $contract_id )->get_status(), 'Not held.' );
+	}
+
+	/**
+	 * Remove the Settlement listeners the bootstrap bound.
+	 */
+	private function unhook_settlement(): void {
+		global $wp_filter;
+
+		foreach ( $wp_filter as $hook_name => $hook ) {
+			foreach ( $hook->callbacks as $priority => $callbacks ) {
+				foreach ( $callbacks as $callback ) {
+					if ( is_array( $callback['function'] ) && $callback['function'][0] instanceof Settlement ) {
+						remove_filter( $hook_name, $callback['function'], $priority );
+					}
+				}
+			}
+		}
 	}
 }

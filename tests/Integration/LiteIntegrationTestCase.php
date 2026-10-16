@@ -22,10 +22,12 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration;
 
+use Automattic\WooCommerce\SubscriptionsEngine\Api\ContractLock;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Payments;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Plans;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\View\CycleView;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\PlanView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\CycleStatus;
@@ -34,7 +36,9 @@ use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\SchemaInstall
 use Automattic\WooCommerce\SubscriptionsLite\Cart\CartPlanHooks;
 use Automattic\WooCommerce\SubscriptionsLite\Checkout\ContractCreationHandler;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Cancellation;
+use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\HeldLocks;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Hold;
+use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\HoldAnchor;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\RenewalOrderBuilder;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\RenewalProcessor;
@@ -43,6 +47,7 @@ use DateTimeZone;
 use RuntimeException;
 use WC_Order;
 use WC_Product_Simple;
+use WP_Error;
 use WP_UnitTestCase;
 
 /**
@@ -320,7 +325,7 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 	 * @return int Contract id.
 	 */
 	protected function seed_contract( array $args = [] ): int {
-		$contract = Contracts::create(
+		$contract = $this->create_released_contract(
 			array_merge(
 				[
 					'extension_slug'   => Package::EXTENSION_SLUG,
@@ -336,6 +341,20 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 		);
 
 		return $contract->get_id();
+	}
+
+	/**
+	 * Create a contract through the engine facade and release the lock its creation holds.
+	 *
+	 * @param array<string, mixed> $args Contract fields.
+	 * @return ContractView The contract as read after the release.
+	 */
+	protected function create_released_contract( array $args ): ContractView {
+		$created = Contracts::create( $args );
+		$this->assertNotNull( $created );
+		$created['lock']->release();
+
+		return $this->get_contract( $created['contract']->get_id() );
 	}
 
 	/**
@@ -423,7 +442,7 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 			'currency'       => 'USD',
 			'order_id'       => $order_id,
 		];
-		Contracts::add_cycle( $contract_id, $cycle_args );
+		$this->add_cycle_with_lock( $contract_id, $cycle_args );
 
 		return $order;
 	}
@@ -566,23 +585,149 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 	}
 
 	/**
-	 * Run one engine due-dispatch batch once the dispatch claims taken at `$now` have expired.
-	 * Claims are measured on the database clock, so the session clock is moved past the claim
-	 * along with the scan moment, then restored.
+	 * Run one engine due-dispatch batch once every lock taken now has expired: the database
+	 * clock (which lock expiry is measured on) and the scan moment both move past the lock TTL.
 	 *
 	 * @param DateTimeImmutable $now The moment the earlier batch ran.
 	 * @return int The number of contracts whose owner was notified.
 	 */
-	protected function run_due_dispatch_after_claims_expire( DateTimeImmutable $now ): int {
+	protected function run_due_dispatch_after_locks_expire( DateTimeImmutable $now ): int {
+		$this->expire_held_locks();
+
+		return $this->run_due_dispatch( $now->modify( sprintf( '+%d seconds', ContractLock::TTL_SECONDS + 60 ) ) );
+	}
+
+	/**
+	 * Acquire the contract's lock in the test, as a concurrent operation would hold it.
+	 *
+	 * @param int    $contract_id Contract id.
+	 * @param string $operation   Operation label.
+	 */
+	protected function hold_lock( int $contract_id, string $operation = 'test' ): ContractLock {
+		$lock = Contracts::lock( $contract_id, $operation );
+		$this->assertNotNull( $lock, 'The lock is free.' );
+
+		return $lock;
+	}
+
+	/**
+	 * Append a cycle under a test lock on the contract, released right after.
+	 *
+	 * @param int                  $contract_id Contract id.
+	 * @param array<string, mixed> $args        Cycle fields.
+	 */
+	protected function add_cycle_with_lock( int $contract_id, array $args ): ?CycleView {
+		$lock = $this->hold_lock( $contract_id );
+		try {
+			return Contracts::add_cycle( $contract_id, $args, $lock );
+		} finally {
+			$lock->release();
+		}
+	}
+
+	/**
+	 * Transition a cycle under a test lock on its contract, released right after.
+	 *
+	 * @param int                  $contract_id The cycle's contract id.
+	 * @param int                  $cycle_id    Cycle id.
+	 * @param array<string, mixed> $args        Transition arguments.
+	 */
+	protected function transition_cycle_with_lock( int $contract_id, int $cycle_id, array $args ): bool {
+		$lock = $this->hold_lock( $contract_id );
+		try {
+			return Contracts::transition_cycle( $cycle_id, $args, $lock );
+		} finally {
+			$lock->release();
+		}
+	}
+
+	/**
+	 * Assert `$result` is Lite's lock conflict on the contract, labelled with `$operation`.
+	 *
+	 * @param mixed  $result      The flow's result.
+	 * @param int    $contract_id Contract id.
+	 * @param string $operation   The holder's operation label.
+	 */
+	protected function assert_lock_conflict( $result, int $contract_id, string $operation ): void {
+		$this->assertInstanceOf( WP_Error::class, $result );
+		$this->assertSame( 'woocommerce_subscriptions_lite_contract_locked', $result->get_error_code() );
+		$data = $result->get_error_data();
+		$this->assertSame( $contract_id, $data['contract_id'] ?? null );
+		$this->assertSame( $operation, $data['operation'] ?? null );
+	}
+
+	/**
+	 * Assert the contract's lock is released and no longer registered as held.
+	 *
+	 * @param int $contract_id Contract id.
+	 */
+	protected function assert_lock_released( int $contract_id ): void {
+		$this->assertNull( $this->get_contract( $contract_id )->get_lock_state(), 'The lock is released.' );
+		$this->assertNull( HeldLocks::get( $contract_id ), 'The lock is unregistered.' );
+	}
+
+	/**
+	 * Pin the session's database clock at `$moment`, so locks are live or expired as of then.
+	 * The clock is restored after the test.
+	 *
+	 * @param DateTimeImmutable $moment The database's now.
+	 */
+	protected function expire_lock_at( DateTimeImmutable $moment ): void {
 		global $wpdb;
 
-		$later = $now->modify( sprintf( '+%d seconds', DueDispatcher::CLAIM_TTL_SECONDS + 60 ) );
-		$wpdb->query( $wpdb->prepare( 'SET timestamp = %d', $later->getTimestamp() ) ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+		$wpdb->query( $wpdb->prepare( 'SET timestamp = %d', $moment->getTimestamp() ) ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+	}
+
+	/**
+	 * Move the database clock past the TTL of every lock taken until now.
+	 */
+	protected function expire_held_locks(): void {
+		$this->expire_lock_at( new DateTimeImmutable( sprintf( '+%d seconds', ContractLock::TTL_SECONDS + 60 ), new DateTimeZone( 'UTC' ) ) );
+	}
+
+	/**
+	 * Run `$flow` as another request would: with none of this request's held locks visible
+	 * (Lite flows otherwise reuse a lock held in the same request). Test-only reflection.
+	 *
+	 * @template T
+	 * @param callable(): T $flow The other request's work.
+	 * @return T
+	 */
+	protected function as_another_request( callable $flow ) {
+		$locks = new \ReflectionProperty( HeldLocks::class, 'locks' );
+		$locks->setAccessible( true );
+		$held = $locks->getValue();
+		$locks->setValue( null, [] );
 
 		try {
-			return $this->run_due_dispatch( $later );
+			return $flow();
 		} finally {
-			$wpdb->query( 'SET timestamp = DEFAULT' ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+			$locks->setValue( null, $held );
 		}
+	}
+
+	/**
+	 * Seed a contract's hold anchor (or remove it when null) as an unlocked write.
+	 *
+	 * @param int         $contract_id Contract id.
+	 * @param string|null $anchor      GMT anchor, or null.
+	 */
+	protected function store_hold_anchor( int $contract_id, ?string $anchor ): void {
+		if ( null === $anchor ) {
+			Contracts::delete_meta( $contract_id, HoldAnchor::META_KEY );
+			return;
+		}
+
+		Contracts::update_meta( $contract_id, HoldAnchor::META_KEY, $anchor );
+	}
+
+	/**
+	 * Restore the database clock after a test that pinned it.
+	 */
+	public function tear_down(): void {
+		global $wpdb;
+
+		$wpdb->query( 'SET timestamp = DEFAULT' ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+		parent::tear_down();
 	}
 }

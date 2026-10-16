@@ -229,7 +229,7 @@ final class EngineDataProviderTest extends LiteIntegrationTestCase {
 	public function test_drafts_are_hidden_from_the_customer(): void {
 		$customer_id = $this->create_customer();
 		$active_id   = $this->create_contract( $customer_id );
-		$draft       = Contracts::create(
+		$draft       = $this->create_released_contract(
 			[
 				'extension_slug' => Package::EXTENSION_SLUG,
 				'customer_id'    => $customer_id,
@@ -248,7 +248,7 @@ final class EngineDataProviderTest extends LiteIntegrationTestCase {
 	public function test_a_draft_inside_the_page_window_does_not_shorten_the_page(): void {
 		$customer_id = $this->create_customer();
 		$older_id    = $this->create_contract( $customer_id );
-		Contracts::create(
+		$this->create_released_contract(
 			[
 				'extension_slug' => Package::EXTENSION_SLUG,
 				'customer_id'    => $customer_id,

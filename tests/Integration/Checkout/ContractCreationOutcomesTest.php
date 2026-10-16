@@ -94,10 +94,31 @@ final class ContractCreationOutcomesTest extends LiteIntegrationTestCase {
 		$created = ( new ContractCreationHandler() )->create_contract( $order, $plan );
 		$this->assertInstanceOf( ContractView::class, $created );
 
+		// Written under the checkout lock, so the returned view still shows it; a fresh read
+		// after the release does not, and otherwise matches.
+		$this->assertSame( ContractCreationHandler::OPERATION, $created->get_lock_state()['operation'] ?? null );
 		$view = Contracts::get( $created->get_id() );
-		$this->assertEquals( $view, $created, 'The returned view matches a fresh read.' );
+		$this->assertNull( $view->get_lock_state() );
+		$this->assertSame( $this->get_unlocked_fields( $view ), $this->get_unlocked_fields( $created ), 'The returned view matches a fresh read.' );
 
 		return $view;
+	}
+
+	/**
+	 * Every public getter of the view except the lock state, by method name.
+	 *
+	 * @param ContractView $view The view.
+	 * @return array<string, mixed>
+	 */
+	private function get_unlocked_fields( ContractView $view ): array {
+		$fields = [];
+		foreach ( get_class_methods( $view ) as $method ) {
+			if ( 0 === strpos( $method, 'get_' ) && 'get_lock_state' !== $method ) {
+				$fields[ $method ] = $view->$method();
+			}
+		}
+
+		return $fields;
 	}
 
 	public function test_a_taxed_discounted_order_records_its_recurring_money(): void {

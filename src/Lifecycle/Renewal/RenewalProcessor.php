@@ -2,14 +2,10 @@
 /**
  * RenewalProcessor - renews a Lite contract: one cycle, one order, one charge.
  *
- * Works on the engine's cycle tools so concurrent runs renew once: the new cycle is
- * appended claimed (append-if-absent with a claim), an interrupted cycle is resumed only
- * by the run that takes its expired claim, and settlement moves cycles by
- * compare-and-set. A due contract several periods behind bills the one period containing
- * now ({@see BillingTerms::get_period_to_bill()}). A gateway that declares both the engine's
- * `subscriptions_engine` feature and the `subscriptions` feature is charged through the
- * engine; any other gateway gets a manual renewal order the customer pays, with the
- * contract on hold until then.
+ * Runs under the contract lock (the dispatcher's, or Renew now's own) held through the charge;
+ * the next lock holder resumes a cycle an interrupted run left pending. A gateway declaring the
+ * engine's feature and `subscriptions` is charged through the engine; any other gets a manual
+ * renewal order, with the contract on hold until it is paid.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal
  */
@@ -19,6 +15,7 @@ declare( strict_types=1 );
 namespace Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal;
 
 use Automattic\WooCommerce\Enums\OrderStatus;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\ContractLock;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Payments;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
@@ -27,12 +24,14 @@ use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\CycleStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\ValueObject\BillingPolicy;
 use Automattic\WooCommerce\SubscriptionsLite\Pricing\BillingTerms;
+use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\HeldLocks;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Hold;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ContractPlans;
 use DateTimeImmutable;
 use DateTimeZone;
 use WC_Order;
+use WP_Error;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -42,9 +41,9 @@ defined( 'ABSPATH' ) || exit;
 final class RenewalProcessor {
 
 	/**
-	 * How long a run holds the cycle it renews, in seconds.
+	 * Operation label of a Renew now run's contract lock.
 	 */
-	public const CLAIM_SECONDS = 900;
+	public const OPERATION = 'renewal';
 
 	/**
 	 * The gateway feature, besides the engine's, that says a gateway can charge renewals
@@ -58,31 +57,33 @@ final class RenewalProcessor {
 	public const REASON_ORDER_BUILD_FAILED = 'order-build-failed';
 
 	/**
-	 * Renew `$contract` for the period due at `$anchor`.
+	 * Renew `$contract` for the period due at `$anchor` under `$lock` (the dispatcher's or
+	 * Renew now's), registered as held in this request; every engine write passes it.
 	 *
-	 * @param ContractView      $contract The contract (read with its items and addresses).
+	 * @param ContractView      $contract The contract (read under the lock, with its items and addresses).
 	 * @param DateTimeImmutable $anchor   The due moment the period is anchored on.
 	 * @param DateTimeImmutable $now      The current moment.
 	 * @param bool              $manual   Whether a person asked for the renewal (retries a failed cycle).
+	 * @param ContractLock      $lock     The held lock on the contract.
 	 * @return WC_Order|null The renewal order; null when nothing was renewed (in flight,
 	 *                       awaiting payment, no billing policy, or the order could not be built).
 	 */
-	public function renew( ContractView $contract, DateTimeImmutable $anchor, DateTimeImmutable $now, bool $manual ): ?WC_Order {
+	public function renew( ContractView $contract, DateTimeImmutable $anchor, DateTimeImmutable $now, bool $manual, ContractLock $lock ): ?WC_Order {
 		$contract_id = $contract->get_id();
 		$policy      = ContractPlans::get_billing_policy_for( $contract );
 		$head        = Contracts::get_cycles( $contract_id, 1 )[0] ?? null;
 		if ( null === $policy || null === $head ) {
 			$this->log( 'warning', sprintf( 'contract %d has no billing policy or no billing chain; its due moment is cleared.', $contract_id ), $contract_id );
-			Contracts::update( $contract_id, [ 'next_payment_gmt' => null ] );
+			Contracts::update( $contract_id, [ 'next_payment_gmt' => null ], $lock );
 			return null;
 		}
 
-		$cycle = $this->take_cycle( $contract, $head, $anchor, $now, $manual, $policy );
+		$cycle = $this->take_cycle( $contract, $head, $anchor, $now, $manual, $policy, $lock );
 		if ( null === $cycle ) {
 			return null;
 		}
 
-		$order = $this->ensure_cycle_order( $contract, $cycle );
+		$order = $this->ensure_cycle_order( $contract, $cycle, $lock );
 		if ( null === $order ) {
 			return null;
 		}
@@ -92,30 +93,48 @@ final class RenewalProcessor {
 			$order->save();
 		}
 
-		$this->collect_payment( $contract, $cycle, $order, $now );
+		$this->collect_payment( $contract, $cycle, $order, $now, $lock );
 
 		return $order;
 	}
 
 	/**
-	 * Renew a Lite contract now, on request (admin "Renew now"): an active contract bills its
-	 * next period; an on-hold contract with an unpaid renewal retries that renewal.
+	 * Renew a Lite contract now, on request (admin "Renew now"), under its lock: an active
+	 * contract bills its next period; an on-hold contract with an unpaid renewal retries that
+	 * renewal. The contract and its head are read after acquiring.
 	 *
 	 * @param int $contract_id Contract id.
-	 * @return WC_Order|null The renewal order; null when the contract is not renewable now.
+	 * @return WC_Order|WP_Error|null The renewal order; a lock conflict when another operation holds
+	 *                                the lock; null when the contract is not renewable now.
 	 */
-	public function renew_now( int $contract_id ): ?WC_Order {
-		$contract = Contracts::get( $contract_id );
-		if ( null === $contract || ! self::can_renew_now( $contract ) ) {
-			return null;
+	public function renew_now( int $contract_id ) {
+		$lock     = HeldLocks::get( $contract_id );
+		$acquired = null === $lock;
+		if ( $acquired ) {
+			$lock = HeldLocks::acquire( $contract_id, self::OPERATION );
+			if ( null === $lock ) {
+				return HeldLocks::get_conflict( $contract_id );
+			}
 		}
 
-		$utc    = new DateTimeZone( 'UTC' );
-		$now    = new DateTimeImmutable( 'now', $utc );
-		$head   = Contracts::get_cycles( $contract_id, 1 )[0] ?? null;
-		$anchor = $contract->get_next_payment_gmt() ?? ( null === $head ? null : $head->get_ends_at_gmt() );
+		try {
+			// can_renew_now() also checks the contract is Lite's.
+			$contract = Contracts::get( $contract_id );
+			if ( null === $contract || ! self::can_renew_now( $contract ) ) {
+				return null;
+			}
 
-		return $this->renew( $contract, null === $anchor ? $now : new DateTimeImmutable( $anchor, $utc ), $now, true );
+			$utc    = new DateTimeZone( 'UTC' );
+			$now    = new DateTimeImmutable( 'now', $utc );
+			$head   = Contracts::get_cycles( $contract_id, 1 )[0] ?? null;
+			$anchor = $contract->get_next_payment_gmt() ?? ( null === $head ? null : $head->get_ends_at_gmt() );
+
+			return $this->renew( $contract, null === $anchor ? $now : new DateTimeImmutable( $anchor, $utc ), $now, true, $lock );
+		} finally {
+			if ( $acquired ) {
+				HeldLocks::release( $lock );
+			}
+		}
 	}
 
 	/**
@@ -136,12 +155,10 @@ final class RenewalProcessor {
 	}
 
 	/**
-	 * Take the cycle this run renews: resume the head when it is an interrupted or (manual)
-	 * failed renewal, else append the next one, claimed. Null when another run holds it, the
-	 * head waits on a payment, or the head already settled and only the contract write that
-	 * should have followed was lost (re-applied here: a billed head that covers the period
-	 * re-arms the next due moment, a failed head holds the contract), so a settlement cut
-	 * short never bills the same period twice.
+	 * Take the cycle this run renews: resume a pending or (manual) failed head, else append the
+	 * next one. Null when the head waits on a charge confirmation, or already settled and only
+	 * its contract write was lost: that write is re-applied here (re-arm or hold), so a
+	 * settlement cut short never bills the same period twice.
 	 *
 	 * @param ContractView      $contract The contract.
 	 * @param CycleView         $head     The newest cycle.
@@ -149,17 +166,27 @@ final class RenewalProcessor {
 	 * @param DateTimeImmutable $now      The current moment.
 	 * @param bool              $manual   Whether a person asked.
 	 * @param BillingPolicy     $policy   The billing policy.
+	 * @param ContractLock      $lock     The held lock.
 	 */
-	private function take_cycle( ContractView $contract, CycleView $head, DateTimeImmutable $anchor, DateTimeImmutable $now, bool $manual, BillingPolicy $policy ): ?CycleView {
+	private function take_cycle( ContractView $contract, CycleView $head, DateTimeImmutable $anchor, DateTimeImmutable $now, bool $manual, BillingPolicy $policy, ContractLock $lock ): ?CycleView {
 		switch ( $head->get_status() ) {
 			case CycleStatus::PENDING:
-				return Contracts::claim_cycle( $head->get_id(), CycleStatus::PENDING, self::CLAIM_SECONDS ) ? $head : null;
+				// The lock excludes a concurrent run, so a pending head is one an interrupted run left.
+				return $head;
 			case CycleStatus::FAILED:
 				if ( ! $manual ) {
-					$this->reapply_hold( $contract );
+					$this->reapply_hold( $contract, $lock );
 					return null;
 				}
-				return Contracts::transition_cycle( $head->get_id(), CycleStatus::FAILED, CycleStatus::PENDING, [ 'claim_seconds' => self::CLAIM_SECONDS ] ) ? $head : null;
+				$retried = Contracts::transition_cycle(
+					$head->get_id(),
+					[
+						'from_status' => CycleStatus::FAILED,
+						'to_status'   => CycleStatus::PENDING,
+					],
+					$lock
+				);
+				return $retried ? $head : null;
 			case CycleStatus::PROCESSING:
 				$this->log( 'info', sprintf( 'contract %d is due while its renewal awaits a charge confirmation; nothing is charged.', $contract->get_id() ), $contract->get_id() );
 				return null;
@@ -170,11 +197,11 @@ final class RenewalProcessor {
 		[ $starts_at, $ends_at ] = BillingTerms::get_period_to_bill( $anchor, $now, $policy );
 
 		if ( CycleStatus::BILLED === $head->get_status() && new DateTimeImmutable( $head->get_ends_at_gmt(), new DateTimeZone( 'UTC' ) ) >= $ends_at ) {
-			$this->reapply_schedule( $contract, $head, $now, $policy );
+			$this->reapply_schedule( $contract, $head, $now, $policy, $lock );
 			return null;
 		}
 
-		// Null when a concurrent run appended this cycle first.
+		// Null when the position is taken, which the lock leaves to a writer outside Lite.
 		return Contracts::add_cycle(
 			$contract->get_id(),
 			[
@@ -184,8 +211,8 @@ final class RenewalProcessor {
 				'ends_at_gmt'    => $ends_at,
 				'expected_total' => $contract->get_billing_total(),
 				'currency'       => $contract->get_currency() ?? get_woocommerce_currency(),
-				'claim_seconds'  => self::CLAIM_SECONDS,
-			]
+			],
+			$lock
 		);
 	}
 
@@ -197,12 +224,14 @@ final class RenewalProcessor {
 	 * @param CycleView         $head     The billed head.
 	 * @param DateTimeImmutable $now      The current moment.
 	 * @param BillingPolicy     $policy   The billing policy.
+	 * @param ContractLock      $lock     The held lock.
 	 */
-	private function reapply_schedule( ContractView $contract, CycleView $head, DateTimeImmutable $now, BillingPolicy $policy ): void {
+	private function reapply_schedule( ContractView $contract, CycleView $head, DateTimeImmutable $now, BillingPolicy $policy, ContractLock $lock ): void {
 		$this->log( 'warning', sprintf( 'contract %d is due for a period its newest cycle already billed; its next due moment is re-applied.', $contract->get_id() ), $contract->get_id() );
 		Contracts::update(
 			$contract->get_id(),
-			[ 'next_payment_gmt' => BillingTerms::get_next_due_after( new DateTimeImmutable( $head->get_ends_at_gmt(), new DateTimeZone( 'UTC' ) ), $now, $policy ) ]
+			[ 'next_payment_gmt' => BillingTerms::get_next_due_after( new DateTimeImmutable( $head->get_ends_at_gmt(), new DateTimeZone( 'UTC' ) ), $now, $policy ) ],
+			$lock
 		);
 	}
 
@@ -211,21 +240,23 @@ final class RenewalProcessor {
 	 * customer pays the failed order.
 	 *
 	 * @param ContractView $contract The contract.
+	 * @param ContractLock $lock     The held lock.
 	 */
-	private function reapply_hold( ContractView $contract ): void {
+	private function reapply_hold( ContractView $contract, ContractLock $lock ): void {
 		$this->log( 'warning', sprintf( 'contract %d is due while its newest renewal failed; it is put on hold until the renewal is paid.', $contract->get_id() ), $contract->get_id() );
-		Hold::system_hold( $contract->get_id() );
+		Hold::system_hold( $lock );
 	}
 
 	/**
 	 * The order of a taken cycle: its linked order when it has one that can still be paid,
-	 * else a new draft built and linked while the claim is held (a cancelled, trashed or
+	 * else a new draft built and linked in one compare-and-set (a cancelled, trashed or
 	 * deleted order is replaced).
 	 *
 	 * @param ContractView $contract The contract.
 	 * @param CycleView    $cycle    The taken cycle.
+	 * @param ContractLock $lock     The held lock.
 	 */
-	private function ensure_cycle_order( ContractView $contract, CycleView $cycle ): ?WC_Order {
+	private function ensure_cycle_order( ContractView $contract, CycleView $cycle, ContractLock $lock ): ?WC_Order {
 		$order_id = $cycle->get_order_id();
 		$replaced = null === $order_id ? false : wc_get_order( $order_id );
 		if ( $replaced instanceof WC_Order && ! Settlement::is_dead( $replaced ) ) {
@@ -238,20 +269,29 @@ final class RenewalProcessor {
 			// for a dead order. Renew now retries it once the cause (a deleted product, a
 			// database error) is fixed.
 			$this->log( 'error', sprintf( 'contract %d: the renewal order could not be built; the renewal failed and the contract is on hold until it is renewed by hand.', $contract->get_id() ), $contract->get_id() );
-			if ( Contracts::transition_cycle( $cycle->get_id(), CycleStatus::PENDING, CycleStatus::FAILED, [ 'reason' => self::REASON_ORDER_BUILD_FAILED ] ) ) {
-				Hold::system_hold( $contract->get_id() );
+			$failed = Contracts::transition_cycle(
+				$cycle->get_id(),
+				[
+					'from_status' => CycleStatus::PENDING,
+					'to_status'   => CycleStatus::FAILED,
+					'reason'      => self::REASON_ORDER_BUILD_FAILED,
+				],
+				$lock
+			);
+			if ( $failed ) {
+				Hold::system_hold( $lock );
 			}
 			return null;
 		}
 
 		$linked = Contracts::transition_cycle(
 			$cycle->get_id(),
-			CycleStatus::PENDING,
-			CycleStatus::PENDING,
 			[
-				'order_id'      => $order->get_id(),
-				'claim_seconds' => self::CLAIM_SECONDS,
-			]
+				'from_status' => CycleStatus::PENDING,
+				'to_status'   => CycleStatus::PENDING,
+				'order_id'    => $order->get_id(),
+			],
+			$lock
 		);
 		if ( ! $linked ) {
 			$order->delete( true );
@@ -268,32 +308,29 @@ final class RenewalProcessor {
 	}
 
 	/**
-	 * Collect the order's payment: settle an already paid order, complete a free one, charge
-	 * through the engine when the gateway supports the engine and automatic renewal payments
-	 * ({@see self::GATEWAY_RENEWAL_FEATURE}), else leave a manual renewal order for the
-	 * customer and hold the contract.
-	 *
-	 * After a charge the order status is the outcome the gateway set: paid, failed, or on-hold
-	 * while an asynchronous charge awaits confirmation. Lite never sets it. An order the gateway
-	 * left pending (it awaits the customer, reports later, or threw) is left for payment like a
-	 * manual renewal order: the contract goes on the system hold, so it is not charged again,
-	 * and resumes when the order is paid. A gateway that paid and then threw left a paid order,
-	 * which settles as paid.
+	 * Collect the order's payment: settle a paid order or an asynchronous charge in flight,
+	 * complete a free one, charge through the engine when the gateway supports it, else leave
+	 * the order (or a charge the gateway left pending) for the customer. Every charge first
+	 * schedules its settlement ({@see Settlement::schedule_charge_settlement()}).
 	 *
 	 * @param ContractView      $contract The contract.
 	 * @param CycleView         $cycle    The cycle being billed.
 	 * @param WC_Order          $order    The pending renewal order.
 	 * @param DateTimeImmutable $now      The current moment.
+	 * @param ContractLock      $lock     The held lock, kept through the charge.
 	 */
-	private function collect_payment( ContractView $contract, CycleView $cycle, WC_Order $order, DateTimeImmutable $now ): void {
+	private function collect_payment( ContractView $contract, CycleView $cycle, WC_Order $order, DateTimeImmutable $now, ContractLock $lock ): void {
 		$settlement = new Settlement();
 
-		if ( $order->is_paid() ) {
+		// Paid, or an asynchronous charge in flight (a resumed run whose settlement was cut
+		// short): settle what the order says instead of charging it again.
+		if ( $order->is_paid() || $order->has_status( OrderStatus::ON_HOLD ) ) {
 			$settlement->settle( $order, $now );
 			return;
 		}
 
 		if ( (float) $order->get_total() <= 0 ) {
+			Settlement::schedule_charge_settlement( $order->get_id() );
 			$order->payment_complete();
 			$settlement->settle( $order, $now );
 			return;
@@ -304,11 +341,13 @@ final class RenewalProcessor {
 				$contract,
 				$cycle,
 				$order,
-				__( 'Renewal order created for manual payment: the payment method cannot be charged automatically. The subscription is on hold until the customer pays this order.', 'woocommerce-subscriptions-lite' )
+				__( 'Renewal order created for manual payment: the payment method cannot be charged automatically. The subscription is on hold until the customer pays this order.', 'woocommerce-subscriptions-lite' ),
+				$lock
 			);
 			return;
 		}
 
+		Settlement::schedule_charge_settlement( $order->get_id() );
 		$handed_over = Payments::process_scheduled_payment( $order );
 		$charged     = wc_get_order( $order->get_id() );
 		if ( $charged instanceof WC_Order && $charged->has_status( OrderStatus::PENDING ) ) {
@@ -320,7 +359,8 @@ final class RenewalProcessor {
 				$charged,
 				$handed_over
 					? __( 'Renewal payment not completed yet: the payment gateway did not report an outcome. The subscription is on hold until this order is paid.', 'woocommerce-subscriptions-lite' )
-					: __( 'Renewal payment not completed: the payment gateway reported an error. Check the payment gateway logs before taking a payment again. The subscription is on hold until this order is paid.', 'woocommerce-subscriptions-lite' )
+					: __( 'Renewal payment not completed: the payment gateway reported an error. Check the payment gateway logs before taking a payment again. The subscription is on hold until this order is paid.', 'woocommerce-subscriptions-lite' ),
+				$lock
 			);
 			return;
 		}
@@ -329,19 +369,34 @@ final class RenewalProcessor {
 	}
 
 	/**
-	 * Leave a pending renewal order for payment: note it, release the cycle's claim with the
-	 * order linked, and put the contract on the system hold, so it is not charged again. Paying
-	 * the order settles the cycle and resumes the contract.
+	 * Leave a pending renewal order for payment: note it, confirm the cycle is still pending
+	 * on this order, and put the contract on the system hold, so it is not charged again.
+	 * Paying the order settles the cycle and resumes the contract. Under the lock the cycle
+	 * cannot move, so a lost compare-and-set is an anomaly: it is logged and nothing is held.
 	 *
 	 * @param ContractView $contract The contract.
 	 * @param CycleView    $cycle    The cycle the order bills.
 	 * @param WC_Order     $order    The pending renewal order.
 	 * @param string       $note     Order note saying why the order awaits payment.
+	 * @param ContractLock $lock     The held lock.
 	 */
-	private function leave_for_payment( ContractView $contract, CycleView $cycle, WC_Order $order, string $note ): void {
+	private function leave_for_payment( ContractView $contract, CycleView $cycle, WC_Order $order, string $note, ContractLock $lock ): void {
 		$order->add_order_note( $note );
-		Contracts::transition_cycle( $cycle->get_id(), CycleStatus::PENDING, CycleStatus::PENDING, [ 'order_id' => $order->get_id() ] );
-		Hold::system_hold( $contract->get_id() );
+		$pending = Contracts::transition_cycle(
+			$cycle->get_id(),
+			[
+				'from_status' => CycleStatus::PENDING,
+				'to_status'   => CycleStatus::PENDING,
+				'order_id'    => $order->get_id(),
+			],
+			$lock
+		);
+		if ( ! $pending ) {
+			$this->log( 'warning', sprintf( 'contract %d: cycle %d is no longer pending on order %d; the contract is not held for its payment.', $contract->get_id(), $cycle->get_id(), $order->get_id() ), $contract->get_id() );
+			return;
+		}
+
+		Hold::system_hold( $lock );
 	}
 
 	/**

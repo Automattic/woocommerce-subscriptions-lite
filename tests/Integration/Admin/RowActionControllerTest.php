@@ -183,7 +183,7 @@ final class RowActionControllerTest extends LiteIntegrationTestCase {
 	}
 
 	public function test_a_draft_offers_cancel_and_the_real_cancel_resolves_it(): void {
-		$draft = Contracts::create( [ 'extension_slug' => Package::EXTENSION_SLUG ] );
+		$draft = $this->create_released_contract( [ 'extension_slug' => Package::EXTENSION_SLUG ] );
 		$id    = $draft->get_id();
 
 		ob_start();
@@ -312,5 +312,45 @@ final class RowActionControllerTest extends LiteIntegrationTestCase {
 
 		$this->assertNotFalse( has_action( 'admin_post_woocommerce_subscriptions_lite_renew_now' ) );
 		$this->assertNotFalse( has_action( 'admin_post_woocommerce_subscriptions_lite_cancel_admin' ) );
+	}
+
+	public function test_renew_now_under_another_operations_lock_reports_the_operation_in_progress(): void {
+		$this->support_engine_charges( 'cod' );
+		$contract_id = $this->create_contract( $this->create_customer(), [ 'payment_method' => 'cod' ] );
+		$this->hold_lock( $contract_id, 'engine_due_dispatch' );
+		$controller = new RowActionController(
+			null,
+			static fn (): bool => true,
+			function ( string $message ): void {
+				$this->logged[] = $message;
+			}
+		);
+
+		$result = $controller->handle_renew_now( [ 'contract_id' => $contract_id ] );
+
+		$this->assertSame( RowActionResult::INFO, $result->type() );
+		$this->assertSame( sprintf( 'Another change to subscription #%d is in progress (renewal). Try again shortly.', $contract_id ), $result->message() );
+		$this->assertSame( [], $this->logged, 'A conflict is not an error.' );
+		$this->assertSame( 0, $this->charge_count() );
+		$this->assertCount( 1, Contracts::get_cycles( $contract_id ), 'Nothing renewed.' );
+	}
+
+	public function test_the_real_cancel_under_another_operations_lock_reports_the_operation_in_progress(): void {
+		$contract_id = $this->seed_contract();
+		$this->hold_lock( $contract_id, 'renewal' );
+		$controller = new RowActionController(
+			null,
+			static fn (): bool => true,
+			function ( string $message ): void {
+				$this->logged[] = $message;
+			}
+		);
+
+		$result = $controller->handle_cancel( [ 'contract_id' => $contract_id ] );
+
+		$this->assertSame( RowActionResult::INFO, $result->type() );
+		$this->assertSame( sprintf( 'Another change to subscription #%d is in progress (renewal). Try again shortly.', $contract_id ), $result->message() );
+		$this->assertSame( [], $this->logged );
+		$this->assertSame( ContractStatus::ACTIVE, $this->get_contract( $contract_id )->get_status() );
 	}
 }

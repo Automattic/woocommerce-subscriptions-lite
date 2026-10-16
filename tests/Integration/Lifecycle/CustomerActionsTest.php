@@ -349,7 +349,7 @@ final class CustomerActionsTest extends LiteIntegrationTestCase {
 		$contract_id = $this->seed_owned_contract();
 		$meta_table  = SchemaInstaller::get_table_name( SchemaInstaller::TABLE_CONTRACT_META );
 		$break       = static function ( string $query ) use ( $meta_table ): string {
-			return 0 === strpos( $query, "INSERT INTO `{$meta_table}`" ) ? 'SELECT broken syntax (' : $query;
+			return 1 === preg_match( "/^INSERT INTO `?{$meta_table}`? /", $query ) ? 'SELECT broken syntax (' : $query;
 		};
 		add_filter( 'query', $break );
 
@@ -361,6 +361,7 @@ final class CustomerActionsTest extends LiteIntegrationTestCase {
 
 		$this->assertSame( 500, $response->get_status() );
 		$this->assertSame( ContractStatus::ACTIVE, $this->get_contract( $contract_id )->get_status() );
+		$this->assert_lock_released( $contract_id );
 	}
 
 	/**
@@ -392,5 +393,45 @@ final class CustomerActionsTest extends LiteIntegrationTestCase {
 		$lite_draft = $this->get_contract( $this->seed_owned_contract( ContractStatus::DRAFT, null ) );
 
 		$this->assertTrue( user_can( $this->owner_id, 'read', $lite_draft ) );
+	}
+
+	/**
+	 * @dataProvider provide_locked_actions
+	 *
+	 * @param string               $status      Stored status.
+	 * @param string|null          $next_payment Stored next payment.
+	 * @param string               $action      Action slug.
+	 * @param array<string, mixed> $action_args Action args.
+	 */
+	public function test_an_action_while_another_operation_holds_the_lock_is_a_lite_conflict( string $status, ?string $next_payment, string $action, array $action_args ): void {
+		wp_set_current_user( $this->owner_id );
+		$contract_id = $this->seed_owned_contract( $status, $next_payment );
+		$this->hold_lock( $contract_id, 'renewal' );
+
+		$response = $this->post_action( $contract_id, $action, $action_args );
+
+		$this->assertSame( 409, $response->get_status() );
+		$data = $this->get_response_data( $response );
+		$this->assertSame( 'woocommerce_subscriptions_lite_contract_locked', $data['code'] );
+		$this->assertSame( sprintf( 'Another change to subscription #%d is in progress (renewal).', $contract_id ), $data['message'] );
+		$this->assertSame( [ 'status' => 409 ], $data['data'] ?? null, 'Only the status: no lock details, no additional_data.' );
+		$this->assertArrayNotHasKey( 'additional_data', $data );
+		$stored = $this->get_contract( $contract_id );
+		$this->assertSame( $status, $stored->get_status(), 'Nothing was written.' );
+		$this->assertSame( $next_payment, $stored->get_next_payment_gmt() );
+	}
+
+	/**
+	 * Actions a customer can run, by the status that allows them.
+	 *
+	 * @return array<string, array{0: string, 1: string|null, 2: string, 3: array<string, mixed>}>
+	 */
+	public function provide_locked_actions(): array {
+		return [
+			'hold'                 => [ ContractStatus::ACTIVE, '2099-02-01 00:00:00', 'hold', [] ],
+			'reactivate'           => [ ContractStatus::ON_HOLD, null, 'reactivate', [] ],
+			'cancel now'           => [ ContractStatus::ACTIVE, '2099-02-01 00:00:00', 'cancel', [ 'at_period_end' => false ] ],
+			'cancel at period end' => [ ContractStatus::ACTIVE, '2099-02-01 00:00:00', 'cancel', [ 'at_period_end' => true ] ],
+		];
 	}
 }
