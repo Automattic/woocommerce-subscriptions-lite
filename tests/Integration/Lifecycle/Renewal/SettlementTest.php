@@ -9,6 +9,7 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Lifecycle\Renewal;
 
+use Automattic\WooCommerce\Enums\OrderStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\CycleView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
@@ -19,7 +20,6 @@ use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\HoldAnchor;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\RenewalOrderBuilder;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\Settlement;
-use Automattic\WooCommerce\SubscriptionsLite\Utilities\ScheduledActions;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
 use DateTimeImmutable;
 use DateTimeZone;
@@ -131,6 +131,32 @@ final class SettlementTest extends LiteIntegrationTestCase {
 		$order->payment_complete();
 		$order->set_date_paid( '2026-02-16 10:00:00' );
 		$order->save();
+	}
+
+	/**
+	 * Link a pending cycle of another extension's contract to `$order`, after the Lite cycle,
+	 * so it is the newest cycle linked to the order.
+	 *
+	 * @param WC_Order $order The Lite renewal order.
+	 * @return int The foreign contract id.
+	 */
+	private function link_foreign_cycle( WC_Order $order ): int {
+		$foreign_id = $this->seed_contract( [ 'extension_slug' => 'another-extension' ] );
+		Contracts::add_cycle(
+			$foreign_id,
+			[
+				'status'         => CycleStatus::PENDING,
+				'count'          => 2,
+				'starts_at_gmt'  => '2026-02-15 00:00:00',
+				'ends_at_gmt'    => '2026-03-15 00:00:00',
+				'expected_total' => '19.99',
+				'currency'       => 'USD',
+				'order_id'       => $order->get_id(),
+			]
+		);
+		$this->assertSame( $foreign_id, Contracts::find_cycles_by_order( $order->get_id() )[0]->get_contract_id(), 'The foreign cycle is the newest linked one.' );
+
+		return $foreign_id;
 	}
 
 	public function test_a_paid_order_bills_a_pending_cycle_once_and_arms_the_next_period(): void {
@@ -312,6 +338,28 @@ final class SettlementTest extends LiteIntegrationTestCase {
 		$this->assertSame( ContractStatus::ACTIVE, $this->get_contract( $contract_id )->get_status() );
 	}
 
+	public function test_a_foreign_cycle_linked_to_the_same_order_is_ignored(): void {
+		[ $contract_id, $order ] = $this->seed_renewal();
+		$foreign_id              = $this->link_foreign_cycle( $order );
+		$order->update_status( OrderStatus::FAILED );
+
+		( new Settlement() )->settle( $order, $this->utc( '2026-02-16 12:00:00' ) );
+
+		$this->assertSame( CycleStatus::FAILED, $this->head( $contract_id )->get_status() );
+		$this->assertSame( CycleStatus::PENDING, $this->head( $foreign_id )->get_status() );
+		$this->assertSame( ContractStatus::ACTIVE, $this->get_contract( $foreign_id )->get_status() );
+	}
+
+	public function test_a_removed_order_ignores_a_foreign_cycle_linked_to_it(): void {
+		[ $contract_id, $order ] = $this->seed_renewal();
+		$foreign_id              = $this->link_foreign_cycle( $order );
+
+		( new Settlement() )->handle_removed_order( $order->get_id() );
+
+		$this->assertSame( CycleStatus::FAILED, $this->head( $contract_id )->get_status() );
+		$this->assertSame( CycleStatus::PENDING, $this->head( $foreign_id )->get_status() );
+	}
+
 	public function test_a_late_payment_on_a_cancelled_contract_bills_the_cycle_and_keeps_the_status(): void {
 		[ $contract_id, $order ] = $this->seed_renewal( 'pending', CycleStatus::PENDING, 'cancelled' );
 		$before                  = $this->get_contract( $contract_id );
@@ -428,7 +476,7 @@ final class SettlementTest extends LiteIntegrationTestCase {
 		$actions = as_get_scheduled_actions(
 			[
 				'hook'     => 'woocommerce_subscriptions_lite_settle_order',
-				'group'    => ScheduledActions::GROUP,
+				'group'    => 'woocommerce-subscriptions-lite',
 				'status'   => \ActionScheduler_Store::STATUS_PENDING,
 				'per_page' => -1,
 			]
@@ -553,7 +601,7 @@ final class SettlementTest extends LiteIntegrationTestCase {
 			}
 		);
 		$this->assertCount( 1, $notes );
-		$this->assertSame( '1', (string) wc_get_order( $order->get_id() )->get_meta( '_wcsl_late_payment_flagged' ) );
+		$this->assertSame( '1', (string) wc_get_order( $order->get_id() )->get_meta( '_wcsl_refund_flagged' ) );
 		$this->assertSame( CycleStatus::CANCELLED, $this->head( $contract_id )->get_status() );
 		$this->assertSame( [], $this->fired );
 	}

@@ -70,7 +70,7 @@ final class Settlement {
 	/**
 	 * Order meta set once a paid order that bills no cycle was flagged for a refund.
 	 */
-	private const REFUND_FLAGGED_META = '_wcsl_late_payment_flagged';
+	private const REFUND_FLAGGED_META = '_wcsl_refund_flagged';
 
 	/**
 	 * Cycles read per page when looking up the cycle a replaced order billed.
@@ -122,8 +122,9 @@ final class Settlement {
 		}
 
 		$order_id = (int) $order_id;
-		if ( wc_get_order( $order_id ) instanceof WC_Order ) {
-			$this->handle_order( $order_id );
+		$order    = wc_get_order( $order_id );
+		if ( $order instanceof WC_Order ) {
+			$this->settle_or_schedule_retry( $order );
 			return;
 		}
 
@@ -138,18 +139,7 @@ final class Settlement {
 			return;
 		}
 
-		try {
-			$conflict = $this->settle_deleted( $order_id );
-		} catch ( ContractLockedException $e ) {
-			$conflict = HeldLocks::get_refused_conflict( $e );
-		} catch ( Throwable $e ) {
-			$this->log_failure( sprintf( 'Settlement: settling deleted renewal order %d failed: %s', $order_id, $e->getMessage() ), $order_id );
-			return;
-		}
-
-		if ( null !== $conflict ) {
-			$this->schedule_retry( $order_id, $conflict, false );
-		}
+		$this->settle_removed( $order_id );
 	}
 
 	/**
@@ -251,17 +241,27 @@ final class Settlement {
 			return;
 		}
 
+		$this->settle_removed( $order->get_id() );
+	}
+
+	/**
+	 * Settle an unpaid order that is removed or gone. A lock conflict schedules a retry; any
+	 * other failure is logged, not rethrown.
+	 *
+	 * @param int $order_id Order id.
+	 */
+	private function settle_removed( int $order_id ): void {
 		try {
-			$conflict = $this->settle_deleted( $order->get_id() );
+			$conflict = $this->settle_deleted( $order_id );
 		} catch ( ContractLockedException $e ) {
 			$conflict = HeldLocks::get_refused_conflict( $e );
 		} catch ( Throwable $e ) {
-			$this->log_failure( sprintf( 'Settlement: settling removed renewal order %d failed: %s', $order->get_id(), $e->getMessage() ), $order->get_id() );
+			$this->log_failure( sprintf( 'Settlement: settling removed renewal order %d failed: %s', $order_id, $e->getMessage() ), $order_id );
 			return;
 		}
 
 		if ( null !== $conflict ) {
-			$this->schedule_retry( $order->get_id(), $conflict, false );
+			$this->schedule_retry( $order_id, $conflict, false );
 		}
 	}
 
@@ -273,14 +273,13 @@ final class Settlement {
 	 * @return WP_Error|null A lock conflict when another operation holds the lock, else null.
 	 */
 	private function settle_deleted( int $order_id ): ?WP_Error {
-		$linked = Contracts::find_cycles_by_order( $order_id )[0] ?? null;
-		if ( null === $linked ) {
+		$contract_id = self::find_lite_contract_id( $order_id );
+		if ( null === $contract_id ) {
 			return null;
 		}
 
-		$contract_id = $linked->get_contract_id();
-		$lock        = HeldLocks::get( $contract_id );
-		$acquired    = null === $lock;
+		$lock     = HeldLocks::get( $contract_id );
+		$acquired = null === $lock;
 		if ( $acquired ) {
 			$lock = HeldLocks::acquire( $contract_id, self::OPERATION );
 			if ( null === $lock ) {
@@ -291,7 +290,7 @@ final class Settlement {
 		try {
 			$contract = Contracts::get( $contract_id );
 			$cycle    = self::find_order_cycle( $order_id, $contract_id );
-			if ( null !== $contract && Package::EXTENSION_SLUG === $contract->get_extension_slug() && null !== $cycle ) {
+			if ( null !== $contract && null !== $cycle ) {
 				$this->settle_dead( $contract, $cycle, $lock );
 			}
 
@@ -313,10 +312,17 @@ final class Settlement {
 	 */
 	public function handle_order( $order_id ): void {
 		$order = is_numeric( $order_id ) ? wc_get_order( (int) $order_id ) : false;
-		if ( ! $order instanceof WC_Order ) {
-			return;
+		if ( $order instanceof WC_Order ) {
+			$this->settle_or_schedule_retry( $order );
 		}
+	}
 
+	/**
+	 * Settle the order; a lock conflict schedules a retry, any other failure is logged.
+	 *
+	 * @param WC_Order $order The order.
+	 */
+	private function settle_or_schedule_retry( WC_Order $order ): void {
 		try {
 			$conflict = $this->settle( $order );
 		} catch ( ContractLockedException $e ) {
@@ -346,16 +352,15 @@ final class Settlement {
 			return null;
 		}
 
-		$order_id = $fresh_order->get_id();
-		$linked   = Contracts::find_cycles_by_order( $order_id )[0] ?? null;
-		if ( null === $linked ) {
+		$order_id    = $fresh_order->get_id();
+		$contract_id = self::find_lite_contract_id( $order_id );
+		if ( null === $contract_id ) {
 			return $fresh_order->is_paid() ? $this->settle_replaced_paid( $fresh_order, $now ) : null;
 		}
 
-		$utc_now     = ( $now ?? new DateTimeImmutable( 'now', new DateTimeZone( 'UTC' ) ) )->setTimezone( new DateTimeZone( 'UTC' ) );
-		$contract_id = $linked->get_contract_id();
-		$lock        = HeldLocks::get( $contract_id );
-		$acquired    = null === $lock;
+		$utc_now  = ( $now ?? new DateTimeImmutable( 'now', new DateTimeZone( 'UTC' ) ) )->setTimezone( new DateTimeZone( 'UTC' ) );
+		$lock     = HeldLocks::get( $contract_id );
+		$acquired = null === $lock;
 		if ( $acquired ) {
 			$lock = HeldLocks::acquire( $contract_id, self::OPERATION );
 			if ( null === $lock ) {
@@ -365,7 +370,7 @@ final class Settlement {
 
 		try {
 			$contract = Contracts::get( $contract_id );
-			if ( null === $contract || Package::EXTENSION_SLUG !== $contract->get_extension_slug() ) {
+			if ( null === $contract ) {
 				return null;
 			}
 
@@ -825,6 +830,23 @@ final class Settlement {
 	 */
 	public static function is_dead( WC_Order $order ): bool {
 		return $order->has_status( [ OrderStatus::CANCELLED, OrderStatus::TRASH ] );
+	}
+
+	/**
+	 * The contract of the newest cycle linked to the order that is on a Lite contract, or null.
+	 * It only locates the contract: callers re-read it under its lock.
+	 *
+	 * @param int $order_id Order id.
+	 */
+	private static function find_lite_contract_id( int $order_id ): ?int {
+		foreach ( Contracts::find_cycles_by_order( $order_id ) as $cycle ) {
+			$contract = Contracts::get( $cycle->get_contract_id() );
+			if ( null !== $contract && Package::EXTENSION_SLUG === $contract->get_extension_slug() ) {
+				return $contract->get_id();
+			}
+		}
+
+		return null;
 	}
 
 	/**

@@ -131,10 +131,20 @@ final class HeldLocks {
 
 	/**
 	 * The lock conflict for a write the engine refused mid-flow, in the shape of a lost acquire.
+	 * Logged, since the flow may have done part of its work (a charge) before the refusal.
 	 *
 	 * @param ContractLockedException $refused The refused write.
 	 */
 	public static function get_refused_conflict( ContractLockedException $refused ): WP_Error {
+		wc_get_logger()->warning(
+			sprintf( 'HeldLocks: a write to contract %d was refused mid-flow; another operation (%s) holds its lock.', $refused->get_contract_id(), $refused->get_operation() ?? 'unknown' ),
+			[
+				'source'      => Package::EXTENSION_SLUG,
+				'contract_id' => $refused->get_contract_id(),
+				'operation'   => $refused->get_operation(),
+			]
+		);
+
 		return self::build_conflict( $refused->get_contract_id(), $refused->get_operation(), $refused->get_locked_until() );
 	}
 

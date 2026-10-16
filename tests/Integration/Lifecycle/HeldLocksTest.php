@@ -88,9 +88,10 @@ final class HeldLocksTest extends LiteIntegrationTestCase {
 		$lock->release();
 	}
 
-	public function test_a_refused_write_is_the_same_conflict(): void {
+	public function test_a_refused_write_is_the_same_conflict_and_is_logged(): void {
 		$contract_id = $this->seed_contract();
 		$lock        = $this->hold_lock( $contract_id, 'cancel' );
+		$this->capture_log();
 
 		try {
 			Contracts::update( $contract_id, [ 'next_payment_gmt' => '2099-03-01 00:00:00' ] );
@@ -100,6 +101,8 @@ final class HeldLocksTest extends LiteIntegrationTestCase {
 		} finally {
 			$lock->release();
 		}
+
+		$this->assertTrue( $this->has_logged( sprintf( 'a write to contract %d was refused mid-flow; another operation (cancel)', $contract_id ) ) );
 	}
 
 	public function test_a_missing_or_foreign_contract_is_no_conflict(): void {
