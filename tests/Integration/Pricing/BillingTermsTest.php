@@ -21,6 +21,8 @@ use DateTimeZone;
  */
 final class BillingTermsTest extends LiteIntegrationTestCase {
 
+	use ListsValidationErrors;
+
 	public function test_reads_the_plan_billing_policy(): void {
 		$terms = BillingTerms::from_plan(
 			$this->make_plan(
@@ -192,92 +194,109 @@ final class BillingTermsTest extends LiteIntegrationTestCase {
 		$this->assertNull( BillingTerms::from_plan( $plan ) );
 	}
 
-	/**
-	 * @dataProvider provide_billing_payloads_to_validate
-	 *
-	 * @param array<string, mixed>|null $policy  Billing payload.
-	 * @param string|null               $code    Expected error code, or null when billable.
-	 * @param string                    $field   Expected `field` data.
-	 * @param string                    $message Expected translated message.
-	 */
-	public function test_validate_reports_why_a_payload_is_not_billable( ?array $policy, ?string $code, string $field = '', string $message = '' ): void {
-		$errors = BillingTerms::validate( $policy );
+	public function test_a_billable_payload_has_no_errors(): void {
+		$policy = [
+			'period'         => 'week',
+			'interval'       => 2,
+			'max_cycles'     => 6,
+			'trial_duration' => [
+				'length' => 7,
+				'unit'   => 'day',
+			],
+		];
 
-		if ( null === $code ) {
-			$this->assertFalse( $errors->has_errors() );
-			return;
-		}
-
-		$this->assertSame( [ $code ], $errors->get_error_codes() );
-		$this->assertSame( [ $message ], $errors->get_error_messages( $code ) );
-		$this->assertSame( $field, $errors->get_error_data( $code )['field'] );
+		$this->assertFalse( BillingTerms::validate( $policy )->has_errors() );
+		$this->assertTrue( BillingTerms::is_billable( $policy ) );
 	}
 
 	/**
-	 * @return array<string, array<int, mixed>>
+	 * @dataProvider provide_billing_payloads_to_validate
+	 *
+	 * @param array<string, mixed>|null                                  $policy   Billing payload.
+	 * @param list<array{0: string, 1: string, 2: array<string, mixed>}> $expected Every error as code, field and params.
+	 */
+	public function test_validate_reports_why_a_payload_is_not_billable( ?array $policy, array $expected ): void {
+		$this->assertSame( $expected, $this->get_validation_errors( BillingTerms::validate( $policy ) ) );
+	}
+
+	/**
+	 * @return array<string, array{0: array<string, mixed>|null, 1: list<array{0: string, 1: string, 2: array<string, mixed>}>}>
 	 */
 	public function provide_billing_payloads_to_validate(): array {
-		$cadence = 'billing_policy must have a period (day, week, month or year) and a positive interval.';
+		$units = [ 'allowed' => [ 'day', 'week', 'month', 'year' ] ];
 
 		return [
-			'billable'           => [
-				[
-					'period'         => 'week',
-					'interval'       => 2,
-					'trial_duration' => [
-						'length' => 7,
-						'unit'   => 'day',
-					],
-				],
-				null,
-			],
-			'null'               => [ null, 'required', 'billing_policy', $cadence ],
-			'no period'          => [
+			'null'                       => [ null, [ [ 'required', 'billing_policy', [] ] ] ],
+			'no period'                  => [
 				[ 'interval' => 1 ],
-				'invalid_value',
-				'billing_policy',
-				$cadence,
+				[ [ 'required', 'billing_policy.period', [] ] ],
 			],
-			'unknown period'     => [
+			'unknown period'             => [
 				[
 					'period'   => 'fortnight',
 					'interval' => 1,
 				],
-				'invalid_value',
-				'billing_policy',
-				$cadence,
+				[ [ 'not_in_enum', 'billing_policy.period', $units ] ],
 			],
-			'zero max cycles'    => [
+			'zero interval'              => [
+				[
+					'period'   => 'month',
+					'interval' => 0,
+				],
+				[ [ 'out_of_bounds', 'billing_policy.interval', [ 'min' => 1 ] ] ],
+			],
+			'string interval'            => [
+				[
+					'period'   => 'month',
+					'interval' => '2',
+				],
+				[ [ 'invalid_type', 'billing_policy.interval', [ 'type' => 'integer' ] ] ],
+			],
+			'zero max cycles'            => [
 				[
 					'period'     => 'month',
 					'interval'   => 1,
 					'max_cycles' => 0,
 				],
-				'out_of_bounds',
-				'billing_policy[max_cycles]',
-				'billing_policy[max_cycles] must be a positive integer, or null for no limit.',
+				[ [ 'out_of_bounds', 'billing_policy.max_cycles', [ 'min' => 1 ] ] ],
 			],
-			'min above max'      => [
+			'zero interval and max'      => [
+				[
+					'period'     => 'month',
+					'interval'   => 0,
+					'max_cycles' => 0,
+				],
+				[
+					[ 'out_of_bounds', 'billing_policy.interval', [ 'min' => 1 ] ],
+					[ 'out_of_bounds', 'billing_policy.max_cycles', [ 'min' => 1 ] ],
+				],
+			],
+			'negative max cycles'        => [
+				[
+					'period'     => 'month',
+					'interval'   => 1,
+					'max_cycles' => -1,
+				],
+				[ [ 'out_of_bounds', 'billing_policy.max_cycles', [ 'min' => 0 ] ] ],
+			],
+			'leading-zero max cycles'    => [
+				[
+					'period'     => 'month',
+					'interval'   => 1,
+					'max_cycles' => '06',
+				],
+				[ [ 'out_of_bounds', 'billing_policy.max_cycles', [ 'min' => 1 ] ] ],
+			],
+			'min above max'              => [
 				[
 					'period'     => 'month',
 					'interval'   => 1,
 					'min_cycles' => 5,
 					'max_cycles' => 2,
 				],
-				'out_of_bounds',
-				'billing_policy[min_cycles]',
-				'billing_policy[min_cycles] must be less than or equal to 2.',
+				[ [ 'out_of_bounds', 'billing_policy.min_cycles', [ 'max' => 2 ] ] ],
 			],
-			'string interval'    => [
-				[
-					'period'   => 'month',
-					'interval' => '2',
-				],
-				'invalid_type',
-				'billing_policy[interval]',
-				'billing_policy[interval] is not of type integer.',
-			],
-			'unknown trial unit' => [
+			'unknown trial unit'         => [
 				[
 					'period'         => 'month',
 					'interval'       => 1,
@@ -286,11 +305,45 @@ final class BillingTermsTest extends LiteIntegrationTestCase {
 						'unit'   => 'fortnight',
 					],
 				],
-				'not_in_enum',
-				'billing_policy[trial_duration][unit]',
-				'billing_policy[trial_duration][unit] is not one of day, week, month, year.',
+				[ [ 'not_in_enum', 'billing_policy.trial_duration.unit', $units ] ],
+			],
+			'zero trial length'          => [
+				[
+					'period'         => 'month',
+					'interval'       => 1,
+					'trial_duration' => [
+						'length' => 0,
+						'unit'   => 'day',
+					],
+				],
+				[ [ 'out_of_bounds', 'billing_policy.trial_duration.length', [ 'min' => 1 ] ] ],
+			],
+			'every engine field at once' => [
+				[
+					'period'     => 'fortnight',
+					'interval'   => '2',
+					'max_cycles' => -1,
+				],
+				[
+					[ 'not_in_enum', 'billing_policy.period', $units ],
+					[ 'invalid_type', 'billing_policy.interval', [ 'type' => 'integer' ] ],
+					[ 'out_of_bounds', 'billing_policy.max_cycles', [ 'min' => 0 ] ],
+				],
 			],
 		];
+	}
+
+	/**
+	 * `is_billable()` and `validate()` apply one rule.
+	 *
+	 * @dataProvider provide_billing_payloads_to_validate
+	 * @dataProvider provide_unusable_plan_billing
+	 * @dataProvider provide_unbillable_cycle_and_trial_payloads
+	 *
+	 * @param array<string, mixed>|null $policy Billing payload.
+	 */
+	public function test_is_billable_agrees_with_validate( ?array $policy ): void {
+		$this->assertSame( ! BillingTerms::validate( $policy )->has_errors(), BillingTerms::is_billable( $policy ) );
 	}
 
 	public function test_validate_keeps_the_engine_params(): void {
@@ -305,26 +358,36 @@ final class BillingTermsTest extends LiteIntegrationTestCase {
 
 		$this->assertSame(
 			[
-				'field'  => 'billing_policy[min_cycles]',
+				'field'  => 'billing_policy.min_cycles',
 				'params' => [ 'max' => 2 ],
 			],
 			$errors->get_error_data( 'out_of_bounds' )
 		);
 	}
 
+	public function test_validate_reports_a_null_payload_with_the_engine_message(): void {
+		$this->assertSame( 'This field is required.', BillingTerms::validate( null )->get_error_message( 'required' ) );
+	}
+
 	public function test_validate_translates_its_own_messages(): void {
 		$translate = static function ( string $translation, string $text, string $domain ): string {
-			return 'woocommerce-subscriptions-lite' === $domain && false !== strpos( $text, 'must have a period' ) ? 'Translated %s' : $translation;
+			return 'woocommerce-subscriptions-lite' === $domain && 'Must be a positive integer, or empty for no limit.' === $text ? 'Translated cycle limit' : $translation;
 		};
 		add_filter( 'gettext', $translate, 10, 3 );
 
 		try {
-			$errors = BillingTerms::validate( null );
+			$errors = BillingTerms::validate(
+				[
+					'period'     => 'month',
+					'interval'   => 1,
+					'max_cycles' => 0,
+				]
+			);
 		} finally {
 			remove_filter( 'gettext', $translate, 10 );
 		}
 
-		$this->assertSame( 'Translated billing_policy', $errors->get_error_message( 'required' ) );
+		$this->assertSame( [ 'Translated cycle limit' ], $errors->get_error_messages( 'out_of_bounds' ) );
 	}
 
 	public function test_get_first_renewal_from_applies_the_trial(): void {
