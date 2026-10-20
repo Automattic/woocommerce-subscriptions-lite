@@ -130,10 +130,19 @@ final class ContractCreationHandler {
 			return;
 		}
 		$succeeded = $this->create_for_order( $order );
-		if ( $succeeded ) {
-			return;
+		if ( ! $succeeded ) {
+			$this->record_failed_resume( $order );
 		}
+	}
 
+	/**
+	 * Count a failed resume run on the order; at {@see self::MAX_RESUME_ATTEMPTS} drop the
+	 * scheduled resume and note the order once. A failure to record it is logged.
+	 *
+	 * @param WC_Order $order The order.
+	 */
+	private function record_failed_resume( WC_Order $order ): void {
+		$order_id = $order->get_id();
 		try {
 			$attempts = (int) $order->get_meta( self::RESUME_ATTEMPTS_META ) + 1;
 			$order->update_meta_data( self::RESUME_ATTEMPTS_META, (string) $attempts );
@@ -192,7 +201,7 @@ final class ContractCreationHandler {
 		}
 		$existing = Contracts::find_by_origin_order( $order_id );
 		if ( [] !== $existing ) {
-			return $this->resume_drafts( $order, $existing, $outcome['plan'] );
+			return $this->resume_drafts( $order, $existing );
 		}
 
 		if ( null !== $outcome['reason'] ) {
@@ -210,7 +219,8 @@ final class ContractCreationHandler {
 				// parse) fails the same way every time, so the deferral flag stops the retries;
 				// any other failure (a database error) may be transient: it gets a note but no
 				// flag, so a later paid transition still retries.
-				if ( ! $this->note_stuck_draft( $order ) ) {
+				$has_contract = $this->note_stuck_draft( $order );
+				if ( ! $has_contract ) {
 					if ( $e instanceof LogicException ) {
 						$this->record_deferral( $order, self::REASON_CREATION_FAILED );
 					} else {
@@ -229,36 +239,42 @@ final class ContractCreationHandler {
 				sprintf( 'ContractCreationHandler: the contract for order %d was already created.', $order_id ),
 				[ 'source' => self::LOG_SOURCE ]
 			);
-			return $this->resume_drafts( $order, Contracts::find_by_origin_order( $order_id ), $outcome['plan'] );
+			return $this->resume_drafts( $order, Contracts::find_by_origin_order( $order_id ) );
 		}
 
 		return true;
 	}
 
 	/**
-	 * Resume each Lite draft of the order: a creation cut short. A draft whose lock is live (its
-	 * creation may still be running) is resumed later; a failed resume is resumed again past the
-	 * lock's expiry, within the attempt cap.
+	 * Resume each Lite draft of the order, with the draft's own plan: a creation cut short. A
+	 * draft whose lock is live (its creation may still be running) is resumed later; a failed
+	 * resume, a draft whose plan no longer resolves included, is resumed again past the lock's
+	 * expiry, within the attempt cap.
 	 *
 	 * @param WC_Order                 $order     The paid order.
 	 * @param array<int, ContractView> $contracts The order's contracts.
-	 * @param PlanView|null            $plan      The order's selling plan.
 	 * @return bool False when a resume failed.
 	 */
-	private function resume_drafts( WC_Order $order, array $contracts, ?PlanView $plan ): bool {
-		$resumed = true;
+	private function resume_drafts( WC_Order $order, array $contracts ): bool {
+		$resumed  = true;
+		$resolver = new ProductPlanResolver();
 		foreach ( $contracts as $contract ) {
 			if ( Package::EXTENSION_SLUG !== $contract->get_extension_slug() || ContractStatus::DRAFT !== $contract->get_status() ) {
 				continue;
 			}
-			if ( ! $plan instanceof PlanView ) {
-				$this->log_error( sprintf( 'draft contract %d of order %d cannot be resumed: the order no longer resolves to one plan.', $contract->get_id(), $order->get_id() ) );
+			$plan = $resolver->get_line_plan( (int) $contract->get_selling_plan_id() );
+			if ( null === $plan ) {
+				$resumed = false;
+				$this->log_error( sprintf( 'draft contract %d of order %d cannot be resumed: its plan no longer resolves.', $contract->get_id(), $order->get_id() ) );
+				self::schedule_resume( $order->get_id(), ContractLock::TTL_SECONDS + ScheduledActions::LOCK_RETRY_DELAY_SECONDS );
 				continue;
 			}
 
 			try {
 				$locked = ! $this->resume_draft( $order, $contract->get_id(), $plan );
 			} catch ( ContractLockedException $e ) {
+				// Refused mid-flow: logged with the holder's operation, then resumed later.
+				HeldLocks::get_refused_conflict( $e );
 				$locked = true;
 			} catch ( Throwable $e ) {
 				$resumed = false;
@@ -285,7 +301,7 @@ final class ContractCreationHandler {
 	 *
 	 * @param WC_Order $order       The paid order.
 	 * @param int      $contract_id The draft.
-	 * @param PlanView $plan        The order's selling plan.
+	 * @param PlanView $plan        The draft's selling plan.
 	 * @return bool False when its lock is not acquired (held by another operation, or the draft
 	 *              was deleted): resume it later. True once the draft is resumed or is no draft.
 	 */
