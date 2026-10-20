@@ -54,9 +54,8 @@ final class PlanWriteValidation {
 			return;
 		}
 
-		$billing_errors = $this->billing_needs_validation( $plan ) ? BillingTerms::validate( $plan->get_billing_policy() ) : [];
-		foreach ( $billing_errors as $message ) {
-			$errors->add( 'rest_invalid_param', $message, [ 'status' => 400 ] );
+		if ( $this->billing_needs_validation( $plan ) ) {
+			$errors->merge_from( BillingTerms::validate( $plan->get_billing_policy() ) );
 		}
 
 		$pricing_policy = $plan->get_pricing_policy();

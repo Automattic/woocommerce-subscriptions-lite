@@ -25,12 +25,15 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Pricing;
 
+use Automattic\WooCommerce\SubscriptionsEngine\Api\ValidationException;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\PlanView;
+use Automattic\WooCommerce\SubscriptionsEngine\Core\Support\InvalidInputException;
+use Automattic\WooCommerce\SubscriptionsEngine\Core\Support\ValidationErrorCode;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\ValueObject\BillingPolicy;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 use DateTimeImmutable;
 use DateTimeZone;
-use DomainException;
+use WP_Error;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -41,9 +44,7 @@ final class BillingTerms {
 
 	private const PERIODS = [ 'day', 'week', 'month', 'year' ];
 
-	private const CADENCE_MESSAGE = 'billing_policy must have a period (day, week, month or year) and a positive interval.';
-
-	private const MAX_CYCLES_MESSAGE = 'billing_policy max_cycles must be a positive integer, or null for no limit.';
+	private const FIELD = 'billing_policy';
 
 	/**
 	 * Bound on the forward roll, so a fine-grained cadence far behind cannot loop unboundedly.
@@ -106,7 +107,7 @@ final class BillingTerms {
 
 		$policy = $plan->get_billing_policy();
 
-		return [] === self::validate( $policy ) ? self::from_policy( $policy ) : null;
+		return self::validate( $policy )->has_errors() ? null : self::from_policy( $policy );
 	}
 
 	/**
@@ -114,28 +115,72 @@ final class BillingTerms {
 	 * known period and a positive interval, a `max_cycles` that is null (no limit) or
 	 * a positive integer, and it must parse through the engine's `BillingPolicy` with
 	 * a first renewal date, exactly as contract creation reads it (an integer
-	 * interval, a known trial unit, consistent cycle bounds).
+	 * interval, a known trial unit, consistent cycle bounds). Each error carries an
+	 * engine error code, a translated message and `field` / `params` data.
 	 *
 	 * @param array<string, mixed>|null $policy Billing payload.
-	 * @return array<int, string> Error messages; empty when billable.
+	 * @return WP_Error Validation errors; none when billable.
 	 */
-	public static function validate( ?array $policy ): array {
+	public static function validate( ?array $policy ): WP_Error {
+		$errors = new WP_Error();
+
 		if ( null === $policy || null === self::from_policy( $policy ) ) {
-			return [ self::CADENCE_MESSAGE ];
+			$errors->add(
+				null === $policy ? ValidationErrorCode::REQUIRED : ValidationErrorCode::INVALID_VALUE,
+				sprintf(
+					/* translators: %s: field name, billing_policy. */
+					__( '%s must have a period (day, week, month or year) and a positive interval.', 'woocommerce-subscriptions-lite' ),
+					self::FIELD
+				),
+				[
+					'field'  => self::FIELD,
+					'params' => [],
+				]
+			);
+			return $errors;
 		}
 
 		// The engine counts cycles against max_cycles, so 0 would read as already reached.
 		if ( null !== ( $policy['max_cycles'] ?? null ) && null === self::positive_int( $policy['max_cycles'] ) ) {
-			return [ self::MAX_CYCLES_MESSAGE ];
+			$field = self::FIELD . '[max_cycles]';
+			$errors->add(
+				ValidationErrorCode::OUT_OF_BOUNDS,
+				sprintf(
+					/* translators: %s: field name, billing_policy[max_cycles]. */
+					__( '%s must be a positive integer, or null for no limit.', 'woocommerce-subscriptions-lite' ),
+					$field
+				),
+				[
+					'field'  => $field,
+					'params' => [ 'min' => 1 ],
+				]
+			);
+			return $errors;
 		}
 
 		try {
 			self::parse_first_renewal( $policy, new DateTimeImmutable( '2000-01-01', new DateTimeZone( 'UTC' ) ) );
-		} catch ( DomainException $e ) {
-			return [ 'billing_policy: ' . $e->getMessage() ];
+		} catch ( InvalidInputException $e ) {
+			$errors->merge_from( ValidationException::from_core( self::with_full_path( $e ) )->get_errors() );
 		}
 
-		return [];
+		return $errors;
+	}
+
+	/**
+	 * The engine error rebuilt with its field nested under `billing_policy`:
+	 * `trial_duration[length]` becomes `billing_policy[trial_duration][length]`.
+	 *
+	 * @param InvalidInputException $e Error reported by the engine's `BillingPolicy`.
+	 */
+	private static function with_full_path( InvalidInputException $e ): InvalidInputException {
+		$field   = $e->get_field();
+		$bracket = strpos( $field, '[' );
+		$path    = false === $bracket
+			? self::FIELD . '[' . $field . ']'
+			: self::FIELD . '[' . substr( $field, 0, $bracket ) . ']' . substr( $field, $bracket );
+
+		return new InvalidInputException( $e->get_error_code(), $path, $e->getMessage(), $e->get_params() );
 	}
 
 	/**
@@ -143,7 +188,7 @@ final class BillingTerms {
 	 *
 	 * @param PlanView          $plan  Plan.
 	 * @param DateTimeImmutable $start Contract start.
-	 * @throws DomainException When the billing payload is not billable.
+	 * @throws InvalidInputException When the billing payload is not billable.
 	 */
 	public static function get_first_renewal_from( PlanView $plan, DateTimeImmutable $start ): DateTimeImmutable {
 		return self::parse_first_renewal( $plan->get_billing_policy() ?? [], $start );
@@ -154,7 +199,7 @@ final class BillingTerms {
 	 *
 	 * @param array<string, mixed> $policy Billing payload.
 	 * @param DateTimeImmutable    $start  Contract start.
-	 * @throws DomainException When the payload does not parse or has no usable cadence.
+	 * @throws InvalidInputException When the payload does not parse or has no usable cadence.
 	 */
 	private static function parse_first_renewal( array $policy, DateTimeImmutable $start ): DateTimeImmutable {
 		return BillingPolicy::from_array( $policy )->compute_first_renewal_from( $start );
