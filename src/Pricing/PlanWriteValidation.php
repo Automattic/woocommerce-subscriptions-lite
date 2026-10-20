@@ -13,7 +13,9 @@
  * prices the carts and orders that carry it). Only a write to a plan that is not
  * active and keeps its stored billing skips it, so a plan with unusable stored
  * billing can still be archived; restoring it checks billing again. Each problem is
- * added to the collector; the plan is stored exactly as sent.
+ * added to the collector with an engine error code, a translated message and
+ * `field` / `params` data (`billing_policy[max_cycles]`), so the engine's plans
+ * route reports it under that request arg. The plan is stored exactly as sent.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Pricing
  */
@@ -43,7 +45,7 @@ final class PlanWriteValidation {
 	}
 
 	/**
-	 * Add an error for each invalid billing or pricing term of a Lite plan.
+	 * Add a coded error for each invalid billing or pricing term of a Lite plan.
 	 *
 	 * @param WP_Error $errors         Error collector.
 	 * @param PlanView $plan           View of the plan about to be written.
