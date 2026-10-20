@@ -141,11 +141,11 @@ final class StatusLabels {
 	}
 
 	/**
-	 * Humanize a slug as a last resort: `pending-cancellation` -> `Pending cancellation`.
+	 * Humanize a status slug as a last resort: `pending-cancellation` -> `Pending cancellation`.
 	 *
-	 * @param string $slug Raw slug.
+	 * @param string $slug Raw status slug.
 	 */
 	private static function humanize( string $slug ): string {
-		return ucfirst( str_replace( [ '-', '_' ], ' ', $slug ) );
+		return ucfirst( str_replace( '-', ' ', $slug ) );
 	}
 }
