@@ -603,6 +603,7 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 		$this->assertInstanceOf( WC_Order::class, $order );
 		$this->assertSame( CycleStatus::BILLED, $this->head( $contract_id )->get_status() );
 		$this->assertSame( 2, $this->head( $contract_id )->get_count() );
+		$this->assert_lock_released( $contract_id );
 	}
 
 	public function test_renew_now_refuses_a_customer_hold_and_another_extensions_contract(): void {
@@ -637,6 +638,7 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 		$this->assertInstanceOf( WC_Order::class, $order );
 		$this->assertSame( $failed->get_id(), $order->get_id() );
 		$this->assertSame( ContractStatus::ACTIVE, $this->get_contract( $contract_id )->get_status() );
+		$this->assert_lock_released( $contract_id );
 	}
 
 	public function test_a_charge_settled_by_the_gateway_status_change_uses_the_held_lock(): void {
@@ -649,15 +651,11 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 		$this->assertInstanceOf( WC_Order::class, $order );
 		$this->assertSame( CycleStatus::BILLED, $this->head( $contract_id )->get_status() );
 		$this->assertSame( $this->period_end, $this->get_contract( $contract_id )->get_next_payment_gmt() );
-		$retries = as_get_scheduled_actions(
-			[
-				'hook'         => 'woocommerce_subscriptions_lite_settle_order',
-				'group'        => 'woocommerce-subscriptions-lite',
-				'status'       => \ActionScheduler_Store::STATUS_PENDING,
-				'date'         => as_get_datetime_object( time() + ContractLock::TTL_SECONDS ),
-				'date_compare' => '<',
-			],
-			'ids'
+		$retries = array_filter(
+			$this->get_pending_actions( 'woocommerce_subscriptions_lite_settle_order' ),
+			static function ( $action ): bool {
+				return $action->get_schedule()->get_date()->getTimestamp() < time() + ContractLock::TTL_SECONDS;
+			}
 		);
 		$this->assertSame( [], $retries, 'No settlement retry: only the charge settlement is pending.' );
 		$this->assertFalse( $this->has_logged( 'Settlement: settling renewal order' ) );

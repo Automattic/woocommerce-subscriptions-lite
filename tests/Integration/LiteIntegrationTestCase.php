@@ -123,6 +123,47 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Pending Lite Action Scheduler actions for `$hook`, limited to `$args` when given.
+	 *
+	 * @param string                    $hook Action hook.
+	 * @param array<string, mixed>|null $args Exact action arguments, or null for any.
+	 * @return array<int, \ActionScheduler_Action> Actions by id.
+	 */
+	protected function get_pending_actions( string $hook, ?array $args = null ): array {
+		$query = [
+			'hook'     => $hook,
+			'group'    => 'woocommerce-subscriptions-lite',
+			'status'   => \ActionScheduler_Store::STATUS_PENDING,
+			'per_page' => -1,
+		];
+		if ( null !== $args ) {
+			$query['args'] = $args;
+		}
+
+		return as_get_scheduled_actions( $query );
+	}
+
+	/**
+	 * The order's notes containing `$needle`.
+	 *
+	 * @param int    $order_id Order id.
+	 * @param string $needle   Text to look for.
+	 * @return array<int, string>
+	 */
+	protected function get_order_notes_containing( int $order_id, string $needle ): array {
+		$notes = wp_list_pluck( wc_get_order_notes( [ 'order_id' => $order_id ] ), 'content' );
+
+		return array_values(
+			array_filter(
+				$notes,
+				static function ( $note ) use ( $needle ): bool {
+					return false !== strpos( (string) $note, $needle );
+				}
+			)
+		);
+	}
+
+	/**
 	 * Create a customer user.
 	 *
 	 * @param array<string, mixed> $overrides WP user field overrides.

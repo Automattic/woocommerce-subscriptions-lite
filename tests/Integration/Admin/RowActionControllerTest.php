@@ -83,6 +83,7 @@ final class RowActionControllerTest extends LiteIntegrationTestCase {
 		$order = wc_get_order( $this->charged_order_ids[0] );
 		$this->assertInstanceOf( WC_Order::class, $order );
 		$this->assertStringContainsString( '#' . $order->get_order_number(), $result->message(), 'The renewal order number is surfaced.' );
+		$this->assert_lock_released( $contract_id );
 	}
 
 	public function test_renew_now_reports_a_customer_hold_as_not_renewable(): void {
@@ -218,6 +219,7 @@ final class RowActionControllerTest extends LiteIntegrationTestCase {
 		$this->assertTrue( $result->is_success() );
 		$this->assertSame( 1, $fired, 'The Lite cancelled action fires.' );
 		$this->assertNull( $this->get_contract( $contract_id )->get_next_payment_gmt() );
+		$this->assert_lock_released( $contract_id );
 	}
 
 	public function test_the_real_cancel_reports_a_missing_contract_as_not_found(): void {

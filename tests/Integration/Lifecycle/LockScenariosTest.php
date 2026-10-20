@@ -27,6 +27,7 @@ use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\RenewalProcessor;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\Settlement;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
+use Automattic\WooCommerce\SubscriptionsLite\Utilities\ScheduledActions;
 use DateTimeImmutable;
 use DateTimeZone;
 use RuntimeException;
@@ -345,16 +346,14 @@ final class LockScenariosTest extends LiteIntegrationTestCase {
 		$lock = $this->hold_lock( $contract_id, 'cancel' );
 		$order->payment_complete();
 		$this->assertSame( CycleStatus::PENDING, $this->head( $contract_id )->get_status() );
-		$this->assertNotFalse(
-			as_has_scheduled_action(
-				'woocommerce_subscriptions_lite_settle_order',
-				[
-					'order_id' => $order->get_id(),
-					'paid'     => true,
-				],
-				'woocommerce-subscriptions-lite'
-			)
+		$retries = $this->get_pending_actions(
+			'woocommerce_subscriptions_lite_settle_order',
+			[
+				'order_id' => $order->get_id(),
+				'paid'     => true,
+			]
 		);
+		$this->assertCount( 1, $retries );
 
 		$lock->release();
 		do_action( 'woocommerce_subscriptions_lite_settle_order', $order->get_id() );
@@ -370,15 +369,11 @@ final class LockScenariosTest extends LiteIntegrationTestCase {
 	 * @return array<int, int> Unix timestamps.
 	 */
 	private function pending_settlements( int $order_id ): array {
-		$actions = as_get_scheduled_actions(
+		$actions = $this->get_pending_actions(
+			'woocommerce_subscriptions_lite_settle_order',
 			[
-				'hook'   => 'woocommerce_subscriptions_lite_settle_order',
-				'args'   => [
-					'order_id' => $order_id,
-					'paid'     => false,
-				],
-				'group'  => 'woocommerce-subscriptions-lite',
-				'status' => \ActionScheduler_Store::STATUS_PENDING,
+				'order_id' => $order_id,
+				'paid'     => false,
 			]
 		);
 
@@ -406,6 +401,7 @@ final class LockScenariosTest extends LiteIntegrationTestCase {
 		$this->support_engine_charges( 'cod', 'paid' );
 		$resume = $this->interrupt_billing_writes();
 		$lock   = $this->hold_lock( $contract_id, RenewalProcessor::OPERATION );
+		$before = time();
 		try {
 			// Registered but never released here: the request dies holding it.
 			HeldLocks::register( $lock );
@@ -425,7 +421,9 @@ final class LockScenariosTest extends LiteIntegrationTestCase {
 		$this->assertNull( $contract->get_next_payment_gmt(), 'No due moment: the due scan never repairs it.' );
 		$scheduled = $this->pending_settlements( $order->get_id() );
 		$this->assertCount( 1, $scheduled );
-		$this->assertGreaterThanOrEqual( time() + ContractLock::TTL_SECONDS - 60, $scheduled[0], 'Scheduled past the lock expiry.' );
+		$delay = ContractLock::TTL_SECONDS + ScheduledActions::LOCK_RETRY_DELAY_SECONDS;
+		$this->assertGreaterThanOrEqual( $before + $delay, $scheduled[0], 'Scheduled the retry delay past the lock expiry.' );
+		$this->assertLessThanOrEqual( time() + $delay, $scheduled[0] );
 		$charges = $this->charge_count();
 
 		$this->expire_held_locks();
@@ -436,6 +434,59 @@ final class LockScenariosTest extends LiteIntegrationTestCase {
 		$this->assertSame( ContractStatus::ACTIVE, $contract->get_status() );
 		$this->assertNotNull( $contract->get_next_payment_gmt(), 'Re-armed.' );
 		$this->assertSame( $charges, $this->charge_count(), 'The scheduled settlement never charges.' );
+	}
+
+	/**
+	 * A Renew now charge on an active contract, due only next month, whose request dies after
+	 * the gateway marked the order paid: dispatch does not reach it before that date, so the
+	 * settlement scheduled before the charge is what records the payment.
+	 */
+	public function test_a_charge_cut_short_on_an_active_contract_is_settled_by_its_scheduled_settlement(): void {
+		$this->support_engine_charges( 'cod', 'paid' );
+		$contract_id = $this->create_contract(
+			$this->create_customer(),
+			[
+				'payment_method' => 'cod',
+				'date_paid'      => $this->now()->format( 'Y-m-d H:i:s' ),
+			]
+		);
+		$due_at      = $this->get_contract( $contract_id )->get_next_payment_gmt();
+		$this->assertGreaterThan( $this->now()->format( 'Y-m-d H:i:s' ), (string) $due_at, 'Due in the future.' );
+
+		$resume = $this->interrupt_billing_writes();
+		$lock   = $this->hold_lock( $contract_id, RenewalProcessor::OPERATION );
+		try {
+			// Registered but never released here: the request dies holding it.
+			HeldLocks::register( $lock );
+			( new RenewalProcessor() )->renew_now( $contract_id );
+			$this->fail( 'Expected the request to die.' );
+		} catch ( RuntimeException $e ) {
+			$this->assertSame( 'The request died.', $e->getMessage() );
+		} finally {
+			HeldLocks::unregister( $lock );
+			$resume();
+		}
+
+		$order = $this->renewal_orders()[0];
+		$this->assertTrue( wc_get_order( $order->get_id() )->is_paid(), 'Charged but not recorded.' );
+		$this->assertSame( CycleStatus::PENDING, $this->head( $contract_id )->get_status() );
+		$contract = $this->get_contract( $contract_id );
+		$this->assertSame( ContractStatus::ACTIVE, $contract->get_status() );
+		$this->assertSame( $due_at, $contract->get_next_payment_gmt(), 'Still due next month.' );
+		$this->assertCount( 1, $this->pending_settlements( $order->get_id() ) );
+		$charges = $this->charge_count();
+
+		$this->expire_held_locks();
+		$this->assertSame( 0, $this->run_due_dispatch( $this->now() ), 'Not due: dispatch does not recover it.' );
+		do_action( 'woocommerce_subscriptions_lite_settle_order', $order->get_id() );
+
+		$this->assertSame( CycleStatus::BILLED, $this->head( $contract_id )->get_status() );
+		$this->assertSame( $order->get_id(), $this->head( $contract_id )->get_order_id() );
+		$contract = $this->get_contract( $contract_id );
+		$this->assertSame( ContractStatus::ACTIVE, $contract->get_status() );
+		$this->assertGreaterThan( (string) $due_at, (string) $contract->get_next_payment_gmt(), 'The payment is recorded: the next due moment moves on.' );
+		$this->assertSame( $charges, $this->charge_count(), 'The scheduled settlement never charges.' );
+		$this->assert_lock_released( $contract_id );
 	}
 
 	/**

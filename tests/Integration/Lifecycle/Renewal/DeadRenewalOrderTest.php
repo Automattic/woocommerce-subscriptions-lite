@@ -299,22 +299,6 @@ final class DeadRenewalOrderTest extends LiteIntegrationTestCase {
 		$this->assertSame( ContractStatus::ACTIVE, $this->get_contract( $contract_id )->get_status() );
 	}
 
-	/**
-	 * Notes on an order asking for a refund of this payment.
-	 *
-	 * @param int $order_id Order id.
-	 */
-	private function sole_refund_notes( int $order_id ): array {
-		return array_values(
-			array_filter(
-				wp_list_pluck( wc_get_order_notes( [ 'order_id' => $order_id ] ), 'content' ),
-				static function ( $note ): bool {
-					return false !== strpos( (string) $note, 'Refund this payment' );
-				}
-			)
-		);
-	}
-
 	public function test_a_replaced_order_paid_after_its_renewal_is_gone_is_flagged_for_a_refund(): void {
 		[ , $order ] = $this->replace_a_cancelled_renewal( 'failed' );
 		$replaced    = wc_get_order( $order->get_id() );
@@ -324,7 +308,7 @@ final class DeadRenewalOrderTest extends LiteIntegrationTestCase {
 		$replaced->payment_complete();
 		wc_get_order( $order->get_id() )->update_status( OrderStatus::COMPLETED );
 
-		$notes = $this->sole_refund_notes( $order->get_id() );
+		$notes = $this->get_order_notes_containing( $order->get_id(), 'Refund this payment' );
 		$this->assertCount( 1, $notes, 'Flagged once.' );
 		$this->assertStringContainsString( 'no longer exists', $notes[0] );
 	}
@@ -342,7 +326,7 @@ final class DeadRenewalOrderTest extends LiteIntegrationTestCase {
 
 		wc_get_order( $order->get_id() )->payment_complete();
 
-		$notes = $this->sole_refund_notes( $order->get_id() );
+		$notes = $this->get_order_notes_containing( $order->get_id(), 'Refund this payment' );
 		$this->assertCount( 1, $notes );
 		$this->assertStringContainsString( 'status: cancelled', $notes[0] );
 		$this->assertSame( $replacement_id, $this->head( $contract_id )->get_order_id() );
@@ -366,7 +350,7 @@ final class DeadRenewalOrderTest extends LiteIntegrationTestCase {
 			remove_filter( 'query', $lose );
 		}
 
-		$notes = $this->sole_refund_notes( $order->get_id() );
+		$notes = $this->get_order_notes_containing( $order->get_id(), 'Refund this payment' );
 		$this->assertCount( 1, $notes );
 		$this->assertStringContainsString( 'could not be moved back', $notes[0] );
 		$head = $this->head( $contract_id );

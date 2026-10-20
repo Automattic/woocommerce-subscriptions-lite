@@ -174,6 +174,7 @@ final class SettlementTest extends LiteIntegrationTestCase {
 		$this->assertSame( '2026-03-15 00:00:00', $contract->get_next_payment_gmt() );
 		$this->assertSame( '2026-02-16 10:00:00', $contract->get_last_payment_gmt() );
 		$this->assertSame( [ 'woocommerce_subscriptions_lite_renewal_paid' => 1 ], $this->fired );
+		$this->assert_lock_released( $contract_id );
 	}
 
 	public function test_a_paid_order_bills_a_processing_cycle(): void {
@@ -403,6 +404,7 @@ final class SettlementTest extends LiteIntegrationTestCase {
 
 		$this->assertTrue( $this->has_logged( 'settling renewal order' ) );
 		$this->assertSame( CycleStatus::BILLED, $this->head( $contract_id )->get_status() );
+		$this->assert_lock_released( $contract_id );
 	}
 
 	/**
@@ -473,14 +475,7 @@ final class SettlementTest extends LiteIntegrationTestCase {
 	 * @return array<int, int> Action ids.
 	 */
 	private function pending_retries( int $order_id ): array {
-		$actions = as_get_scheduled_actions(
-			[
-				'hook'     => 'woocommerce_subscriptions_lite_settle_order',
-				'group'    => 'woocommerce-subscriptions-lite',
-				'status'   => \ActionScheduler_Store::STATUS_PENDING,
-				'per_page' => -1,
-			]
-		);
+		$actions = $this->get_pending_actions( 'woocommerce_subscriptions_lite_settle_order' );
 
 		return array_keys(
 			array_filter(
@@ -511,6 +506,7 @@ final class SettlementTest extends LiteIntegrationTestCase {
 		$this->assertSame( ContractStatus::ACTIVE, $this->get_contract( $contract_id )->get_status() );
 		$this->assertNotNull( $this->get_contract( $contract_id )->get_next_payment_gmt(), 'Re-armed.' );
 		$this->assertSame( [ 'woocommerce_subscriptions_lite_renewal_paid' => 1 ], $this->fired );
+		$this->assert_lock_released( $contract_id );
 	}
 
 	public function test_settle_under_another_operations_lock_returns_the_conflict_and_writes_nothing(): void {
@@ -578,6 +574,7 @@ final class SettlementTest extends LiteIntegrationTestCase {
 		$this->assertSame( ContractStatus::ON_HOLD, $contract->get_status() );
 		$this->assertNull( $contract->get_next_payment_gmt() );
 		$this->assertSame( '', Contracts::get_meta( $contract_id, HoldAnchor::META_KEY, true ), 'The system hold carries no anchor.' );
+		$this->assert_lock_released( $contract_id );
 	}
 
 	public function test_a_paid_order_whose_cycle_was_cancelled_is_flagged_for_a_refund_once(): void {
@@ -595,13 +592,7 @@ final class SettlementTest extends LiteIntegrationTestCase {
 		( new Settlement() )->settle( $order, $this->utc( '2026-02-16 12:00:00' ) );
 		( new Settlement() )->settle( $order, $this->utc( '2026-02-16 12:00:00' ) );
 
-		$notes = array_filter(
-			wp_list_pluck( wc_get_order_notes( [ 'order_id' => $order->get_id() ] ), 'content' ),
-			static function ( $note ): bool {
-				return false !== strpos( (string) $note, 'Refund this payment' );
-			}
-		);
-		$this->assertCount( 1, $notes );
+		$this->assertCount( 1, $this->get_order_notes_containing( $order->get_id(), 'Refund this payment' ) );
 		$this->assertSame( '1', (string) wc_get_order( $order->get_id() )->get_meta( '_wcsl_refund_flagged' ) );
 		$this->assertSame( CycleStatus::CANCELLED, $this->head( $contract_id )->get_status() );
 		$this->assertSame( [], $this->fired );
@@ -651,16 +642,12 @@ final class SettlementTest extends LiteIntegrationTestCase {
 
 		( new Settlement() )->handle_order( $order->get_id() );
 
-		$actions = as_get_scheduled_actions(
+		$actions = $this->get_pending_actions(
+			'woocommerce_subscriptions_lite_settle_order',
 			[
-				'hook'   => 'woocommerce_subscriptions_lite_settle_order',
-				'args'   => [
-					'order_id' => $order->get_id(),
-					'paid'     => true,
-				],
-				'status' => \ActionScheduler_Store::STATUS_PENDING,
-			],
-			'ids'
+				'order_id' => $order->get_id(),
+				'paid'     => true,
+			]
 		);
 		$this->assertCount( 1, $actions );
 	}
