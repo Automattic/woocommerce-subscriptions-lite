@@ -43,28 +43,24 @@ final class PlanWriteValidationTest extends LiteIntegrationTestCase {
 	/**
 	 * @dataProvider provide_invalid_policies
 	 *
-	 * @param array<string, mixed> $pricing_policy Invalid pricing payload.
-	 * @param string               $code           Expected engine error code.
-	 * @param string               $field          Expected field path.
-	 * @param string               $message        Expected translated message.
+	 * @param array<string, mixed>                                       $pricing_policy Invalid pricing payload.
+	 * @param list<array{0: string, 1: string, 2: array<string, mixed>}> $expected       Every error as code, field and params.
 	 */
-	public function test_an_invalid_create_is_rejected_and_nothing_is_stored( array $pricing_policy, string $code, string $field, string $message ): void {
+	public function test_an_invalid_create_is_rejected_and_nothing_is_stored( array $pricing_policy, array $expected ): void {
 		$response = $this->create_plan( $pricing_policy );
 
-		$this->assert_invalid_param( $response, 'pricing_policy', $code, $field, $message );
+		$this->assert_invalid_param( $response, $expected );
 		$this->assertSame( [], $this->list_plans() );
 	}
 
 	/**
-	 * @return array<string, array{0: array<string, mixed>, 1: string, 2: string, 3: string}>
+	 * @return array<string, array{0: array<string, mixed>, 1: list<array{0: string, 1: string, 2: array<string, mixed>}>}>
 	 */
 	public function provide_invalid_policies(): array {
 		return [
 			'unknown type'        => [
 				[ 'policies' => [ [ 'type' => 'mystery' ] ] ],
-				'not_in_enum',
-				'pricing_policy[policies][0][type]',
-				'pricing_policy[policies][0][type] must be one of percentage, fixed_amount, price, bogo.',
+				[ [ 'not_in_enum', 'pricing_policy.policies.0.type', [ 'allowed' => [ 'percentage', 'fixed_amount', 'price', 'bogo' ] ] ] ],
 			],
 			'percentage over 100' => [
 				[
@@ -75,9 +71,7 @@ final class PlanWriteValidationTest extends LiteIntegrationTestCase {
 						],
 					],
 				],
-				'out_of_bounds',
-				'pricing_policy[policies][0][value]',
-				'pricing_policy[policies][0][value] must not exceed 100 for a percentage policy.',
+				[ [ 'out_of_bounds', 'pricing_policy.policies.0.value', [ 'max' => 100 ] ] ],
 			],
 			'bogo with a value'   => [
 				[
@@ -88,9 +82,7 @@ final class PlanWriteValidationTest extends LiteIntegrationTestCase {
 						],
 					],
 				],
-				'invalid_value',
-				'pricing_policy[policies][0][value]',
-				'pricing_policy[policies][0][value] must be 0 or omitted for a bogo policy.',
+				[ [ 'invalid_value', 'pricing_policy.policies.0.value', [] ] ],
 			],
 			'zero duration'       => [
 				[
@@ -101,9 +93,7 @@ final class PlanWriteValidationTest extends LiteIntegrationTestCase {
 						],
 					],
 				],
-				'out_of_bounds',
-				'pricing_policy[policies][0][duration_cycles]',
-				'pricing_policy[policies][0][duration_cycles] must be 1 or greater.',
+				[ [ 'out_of_bounds', 'pricing_policy.policies.0.duration_cycles', [ 'min' => 1 ] ] ],
 			],
 			'negative fee'        => [
 				[
@@ -114,9 +104,7 @@ final class PlanWriteValidationTest extends LiteIntegrationTestCase {
 						],
 					],
 				],
-				'out_of_bounds',
-				'pricing_policy[one_time_fees][0][amount]',
-				'pricing_policy[one_time_fees][0][amount] must not be negative.',
+				[ [ 'out_of_bounds', 'pricing_policy.one_time_fees.0.amount', [ 'min' => 0 ] ] ],
 			],
 		];
 	}
@@ -163,13 +151,8 @@ final class PlanWriteValidationTest extends LiteIntegrationTestCase {
 		);
 
 		$invalid = $this->patch_plan( $id, [ 'one_time_fees' => [ [ 'amount' => 'five' ] ] ] );
-		$this->assert_invalid_param(
-			$invalid,
-			'pricing_policy',
-			'invalid_type',
-			'pricing_policy[one_time_fees][0][amount]',
-			'pricing_policy[one_time_fees][0][amount] must be a number.'
-		);
+		$this->assert_invalid_param( $invalid, [ [ 'invalid_type', 'pricing_policy.one_time_fees.0.amount', [ 'type' => 'number' ] ] ] );
+		$this->assertSame( 'Must be a number.', $this->error_data( $invalid )['errors']['pricing_policy.one_time_fees.0.amount'][0]['message'] );
 
 		$fees  = [
 			[
@@ -200,13 +183,7 @@ final class PlanWriteValidationTest extends LiteIntegrationTestCase {
 			]
 		);
 
-		$this->assert_invalid_param(
-			$response,
-			'pricing_policy',
-			'out_of_bounds',
-			'pricing_policy[policies][0][value]',
-			'pricing_policy[policies][0][value] must not exceed 100 for a percentage policy.'
-		);
+		$this->assert_invalid_param( $response, [ [ 'out_of_bounds', 'pricing_policy.policies.0.value', [ 'max' => 100 ] ] ] );
 		$this->assertSame( $before, $this->fetch_pricing_policy( $id ) );
 	}
 
@@ -262,13 +239,7 @@ final class PlanWriteValidationTest extends LiteIntegrationTestCase {
 		$response = $this->create_plan( [ 'policies' => [ [ 'type' => 'mystery' ] ] ] );
 
 		remove_action( 'woocommerce_subscriptions_engine_validate_plan', $earlier, 5 );
-		$this->assert_invalid_param(
-			$response,
-			'pricing_policy',
-			'not_in_enum',
-			'pricing_policy[policies][0][type]',
-			'pricing_policy[policies][0][type] must be one of percentage, fixed_amount, price, bogo.'
-		);
+		$this->assert_invalid_param( $response, [ [ 'not_in_enum', 'pricing_policy.policies.0.type', [ 'allowed' => [ 'percentage', 'fixed_amount', 'price', 'bogo' ] ] ] ] );
 		$data = $response->get_data();
 		$this->assertIsArray( $data );
 		$this->assertSame( [ 'earlier_error' ], array_column( $data['additional_errors'], 'code' ) );
@@ -324,14 +295,14 @@ final class PlanWriteValidationTest extends LiteIntegrationTestCase {
 		$this->assertSame( [ 'Earlier.' ], $errors->get_error_messages( 'earlier_error' ) );
 		$this->assertSame(
 			[
-				'field'  => 'pricing_policy[policies][0][type]',
+				'field'  => 'pricing_policy.policies.0.type',
 				'params' => [ 'allowed' => [ 'percentage', 'fixed_amount', 'price', 'bogo' ] ],
 			],
 			$errors->get_error_data( 'not_in_enum' )
 		);
 		$this->assertSame(
 			[
-				'field'  => 'pricing_policy[one_time_fees][0][amount]',
+				'field'  => 'pricing_policy.one_time_fees.0.amount',
 				'params' => [ 'min' => 0 ],
 			],
 			$errors->get_error_data( 'out_of_bounds' )
@@ -355,7 +326,7 @@ final class PlanWriteValidationTest extends LiteIntegrationTestCase {
 			$this->fail( 'A status-only update of a plan with invalid stored pricing must be refused.' );
 		} catch ( ValidationException $e ) {
 			$this->assertSame( [ 'not_in_enum' ], $e->get_errors()->get_error_codes() );
-			$this->assertSame( 'pricing_policy[policies][0][type]', $e->get_errors()->get_error_data( 'not_in_enum' )['field'] );
+			$this->assertSame( 'pricing_policy.policies.0.type', $e->get_errors()->get_error_data( 'not_in_enum' )['field'] );
 		}
 
 		$plan = Plans::get( $id );
@@ -366,53 +337,45 @@ final class PlanWriteValidationTest extends LiteIntegrationTestCase {
 	/**
 	 * @dataProvider provide_unusable_billing
 	 *
-	 * @param array<string, mixed>|null $billing_policy Billing payload.
-	 * @param string                    $code           Expected error code.
-	 * @param string                    $field          Expected field path.
-	 * @param string                    $message        Expected translated message.
+	 * @param array<string, mixed>|null                                  $billing_policy Billing payload.
+	 * @param list<array{0: string, 1: string, 2: array<string, mixed>}> $expected       Every error as code, field and params.
 	 */
-	public function test_a_create_without_usable_billing_is_rejected_and_nothing_is_stored( ?array $billing_policy, string $code, string $field, string $message ): void {
+	public function test_a_create_without_usable_billing_is_rejected_and_nothing_is_stored( ?array $billing_policy, array $expected ): void {
 		$response = $this->create_plan( null, Package::EXTENSION_SLUG, self::BASE, $billing_policy );
 
-		$this->assert_invalid_param( $response, 'billing_policy', $code, $field, $message );
+		$this->assert_invalid_param( $response, $expected );
 		$this->assertSame( [], $this->list_plans() );
 	}
 
 	/**
-	 * @return array<string, array{0: array<string, mixed>|null, 1: string, 2: string, 3: string}>
+	 * @return array<string, array{0: array<string, mixed>|null, 1: list<array{0: string, 1: string, 2: array<string, mixed>}>}>
 	 */
 	public function provide_unusable_billing(): array {
-		$cadence = 'billing_policy must have a period (day, week, month or year) and a positive interval.';
+		$units = [ 'allowed' => [ 'day', 'week', 'month', 'year' ] ];
 
 		return [
-			'no billing policy'   => [ null, 'required', 'billing_policy', $cadence ],
-			'missing interval'    => [ [ 'period' => 'month' ], 'invalid_value', 'billing_policy', $cadence ],
+			'no billing policy'   => [ null, [ [ 'required', 'billing_policy', [] ] ] ],
+			'missing interval'    => [ [ 'period' => 'month' ], [ [ 'required', 'billing_policy.interval', [] ] ] ],
 			'unknown period'      => [
 				[
 					'period'   => 'fortnight',
 					'interval' => 1,
 				],
-				'invalid_value',
-				'billing_policy',
-				$cadence,
+				[ [ 'not_in_enum', 'billing_policy.period', $units ] ],
 			],
 			'zero interval'       => [
 				[
 					'period'   => 'month',
 					'interval' => 0,
 				],
-				'invalid_value',
-				'billing_policy',
-				$cadence,
+				[ [ 'out_of_bounds', 'billing_policy.interval', [ 'min' => 1 ] ] ],
 			],
 			'string interval'     => [
 				[
 					'period'   => 'month',
 					'interval' => '1',
 				],
-				'invalid_type',
-				'billing_policy[interval]',
-				'billing_policy[interval] is not of type integer.',
+				[ [ 'invalid_type', 'billing_policy.interval', [ 'type' => 'integer' ] ] ],
 			],
 			'unknown trial unit'  => [
 				[
@@ -423,9 +386,7 @@ final class PlanWriteValidationTest extends LiteIntegrationTestCase {
 						'unit'   => 'fortnight',
 					],
 				],
-				'not_in_enum',
-				'billing_policy[trial_duration][unit]',
-				'billing_policy[trial_duration][unit] is not one of day, week, month, year.',
+				[ [ 'not_in_enum', 'billing_policy.trial_duration.unit', $units ] ],
 			],
 			'min above max cycle' => [
 				[
@@ -434,9 +395,7 @@ final class PlanWriteValidationTest extends LiteIntegrationTestCase {
 					'min_cycles' => 5,
 					'max_cycles' => 2,
 				],
-				'out_of_bounds',
-				'billing_policy[min_cycles]',
-				'billing_policy[min_cycles] must be less than or equal to 2.',
+				[ [ 'out_of_bounds', 'billing_policy.min_cycles', [ 'max' => 2 ] ] ],
 			],
 			'zero max cycles'     => [
 				[
@@ -444,16 +403,25 @@ final class PlanWriteValidationTest extends LiteIntegrationTestCase {
 					'interval'   => 1,
 					'max_cycles' => 0,
 				],
-				'out_of_bounds',
-				'billing_policy[max_cycles]',
-				'billing_policy[max_cycles] must be a positive integer, or null for no limit.',
+				[ [ 'out_of_bounds', 'billing_policy.max_cycles', [ 'min' => 1 ] ] ],
+			],
+			'interval and max'    => [
+				[
+					'period'     => 'month',
+					'interval'   => 0,
+					'max_cycles' => 0,
+				],
+				[
+					[ 'out_of_bounds', 'billing_policy.interval', [ 'min' => 1 ] ],
+					[ 'out_of_bounds', 'billing_policy.max_cycles', [ 'min' => 1 ] ],
+				],
 			],
 		];
 	}
 
 	public function test_an_engine_billing_error_reaches_rest_translated(): void {
 		$translate = static function ( string $translation, string $text, string $domain ): string {
-			return 'woocommerce' === $domain && '%1$s must be less than or equal to %2$d.' === $text ? '%1$s: at most %2$d.' : $translation;
+			return 'woocommerce' === $domain && 'Must be less than or equal to %d.' === $text ? 'At most %d.' : $translation;
 		};
 		add_filter( 'gettext', $translate, 10, 3 );
 
@@ -473,8 +441,68 @@ final class PlanWriteValidationTest extends LiteIntegrationTestCase {
 			remove_filter( 'gettext', $translate, 10 );
 		}
 
-		$this->assert_invalid_param( $response, 'billing_policy', 'out_of_bounds', 'billing_policy[min_cycles]', 'billing_policy[min_cycles]: at most 2.' );
-		$this->assertSame( [ 'max' => 2 ], $this->error_data( $response )['details']['billing_policy']['data']['params'] );
+		$this->assert_invalid_param( $response, [ [ 'out_of_bounds', 'billing_policy.min_cycles', [ 'max' => 2 ] ] ] );
+		$data = $this->error_data( $response );
+		$this->assertSame( 'At most 2.', $data['errors']['billing_policy.min_cycles'][0]['message'] );
+		$this->assertSame( 'billing_policy.min_cycles: At most 2.', $data['params']['billing_policy'] );
+	}
+
+	public function test_billing_and_pricing_errors_are_reported_together(): void {
+		$over_100 = [
+			'type'  => 'percentage',
+			'value' => 150,
+		];
+		$response = $this->create_plan(
+			[ 'policies' => [ $over_100, $over_100 ] ],
+			Package::EXTENSION_SLUG,
+			self::BASE,
+			[
+				'period'     => 'month',
+				'interval'   => 1,
+				'min_cycles' => 5,
+				'max_cycles' => 2,
+			]
+		);
+
+		$this->assert_invalid_param(
+			$response,
+			[
+				[ 'out_of_bounds', 'billing_policy.min_cycles', [ 'max' => 2 ] ],
+				[ 'out_of_bounds', 'pricing_policy.policies.0.value', [ 'max' => 100 ] ],
+				[ 'out_of_bounds', 'pricing_policy.policies.1.value', [ 'max' => 100 ] ],
+			]
+		);
+		$this->assertSame(
+			'pricing_policy.policies.0.value: Must not exceed 100 for a percentage policy. pricing_policy.policies.1.value: Must not exceed 100 for a percentage policy.',
+			$this->error_data( $response )['params']['pricing_policy']
+		);
+		$this->assertSame( [], $this->list_plans() );
+	}
+
+	public function test_an_engine_refusal_and_a_lite_error_are_reported_together(): void {
+		$request = new WP_REST_Request( 'POST', self::BASE );
+		$request->set_body_params(
+			[
+				'extension_slug' => Package::EXTENSION_SLUG,
+				'name'           => '',
+				'billing_policy' => [
+					'period'   => 'month',
+					'interval' => 1,
+				],
+				'pricing_policy' => [ 'policies' => [ [ 'type' => 'mystery' ] ] ],
+			]
+		);
+
+		$response = rest_do_request( $request );
+
+		$this->assert_invalid_param(
+			$response,
+			[
+				[ 'required', 'name', [] ],
+				[ 'not_in_enum', 'pricing_policy.policies.0.type', [ 'allowed' => [ 'percentage', 'fixed_amount', 'price', 'bogo' ] ] ],
+			]
+		);
+		$this->assertSame( [], $this->list_plans() );
 	}
 
 	public function test_a_plan_with_unusable_stored_billing_can_be_archived_but_not_restored(): void {
@@ -528,7 +556,8 @@ final class PlanWriteValidationTest extends LiteIntegrationTestCase {
 			);
 			$this->fail( 'An unbillable billing payload must be refused on an archived plan too.' );
 		} catch ( ValidationException $e ) {
-			$this->assertSame( [ 'invalid_value' ], $e->get_errors()->get_error_codes() );
+			$this->assertSame( [ 'out_of_bounds' ], $e->get_errors()->get_error_codes() );
+			$this->assertSame( 'billing_policy.interval', $e->get_errors()->get_error_data( 'out_of_bounds' )['field'] );
 		}
 
 		$stored = Plans::update(
@@ -574,8 +603,8 @@ final class PlanWriteValidationTest extends LiteIntegrationTestCase {
 			);
 			$this->fail( 'Plans::create() must run the Lite billing validation.' );
 		} catch ( ValidationException $e ) {
-			$this->assertSame( [ 'invalid_value' ], $e->get_errors()->get_error_codes() );
-			$this->assertSame( 'billing_policy', $e->get_errors()->get_error_data( 'invalid_value' )['field'] );
+			$this->assertSame( [ 'not_in_enum' ], $e->get_errors()->get_error_codes() );
+			$this->assertSame( 'billing_policy.period', $e->get_errors()->get_error_data( 'not_in_enum' )['field'] );
 		}
 
 		$this->assertSame( [], Plans::list( [ 'extension_slug' => Package::EXTENSION_SLUG ] ) );
@@ -723,22 +752,58 @@ final class PlanWriteValidationTest extends LiteIntegrationTestCase {
 	}
 
 	/**
-	 * Assert a 400 `rest_invalid_param` response with one error on `$arg`: its translated
-	 * message under `params`, and its code and field path under `details`.
+	 * Assert a 400 `rest_invalid_param` response carrying exactly the expected errors, in
+	 * `WP_Error` order: per top-level arg, `params` joins the sentences that name each field
+	 * and `details` holds the arg's first error; `errors` maps each field to its code and params.
 	 *
-	 * @param WP_REST_Response $response Response.
-	 * @param string           $arg      Top-level request arg.
-	 * @param string           $code     Engine error code.
-	 * @param string           $field    Field path, in bracket notation.
-	 * @param string           $message  Translated message.
+	 * @param WP_REST_Response                                           $response Response.
+	 * @param list<array{0: string, 1: string, 2: array<string, mixed>}> $expected Every error as code, field (dot path) and params.
 	 */
-	private function assert_invalid_param( WP_REST_Response $response, string $arg, string $code, string $field, string $message ): void {
+	private function assert_invalid_param( WP_REST_Response $response, array $expected ): void {
 		$this->assertSame( 400, $response->get_status() );
 		$this->assertSame( 'rest_invalid_param', $this->error_code( $response ) );
 
-		$data = $this->error_data( $response );
-		$this->assertSame( [ $arg => $message ], $data['params'] );
-		$this->assertSame( $code, $data['details'][ $arg ]['code'] );
-		$this->assertSame( $field, $data['details'][ $arg ]['data']['field'] );
+		$data   = $this->error_data( $response );
+		$errors = [];
+		foreach ( $data['errors'] as $field => $field_errors ) {
+			foreach ( $field_errors as $error ) {
+				$errors[ $field ][] = [ $error['code'], $error['params'] ];
+			}
+		}
+
+		$expected_errors = [];
+		$sentences       = [];
+		$details         = [];
+		foreach ( $expected as [ $code, $field, $params ] ) {
+			$expected_errors[ $field ][] = [ $code, $params ];
+
+			$index   = count( $expected_errors[ $field ] ) - 1;
+			$arg     = explode( '.', $field )[0];
+			$message = $field . ': ' . ( $data['errors'][ $field ][ $index ]['message'] ?? '' );
+
+			$sentences[ $arg ][] = $message;
+			if ( ! isset( $details[ $arg ] ) ) {
+				$details[ $arg ] = [
+					'code'    => $code,
+					'message' => $message,
+					'data'    => [
+						'field'  => $field,
+						'params' => $params,
+					],
+				];
+			}
+		}
+
+		$this->assertSame( $expected_errors, $errors );
+		$this->assertSame(
+			array_map(
+				static function ( array $arg_sentences ): string {
+					return implode( ' ', $arg_sentences );
+				},
+				$sentences
+			),
+			$data['params']
+		);
+		$this->assertSame( $details, $data['details'] );
 	}
 }

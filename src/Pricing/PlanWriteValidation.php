@@ -13,9 +13,11 @@
  * prices the carts and orders that carry it). Only a write to a plan that is not
  * active and keeps its stored billing skips it, so a plan with unusable stored
  * billing can still be archived; restoring it checks billing again. Each problem is
- * added to the collector with an engine error code, a translated message and
- * `field` / `params` data (`billing_policy[max_cycles]`), so the engine's plans
- * route reports it under that request arg. The plan is stored exactly as sent.
+ * added to the collector with an engine error code, a translated field-free message
+ * and `field` (dot path, such as `billing_policy.max_cycles`) / `params` data, so the
+ * engine's plans route reports it under that field and its request arg. The engine
+ * fires the action even for a plan it refuses, so its own errors (an empty name) and
+ * Lite's arrive in one response. The plan is stored exactly as sent.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Pricing
  */
