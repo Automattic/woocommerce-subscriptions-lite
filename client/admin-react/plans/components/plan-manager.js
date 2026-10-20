@@ -151,11 +151,13 @@ export function PlanManager() {
 				await reload();
 			} catch ( statusError ) {
 				showError(
-					statusError?.message ||
+					getSaveErrorMessages(
+						statusError,
 						__(
 							'Plan status could not be changed.',
 							'woocommerce-subscriptions-lite'
 						)
+					).join( ' ' )
 				);
 			}
 		},

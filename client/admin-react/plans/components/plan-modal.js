@@ -12,7 +12,7 @@ import { PlanForm } from './plan-form';
  * @param {Object}        props.definitions      Normalized engine definitions.
  * @param {Object|null}   props.plan             Plan being edited, or null.
  * @param {boolean}       props.isSaving         Whether a save is in progress.
- * @param {string[]}      props.apiErrors        API error messages, one per field; empty when none.
+ * @param {string[]}      props.apiErrors        API error messages: one per field, plus errors without a field; empty when none.
  * @param {boolean}       props.duplicateWarning Whether a duplicate was detected.
  * @param {Function}      props.onClose          Close callback.
  * @param {Function}      props.onSave           Save callback (payload, formData).
@@ -66,7 +66,7 @@ export function PlanModal( {
 					{ apiErrors.length === 1 ? (
 						apiErrors[ 0 ]
 					) : (
-						<ul>
+						<ul className="ul-disc">
 							{ apiErrors.map( ( message ) => (
 								<li key={ message }>{ message }</li>
 							) ) }
