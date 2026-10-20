@@ -63,9 +63,7 @@ final class PlanWriteValidation {
 			return;
 		}
 
-		foreach ( PricingTerms::validate( $pricing_policy ) as $message ) {
-			$errors->add( 'rest_invalid_param', $message, [ 'status' => 400 ] );
-		}
+		$errors->merge_from( PricingTerms::validate( $pricing_policy ) );
 	}
 
 	/**

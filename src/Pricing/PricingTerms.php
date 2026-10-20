@@ -25,6 +25,8 @@ declare( strict_types=1 );
 namespace Automattic\WooCommerce\SubscriptionsLite\Pricing;
 
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\PlanView;
+use Automattic\WooCommerce\SubscriptionsEngine\Core\Support\ValidationErrorCode;
+use WP_Error;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -104,35 +106,51 @@ final class PricingTerms {
 	}
 
 	/**
-	 * Strict validation for a plan write. Null is valid (no terms).
+	 * Strict validation for a plan write. Null is valid (no terms). Each error carries an
+	 * engine error code, a translated message and `field` (bracket path) / `params` data.
 	 *
 	 * @param mixed $data Raw pricing_policy payload.
-	 * @return array<int, string> Error messages; empty when valid.
+	 * @return WP_Error Validation errors; none when valid.
 	 */
-	public static function validate( $data ): array {
+	public static function validate( $data ): WP_Error {
+		$errors = new WP_Error();
 		if ( null === $data ) {
-			return [];
+			return $errors;
 		}
 		if ( ! is_array( $data ) ) {
-			return [ 'pricing_policy must be an object or null.' ];
+			self::add_error(
+				$errors,
+				ValidationErrorCode::INVALID_TYPE,
+				'pricing_policy',
+				/* translators: %s: field name, pricing_policy. */
+				sprintf( __( '%s must be an object or null.', 'woocommerce-subscriptions-lite' ), 'pricing_policy' ),
+				[ 'type' => 'object' ]
+			);
+			return $errors;
 		}
-
-		$errors = [];
 
 		foreach ( [ 'policies', 'one_time_fees' ] as $key ) {
 			if ( isset( $data[ $key ] ) && ! ( is_array( $data[ $key ] ) && array_is_list( $data[ $key ] ) ) ) {
-				$errors[] = sprintf( 'pricing_policy.%s: must be a list.', $key );
+				$field = 'pricing_policy[' . $key . ']';
+				self::add_error(
+					$errors,
+					ValidationErrorCode::INVALID_TYPE,
+					$field,
+					/* translators: %s: field name, such as pricing_policy[policies]. */
+					sprintf( __( '%s must be a list.', 'woocommerce-subscriptions-lite' ), $field ),
+					[ 'type' => 'array' ]
+				);
 			}
 		}
-		if ( ! empty( $errors ) ) {
+		if ( $errors->has_errors() ) {
 			return $errors;
 		}
 
 		foreach ( self::entries( $data, 'policies' ) as $index => $entry ) {
-			$errors = array_merge( $errors, self::validate_policy( (int) $index, $entry ) );
+			self::validate_policy( $errors, 'pricing_policy[policies][' . (int) $index . ']', $entry );
 		}
 		foreach ( self::entries( $data, 'one_time_fees' ) as $index => $entry ) {
-			$errors = array_merge( $errors, self::validate_fee( (int) $index, $entry ) );
+			self::validate_fee( $errors, 'pricing_policy[one_time_fees][' . (int) $index . ']', $entry );
 		}
 
 		return $errors;
@@ -247,31 +265,40 @@ final class PricingTerms {
 	}
 
 	/**
-	 * Validation errors for one policy entry.
+	 * Add the validation errors of one policy entry.
 	 *
-	 * @param int   $index Entry index.
-	 * @param mixed $entry Raw entry.
-	 * @return array<int, string>
+	 * @param WP_Error $errors Error collector.
+	 * @param string   $path   The entry's field path, such as `pricing_policy[policies][0]`.
+	 * @param mixed    $entry  Raw entry.
 	 */
-	private static function validate_policy( int $index, $entry ): array {
+	private static function validate_policy( WP_Error $errors, string $path, $entry ): void {
 		if ( ! is_array( $entry ) ) {
-			return [ sprintf( 'pricing_policy.policies[%d]: must be an object, got %s', $index, gettype( $entry ) ) ];
+			self::add_object_error( $errors, $path );
+			return;
 		}
 
 		$type = $entry['type'] ?? null;
 		if ( ! is_string( $type ) || ! in_array( $type, self::TYPES, true ) ) {
-			$shown = is_scalar( $type ) ? (string) $type : gettype( $type );
-			return [ sprintf( 'pricing_policy.policies[%d]: invalid type %s', $index, $shown ) ];
+			$field = $path . '[type]';
+			self::add_error(
+				$errors,
+				ValidationErrorCode::NOT_IN_ENUM,
+				$field,
+				/* translators: 1: field name, such as pricing_policy[policies][0][type]; 2: comma-separated list of policy types. */
+				sprintf( __( '%1$s must be one of %2$s.', 'woocommerce-subscriptions-lite' ), $field, implode( ', ', self::TYPES ) ),
+				[ 'allowed' => self::TYPES ]
+			);
+			return;
 		}
 
-		$errors = [];
-		$value  = $entry['value'] ?? 0;
+		$value = $entry['value'] ?? 0;
+		$field = $path . '[value]';
 		if ( ! is_numeric( $value ) ) {
-			$errors[] = sprintf( 'pricing_policy.policies[%d]: value must be numeric, got %s', $index, gettype( $value ) );
+			self::add_number_error( $errors, $field );
 		} else {
 			$error = self::value_error( $type, (float) $value );
 			if ( null !== $error ) {
-				$errors[] = sprintf( 'pricing_policy.policies[%d]: %s', $index, $error );
+				self::add_error( $errors, $error['code'], $field, sprintf( $error['message'], $field ), $error['params'] );
 			}
 		}
 
@@ -279,73 +306,191 @@ final class PricingTerms {
 			if ( ! isset( $entry[ $gate ] ) ) {
 				continue;
 			}
+			$field = $path . '[' . $gate . ']';
 			$cycle = self::cycle_gate( $entry[ $gate ] );
 			if ( null === $cycle ) {
-				$errors[] = sprintf( 'pricing_policy.policies[%d]: %s must be an integer, got %s', $index, $gate, gettype( $entry[ $gate ] ) );
+				self::add_error(
+					$errors,
+					ValidationErrorCode::INVALID_TYPE,
+					$field,
+					/* translators: %s: field name, such as pricing_policy[policies][0][starting_cycle]. */
+					sprintf( __( '%s must be an integer.', 'woocommerce-subscriptions-lite' ), $field ),
+					[ 'type' => 'integer' ]
+				);
 			} elseif ( $cycle < 1 ) {
-				$errors[] = sprintf( 'pricing_policy.policies[%d]: %s must be at least 1, got %d', $index, $gate, $cycle );
+				self::add_error(
+					$errors,
+					ValidationErrorCode::OUT_OF_BOUNDS,
+					$field,
+					/* translators: %s: field name, such as pricing_policy[policies][0][starting_cycle]. */
+					sprintf( __( '%s must be 1 or greater.', 'woocommerce-subscriptions-lite' ), $field ),
+					[ 'min' => 1 ]
+				);
 			}
 		}
-
-		return $errors;
 	}
 
 	/**
-	 * Range error for a policy value, shared by the write check and the tolerant read.
+	 * Range error for a policy value, shared by the write check and the tolerant read:
+	 * the error code, its params and a translated message with `%s` for the field.
 	 *
 	 * @param string $type  Known policy type.
 	 * @param float  $value Numeric value.
+	 * @return array{code: string, message: string, params: array<string, int>}|null
 	 */
-	private static function value_error( string $type, float $value ): ?string {
+	private static function value_error( string $type, float $value ): ?array {
 		if ( ! is_finite( $value ) ) {
-			return sprintf( '%s value must be finite', $type );
+			return [
+				'code'    => ValidationErrorCode::INVALID_VALUE,
+				'message' => self::get_finite_message(),
+				'params'  => [],
+			];
 		}
 		if ( $value < 0 ) {
-			return sprintf( '%s value must be non-negative, got %s', $type, $value );
+			return [
+				'code'    => ValidationErrorCode::OUT_OF_BOUNDS,
+				'message' => self::get_non_negative_message(),
+				'params'  => [ 'min' => 0 ],
+			];
 		}
 		if ( self::TYPE_PERCENTAGE === $type && $value > 100 ) {
-			return sprintf( 'percentage must not exceed 100, got %s', $value );
+			return [
+				'code'    => ValidationErrorCode::OUT_OF_BOUNDS,
+				/* translators: %s: field name, such as pricing_policy[policies][0][value]. */
+				'message' => __( '%s must not exceed 100 for a percentage policy.', 'woocommerce-subscriptions-lite' ),
+				'params'  => [ 'max' => 100 ],
+			];
 		}
 		if ( self::TYPE_BOGO === $type && 0.0 !== $value ) {
-			return sprintf( 'bogo is value-less; value must be 0 or omitted, got %s', $value );
+			return [
+				'code'    => ValidationErrorCode::INVALID_VALUE,
+				/* translators: %s: field name, such as pricing_policy[policies][0][value]. */
+				'message' => __( '%s must be 0 or omitted for a bogo policy.', 'woocommerce-subscriptions-lite' ),
+				'params'  => [],
+			];
 		}
 
 		return null;
 	}
 
 	/**
-	 * Validation errors for one fee entry.
+	 * Add the validation errors of one fee entry.
 	 *
-	 * @param int   $index Entry index.
-	 * @param mixed $entry Raw entry.
-	 * @return array<int, string>
+	 * @param WP_Error $errors Error collector.
+	 * @param string   $path   The entry's field path, such as `pricing_policy[one_time_fees][0]`.
+	 * @param mixed    $entry  Raw entry.
 	 */
-	private static function validate_fee( int $index, $entry ): array {
+	private static function validate_fee( WP_Error $errors, string $path, $entry ): void {
 		if ( ! is_array( $entry ) ) {
-			return [ sprintf( 'pricing_policy.one_time_fees[%d]: must be an object, got %s', $index, gettype( $entry ) ) ];
+			self::add_object_error( $errors, $path );
+			return;
 		}
 
-		$errors = [];
 		$amount = $entry['amount'] ?? 0;
+		$field  = $path . '[amount]';
 		if ( ! is_numeric( $amount ) ) {
-			$errors[] = sprintf( 'pricing_policy.one_time_fees[%d]: amount must be numeric, got %s', $index, gettype( $amount ) );
+			self::add_number_error( $errors, $field );
 		} elseif ( ! is_finite( (float) $amount ) ) {
-			$errors[] = sprintf( 'pricing_policy.one_time_fees[%d]: amount must be finite', $index );
+			self::add_error( $errors, ValidationErrorCode::INVALID_VALUE, $field, sprintf( self::get_finite_message(), $field ) );
 		} elseif ( (float) $amount < 0 ) {
-			$errors[] = sprintf( 'pricing_policy.one_time_fees[%d]: amount must be non-negative, got %s', $index, $amount );
+			self::add_error( $errors, ValidationErrorCode::OUT_OF_BOUNDS, $field, sprintf( self::get_non_negative_message(), $field ), [ 'min' => 0 ] );
 		}
 
 		$taxable = $entry['taxable'] ?? null;
 		if ( null !== $taxable && null === filter_var( $taxable, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE ) ) {
-			$errors[] = sprintf( 'pricing_policy.one_time_fees[%d]: taxable must be a bool, got %s', $index, gettype( $taxable ) );
+			$field = $path . '[taxable]';
+			self::add_error(
+				$errors,
+				ValidationErrorCode::INVALID_TYPE,
+				$field,
+				/* translators: %s: field name, such as pricing_policy[one_time_fees][0][taxable]. */
+				sprintf( __( '%s must be true or false.', 'woocommerce-subscriptions-lite' ), $field ),
+				[ 'type' => 'boolean' ]
+			);
 		}
 
 		$tax_class = $entry['tax_class'] ?? null;
 		if ( null !== $tax_class && ! is_string( $tax_class ) ) {
-			$errors[] = sprintf( 'pricing_policy.one_time_fees[%d]: tax_class must be string or null, got %s', $index, gettype( $tax_class ) );
+			$field = $path . '[tax_class]';
+			self::add_error(
+				$errors,
+				ValidationErrorCode::INVALID_TYPE,
+				$field,
+				/* translators: %s: field name, such as pricing_policy[one_time_fees][0][tax_class]. */
+				sprintf( __( '%s must be a string or null.', 'woocommerce-subscriptions-lite' ), $field ),
+				[ 'type' => 'string' ]
+			);
 		}
+	}
 
-		return $errors;
+	/**
+	 * Add an entry that is not an object.
+	 *
+	 * @param WP_Error $errors Error collector.
+	 * @param string   $field  The entry's field path.
+	 */
+	private static function add_object_error( WP_Error $errors, string $field ): void {
+		self::add_error(
+			$errors,
+			ValidationErrorCode::INVALID_TYPE,
+			$field,
+			/* translators: %s: field name, such as pricing_policy[policies][0]. */
+			sprintf( __( '%s must be an object.', 'woocommerce-subscriptions-lite' ), $field ),
+			[ 'type' => 'object' ]
+		);
+	}
+
+	/**
+	 * Add a value or amount that is not numeric.
+	 *
+	 * @param WP_Error $errors Error collector.
+	 * @param string   $field  The value's field path.
+	 */
+	private static function add_number_error( WP_Error $errors, string $field ): void {
+		self::add_error(
+			$errors,
+			ValidationErrorCode::INVALID_TYPE,
+			$field,
+			/* translators: %s: field name, such as pricing_policy[policies][0][value]. */
+			sprintf( __( '%s must be a number.', 'woocommerce-subscriptions-lite' ), $field ),
+			[ 'type' => 'number' ]
+		);
+	}
+
+	/**
+	 * Message for a number that is not finite, with `%s` for the field.
+	 */
+	private static function get_finite_message(): string {
+		/* translators: %s: field name, such as pricing_policy[policies][0][value]. */
+		return __( '%s must be a finite number.', 'woocommerce-subscriptions-lite' );
+	}
+
+	/**
+	 * Message for a negative number, with `%s` for the field.
+	 */
+	private static function get_non_negative_message(): string {
+		/* translators: %s: field name, such as pricing_policy[one_time_fees][0][amount]. */
+		return __( '%s must not be negative.', 'woocommerce-subscriptions-lite' );
+	}
+
+	/**
+	 * Add one error with its `field` and `params` data.
+	 *
+	 * @param WP_Error             $errors  Error collector.
+	 * @param string               $code    One of {@see ValidationErrorCode}.
+	 * @param string               $field   Field path, in bracket notation.
+	 * @param string               $message Translated message.
+	 * @param array<string, mixed> $params  Values the code's message needs.
+	 */
+	private static function add_error( WP_Error $errors, string $code, string $field, string $message, array $params = [] ): void {
+		$errors->add(
+			$code,
+			$message,
+			[
+				'field'  => $field,
+				'params' => $params,
+			]
+		);
 	}
 
 	/**
