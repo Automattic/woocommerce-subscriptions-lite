@@ -357,4 +357,40 @@ final class DeadRenewalOrderTest extends LiteIntegrationTestCase {
 		$this->assertSame( $replacement_id, $head->get_order_id(), 'The replacement keeps the renewal.' );
 		$this->assertSame( CycleStatus::FAILED, $head->get_status() );
 	}
+
+	/**
+	 * A relink the engine reports as made, but that left the cycle on the replacement, is
+	 * flagged for a refund instead of being settled again, so settling cannot loop. A query
+	 * filter forces it: the relink writes the replacement's id back and a fresh update time,
+	 * so the row always changes and the engine always reports the relink as made.
+	 */
+	public function test_a_relink_reported_as_made_without_moving_the_cycle_is_flagged_for_a_refund(): void {
+		[ $contract_id, $order, $replacement_id ] = $this->replace_a_cancelled_renewal( 'failed' );
+		$cycles                                   = SchemaInstaller::get_table_name( SchemaInstaller::TABLE_CYCLES );
+		$relink                                   = 'order_id = ' . $order->get_id() . ',';
+		$second                                   = 0;
+		$keep                                     = static function ( string $query ) use ( $cycles, $relink, $replacement_id, &$second ): string {
+			if ( 0 !== strpos( $query, "UPDATE {$cycles} SET" ) || false === strpos( $query, $relink ) ) {
+				return $query;
+			}
+			$query = str_replace( $relink, 'order_id = ' . $replacement_id . ',', $query );
+			++$second;
+
+			return (string) preg_replace( "/date_updated_gmt = '[^']*'/", sprintf( "date_updated_gmt = '2000-01-01 00:00:%02d'", $second % 60 ), $query );
+		};
+		add_filter( 'query', $keep );
+		try {
+			wc_get_order( $order->get_id() )->payment_complete();
+		} finally {
+			remove_filter( 'query', $keep );
+		}
+
+		$notes = $this->get_order_notes_containing( $order->get_id(), 'Refund this payment' );
+		$this->assertCount( 1, $notes );
+		$this->assertStringContainsString( 'could not be moved back', $notes[0] );
+		$head = $this->head( $contract_id );
+		$this->assertSame( $replacement_id, $head->get_order_id(), 'The replacement keeps the renewal.' );
+		$this->assertSame( CycleStatus::FAILED, $head->get_status() );
+		$this->assert_lock_released( $contract_id );
+	}
 }

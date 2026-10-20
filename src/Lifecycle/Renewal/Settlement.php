@@ -735,6 +735,11 @@ final class Settlement {
 					],
 					$lock
 				);
+				if ( $relinked ) {
+					// Settling again needs the cycle to carry this order, or it would land back here.
+					$relinked_cycle = self::find_cycle( $contract_id, $cycle_id );
+					$relinked       = null !== $relinked_cycle && $relinked_cycle->get_order_id() === $order->get_id();
+				}
 				if ( ! $relinked ) {
 					self::flag_for_refund(
 						$order,
