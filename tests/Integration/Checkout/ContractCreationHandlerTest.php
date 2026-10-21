@@ -522,12 +522,14 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 		$order = $this->create_subscription_order( $this->create_customer() );
 		$this->apply_and_stamp( $order, $plan );
 
+		$refused = false;
 		try {
 			( new ContractCreationHandler() )->create_contract( $order, $plan );
-			$this->fail( 'A plan without billing terms must be refused.' );
 		} catch ( DomainException $e ) {
-			$this->assertSame( DomainException::class, get_class( $e ) );
+			$refused = true;
 		}
+
+		$this->assertTrue( $refused, 'A plan with invalid billing terms must be refused.' );
 
 		$this->assertSame( [], Contracts::find_by_origin_order( $order->get_id() ) );
 	}

@@ -72,7 +72,7 @@ final class RenewalProcessor {
 		$terms       = ContractPlans::get_billing_terms_for( $contract );
 		$head        = Contracts::get_cycles( $contract_id, 1 )[0] ?? null;
 		if ( null === $terms || null === $head ) {
-			$this->log( 'warning', sprintf( 'contract %d cannot be renewed automatically: it has no plan with valid billing terms, or no billing chain; its next payment date is cleared.', $contract_id ), $contract_id );
+			$this->log( 'warning', sprintf( 'contract %d cannot be renewed: it has no plan with valid billing terms, or no billing chain; its next payment date is cleared.', $contract_id ), $contract_id );
 			Contracts::update( $contract_id, [ 'next_payment_gmt' => null ], $lock );
 			return null;
 		}
