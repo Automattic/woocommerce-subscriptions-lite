@@ -139,7 +139,7 @@ final class Settlement {
 			return;
 		}
 
-		$this->settle_deleted( $order_id );
+		$this->settle_removed( $order_id );
 	}
 
 	/**
@@ -241,7 +241,7 @@ final class Settlement {
 			return;
 		}
 
-		$this->settle_deleted( $order->get_id() );
+		$this->settle_removed( $order->get_id() );
 	}
 
 	/**
@@ -251,7 +251,7 @@ final class Settlement {
 	 *
 	 * @param int $order_id Order id.
 	 */
-	private function settle_deleted( int $order_id ): void {
+	private function settle_removed( int $order_id ): void {
 		$conflict = null;
 		try {
 			$contract_id = self::find_lite_contract_id( $order_id );
@@ -328,28 +328,28 @@ final class Settlement {
 	}
 
 	/**
-	 * Settle a Lite renewal order from its current status; any other order is ignored. The
-	 * linked cycle only locates the contract: the decision reads the order, the contract and
-	 * the cycle under its lock.
+	 * Settle a Lite renewal order from its status; any other order is ignored. The linked cycle
+	 * only locates the contract: the decision reads the contract and the cycle under its lock,
+	 * and the order as loaded before it (another request's change may not show in that copy).
 	 *
-	 * @param WC_Order               $order The order (re-read, so a stale object is fine).
+	 * @param WC_Order               $order The order, loaded again by id.
 	 * @param DateTimeImmutable|null $now   The current moment; the UTC wall clock when omitted.
 	 * @return WP_Error|null A lock conflict when another operation holds the lock, else null.
 	 */
 	public function settle( WC_Order $order, ?DateTimeImmutable $now = null ): ?WP_Error {
-		$fresh_order = wc_get_order( $order->get_id() );
-		if ( ! $fresh_order instanceof WC_Order || RenewalOrderBuilder::CREATED_VIA !== $fresh_order->get_created_via() ) {
+		$renewal_order = wc_get_order( $order->get_id() );
+		if ( ! $renewal_order instanceof WC_Order || RenewalOrderBuilder::CREATED_VIA !== $renewal_order->get_created_via() ) {
 			return null;
 		}
 
-		$order_id    = $fresh_order->get_id();
+		$order_id    = $renewal_order->get_id();
 		$contract_id = self::find_lite_contract_id( $order_id );
 		if ( null === $contract_id ) {
-			if ( ! $fresh_order->is_paid() ) {
+			if ( ! $renewal_order->is_paid() ) {
 				return null;
 			}
 
-			return $this->settle_replaced_paid( $fresh_order, $now );
+			return $this->settle_replaced_paid( $renewal_order, $now );
 		}
 
 		$utc_now  = ( $now ?? new DateTimeImmutable( 'now', new DateTimeZone( 'UTC' ) ) )->setTimezone( new DateTimeZone( 'UTC' ) );
@@ -363,30 +363,28 @@ final class Settlement {
 		}
 
 		try {
-			// The order is read again under the lock: another signal may have changed it meanwhile.
-			$locked_order = wc_get_order( $order_id );
-			$contract     = Contracts::get( $contract_id );
-			if ( ! $locked_order instanceof WC_Order || null === $contract ) {
+			$contract = Contracts::get( $contract_id );
+			if ( null === $contract ) {
 				return null;
 			}
 
 			$cycle = self::find_order_cycle( $order_id, $contract_id );
 			if ( null === $cycle ) {
 				// The order was relinked away before the lock: settle it as a replaced order.
-				if ( ! $locked_order->is_paid() ) {
+				if ( ! $renewal_order->is_paid() ) {
 					return null;
 				}
 
-				return $this->settle_replaced_paid( $locked_order, $now );
+				return $this->settle_replaced_paid( $renewal_order, $now );
 			}
 
-			if ( $locked_order->is_paid() ) {
-				$this->settle_paid( $locked_order, $contract, $cycle, $utc_now, $lock );
-			} elseif ( $locked_order->has_status( OrderStatus::FAILED ) ) {
-				$this->settle_failed( $locked_order, $contract, $cycle, $utc_now, $lock );
-			} elseif ( $locked_order->has_status( OrderStatus::ON_HOLD ) ) {
+			if ( $renewal_order->is_paid() ) {
+				$this->settle_paid( $renewal_order, $contract, $cycle, $utc_now, $lock );
+			} elseif ( $renewal_order->has_status( OrderStatus::FAILED ) ) {
+				$this->settle_failed( $renewal_order, $contract, $cycle, $utc_now, $lock );
+			} elseif ( $renewal_order->has_status( OrderStatus::ON_HOLD ) ) {
 				$this->settle_in_progress( $contract, $cycle, $lock );
-			} elseif ( self::is_dead( $locked_order ) ) {
+			} elseif ( self::is_dead( $renewal_order ) ) {
 				$this->settle_dead( $contract, $cycle, $lock );
 			}
 
@@ -449,9 +447,9 @@ final class Settlement {
 
 		/**
 		 * Fires after a Lite renewal order was paid and its cycle billed. Delivered at least
-		 * once: completing a cut-short settlement fires it again. Runs under the contract
-		 * lock: a callback writes the contract with
-		 * `HeldLocks::get( $id )`, since an unlocked write is refused.
+		 * once: completing a cut-short settlement fires it again. Runs under the contract lock:
+		 * a callback writes the contract with `HeldLocks::get( $id )`, since an unlocked write
+		 * is refused.
 		 *
 		 * @param ContractView $contract The contract after the payment was recorded.
 		 * @param CycleView    $cycle    The billed cycle.
