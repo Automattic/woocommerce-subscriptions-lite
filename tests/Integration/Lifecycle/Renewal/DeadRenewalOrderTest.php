@@ -10,10 +10,12 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Lifecycle\Renewal;
 
+use Automattic\WooCommerce\Enums\OrderStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\CycleView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\CycleStatus;
+use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\SchemaInstaller;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\RowActionController;
 use Automattic\WooCommerce\SubscriptionsLite\CustomerPortal\EngineDataProvider;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\HoldAnchor;
@@ -69,7 +71,7 @@ final class DeadRenewalOrderTest extends LiteIntegrationTestCase {
 		);
 		if ( ContractStatus::ON_HOLD === $status ) {
 			// Held for the renewal payment, not by the customer: no hold anchor.
-			HoldAnchor::clear( $contract_id );
+			$this->store_hold_anchor( $contract_id, null );
 		}
 
 		return [ $contract_id, $customer_id, $order ];
@@ -134,6 +136,7 @@ final class DeadRenewalOrderTest extends LiteIntegrationTestCase {
 		$this->assertSame( $order->get_id(), $head->get_order_id(), 'The paid order is relinked to the renewal.' );
 		$this->assertSame( 'cancelled', wc_get_order( $replacement_id )->get_status(), 'The unpaid replacement is cancelled.' );
 		$this->assertSame( ContractStatus::ACTIVE, $this->get_contract( $contract_id )->get_status() );
+		$this->assert_lock_released( $contract_id );
 	}
 
 	public function test_a_replaced_order_paid_after_its_replacement_paid_is_flagged_for_a_refund(): void {
@@ -170,22 +173,6 @@ final class DeadRenewalOrderTest extends LiteIntegrationTestCase {
 		$this->assertArrayHasKey( 'cancel', wc_get_account_orders_actions( $plain ), 'Other orders keep the cancel action.' );
 	}
 
-	/**
-	 * The refund notes an order carries.
-	 *
-	 * @param int $order_id Order id.
-	 */
-	private function refund_notes( int $order_id ): int {
-		return count(
-			array_filter(
-				wc_get_order_notes( [ 'order_id' => $order_id ] ),
-				static function ( $note ): bool {
-					return false !== stripos( $note->content, 'refund one of the two payments' );
-				}
-			)
-		);
-	}
-
 	public function test_a_late_payment_never_takes_back_a_renewal_whose_replacement_charge_is_in_flight(): void {
 		[ $contract_id, $order, $replacement_id ] = $this->replace_a_cancelled_renewal( 'on-hold' );
 		$this->assertSame( CycleStatus::PROCESSING, $this->head( $contract_id )->get_status() );
@@ -195,7 +182,7 @@ final class DeadRenewalOrderTest extends LiteIntegrationTestCase {
 
 		$this->assertSame( $replacement_id, $this->head( $contract_id )->get_order_id(), 'The in-flight replacement keeps the renewal.' );
 		$this->assertSame( 'on-hold', wc_get_order( $replacement_id )->get_status(), 'It is not cancelled under its pending charge.' );
-		$this->assertSame( 1, $this->refund_notes( $order->get_id() ) );
+		$this->assertCount( 1, $this->get_order_notes_containing( $order->get_id(), 'one of the two payments' ) );
 		$this->assertTrue( $this->has_logged( 'in flight' ) );
 
 		wc_get_order( $replacement_id )->payment_complete();
@@ -203,8 +190,8 @@ final class DeadRenewalOrderTest extends LiteIntegrationTestCase {
 		$head = $this->head( $contract_id );
 		$this->assertSame( CycleStatus::BILLED, $head->get_status() );
 		$this->assertSame( $replacement_id, $head->get_order_id(), 'One payment settles the renewal.' );
-		$this->assertSame( 0, $this->refund_notes( $replacement_id ) );
-		$this->assertSame( 1, $this->refund_notes( $order->get_id() ), 'The other is flagged once.' );
+		$this->assertCount( 0, $this->get_order_notes_containing( $replacement_id, 'one of the two payments' ) );
+		$this->assertCount( 1, $this->get_order_notes_containing( $order->get_id(), 'one of the two payments' ), 'The other is flagged once.' );
 	}
 
 	public function test_a_cancelled_replacement_that_is_paid_after_all_is_flagged_for_a_refund(): void {
@@ -216,7 +203,7 @@ final class DeadRenewalOrderTest extends LiteIntegrationTestCase {
 		wc_get_order( $replacement_id )->payment_complete();
 
 		$this->assertSame( $order->get_id(), $this->head( $contract_id )->get_order_id() );
-		$this->assertSame( 1, $this->refund_notes( $replacement_id ), 'The stamped replacement is flagged.' );
+		$this->assertCount( 1, $this->get_order_notes_containing( $replacement_id, 'one of the two payments' ), 'The stamped replacement is flagged.' );
 	}
 
 	public function test_a_trashed_manual_renewal_order_fails_its_cycle(): void {
@@ -231,6 +218,7 @@ final class DeadRenewalOrderTest extends LiteIntegrationTestCase {
 		$this->assertSame( $order_id, $head->get_order_id() );
 		$this->assertSame( 'trash', wc_get_order( $order_id )->get_status(), 'The order was trashed, not deleted.' );
 		$this->assertSame( ContractStatus::ON_HOLD, $this->get_contract( $contract_id )->get_status() );
+		$this->assert_lock_released( $contract_id );
 	}
 
 	public function test_a_permanently_deleted_unpaid_renewal_order_fails_its_cycle(): void {
@@ -295,5 +283,101 @@ final class DeadRenewalOrderTest extends LiteIntegrationTestCase {
 
 		$this->assertSame( CycleStatus::BILLED, $this->head( $contract_id )->get_status() );
 		$this->assertSame( ContractStatus::ACTIVE, $this->get_contract( $contract_id )->get_status() );
+	}
+
+	public function test_a_replaced_order_paid_after_its_renewal_is_gone_is_flagged_for_a_refund(): void {
+		[ , $order ] = $this->replace_a_cancelled_renewal( 'failed' );
+		$replaced    = wc_get_order( $order->get_id() );
+		$replaced->update_meta_data( Settlement::REPLACED_CYCLE_META, '987654' );
+		$replaced->save();
+
+		$replaced->payment_complete();
+		wc_get_order( $order->get_id() )->update_status( OrderStatus::COMPLETED );
+
+		$notes = $this->get_order_notes_containing( $order->get_id(), 'Refund this payment' );
+		$this->assertCount( 1, $notes, 'Flagged once.' );
+		$this->assertStringContainsString( 'no longer exists', $notes[0] );
+	}
+
+	public function test_a_replaced_order_paid_after_its_renewal_was_cancelled_is_flagged_for_a_refund(): void {
+		[ $contract_id, $order, $replacement_id ] = $this->replace_a_cancelled_renewal( 'failed' );
+		$this->transition_cycle_with_lock(
+			$contract_id,
+			$this->head( $contract_id )->get_id(),
+			[
+				'from_status' => CycleStatus::FAILED,
+				'to_status'   => CycleStatus::CANCELLED,
+			]
+		);
+
+		wc_get_order( $order->get_id() )->payment_complete();
+
+		$notes = $this->get_order_notes_containing( $order->get_id(), 'Refund this payment' );
+		$this->assertCount( 1, $notes );
+		$this->assertStringContainsString( 'status: cancelled', $notes[0] );
+		$this->assertSame( $replacement_id, $this->head( $contract_id )->get_order_id() );
+	}
+
+	/**
+	 * A relink that loses its compare-and-set (only a writer outside Lite's lock can cause it,
+	 * simulated by a query filter) flags the late payment instead of settling it.
+	 */
+	public function test_a_replaced_order_paid_late_whose_relink_fails_is_flagged_for_a_refund(): void {
+		[ $contract_id, $order, $replacement_id ] = $this->replace_a_cancelled_renewal( 'failed' );
+		$cycles                                   = SchemaInstaller::get_table_name( SchemaInstaller::TABLE_CYCLES );
+		$relink                                   = 'order_id = ' . $order->get_id() . ',';
+		$lose                                     = static function ( string $query ) use ( $cycles, $relink ): string {
+			return 0 === strpos( $query, "UPDATE {$cycles} SET" ) && false !== strpos( $query, $relink ) ? $query . ' AND 1 = 0' : $query;
+		};
+		add_filter( 'query', $lose );
+		try {
+			wc_get_order( $order->get_id() )->payment_complete();
+		} finally {
+			remove_filter( 'query', $lose );
+		}
+
+		$notes = $this->get_order_notes_containing( $order->get_id(), 'Refund this payment' );
+		$this->assertCount( 1, $notes );
+		$this->assertStringContainsString( 'could not be moved back', $notes[0] );
+		$head = $this->head( $contract_id );
+		$this->assertSame( $replacement_id, $head->get_order_id(), 'The replacement keeps the renewal.' );
+		$this->assertSame( CycleStatus::FAILED, $head->get_status() );
+	}
+
+	/**
+	 * A relink the engine reports as made, but that left the cycle on the replacement, is
+	 * flagged for a refund instead of being settled again, so settling cannot loop. A query
+	 * filter forces it: the relink writes the replacement's id back and a fresh update time,
+	 * so the row always changes and the engine always reports the relink as made.
+	 */
+	public function test_a_relink_reported_as_made_without_moving_the_cycle_is_flagged_for_a_refund(): void {
+		[ $contract_id, $order, $replacement_id ] = $this->replace_a_cancelled_renewal( 'failed' );
+		$cycles                                   = SchemaInstaller::get_table_name( SchemaInstaller::TABLE_CYCLES );
+		$relink                                   = 'order_id = ' . $order->get_id() . ',';
+		$second                                   = 0;
+		$keep                                     = static function ( string $query ) use ( $cycles, $relink, $replacement_id, &$second ): string {
+			if ( 1 !== preg_match( "/^UPDATE `?{$cycles}`? SET /", $query ) || false === strpos( $query, $relink ) ) {
+				return $query;
+			}
+			$query = str_replace( $relink, 'order_id = ' . $replacement_id . ',', $query );
+			++$second;
+
+			return (string) preg_replace( "/date_updated_gmt = '[^']*'/", sprintf( "date_updated_gmt = '2000-01-01 00:00:%02d'", $second % 60 ), $query );
+		};
+		add_filter( 'query', $keep );
+		try {
+			wc_get_order( $order->get_id() )->payment_complete();
+		} finally {
+			remove_filter( 'query', $keep );
+		}
+
+		$this->assertGreaterThan( 0, $second, 'The filter rewrote the relink.' );
+		$notes = $this->get_order_notes_containing( $order->get_id(), 'Refund this payment' );
+		$this->assertCount( 1, $notes );
+		$this->assertStringContainsString( 'could not be moved back', $notes[0] );
+		$head = $this->head( $contract_id );
+		$this->assertSame( $replacement_id, $head->get_order_id(), 'The replacement keeps the renewal.' );
+		$this->assertSame( CycleStatus::FAILED, $head->get_status() );
+		$this->assert_lock_released( $contract_id );
 	}
 }

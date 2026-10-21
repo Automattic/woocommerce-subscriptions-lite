@@ -9,11 +9,13 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Lifecycle\Renewal;
 
+use Automattic\WooCommerce\Enums\OrderStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\CycleView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\CycleStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\SchemaInstaller;
+use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Hold;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\HoldAnchor;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\RenewalOrderBuilder;
@@ -131,6 +133,32 @@ final class SettlementTest extends LiteIntegrationTestCase {
 		$order->save();
 	}
 
+	/**
+	 * Link a pending cycle of another extension's contract to `$order`, after the Lite cycle,
+	 * so it is the newest cycle linked to the order.
+	 *
+	 * @param WC_Order $order The Lite renewal order.
+	 * @return int The foreign contract id.
+	 */
+	private function link_foreign_cycle( WC_Order $order ): int {
+		$foreign_id = $this->seed_contract( [ 'extension_slug' => 'another-extension' ] );
+		$this->add_cycle_with_lock(
+			$foreign_id,
+			[
+				'status'         => CycleStatus::PENDING,
+				'count'          => 2,
+				'starts_at_gmt'  => '2026-02-15 00:00:00',
+				'ends_at_gmt'    => '2026-03-15 00:00:00',
+				'expected_total' => '19.99',
+				'currency'       => 'USD',
+				'order_id'       => $order->get_id(),
+			]
+		);
+		$this->assertSame( $foreign_id, Contracts::find_cycles_by_order( $order->get_id() )[0]->get_contract_id(), 'The foreign cycle is the newest linked one.' );
+
+		return $foreign_id;
+	}
+
 	public function test_a_paid_order_bills_a_pending_cycle_once_and_arms_the_next_period(): void {
 		[ $contract_id, $order ] = $this->seed_renewal();
 		$this->pay( $order );
@@ -146,6 +174,7 @@ final class SettlementTest extends LiteIntegrationTestCase {
 		$this->assertSame( '2026-03-15 00:00:00', $contract->get_next_payment_gmt() );
 		$this->assertSame( '2026-02-16 10:00:00', $contract->get_last_payment_gmt() );
 		$this->assertSame( [ 'woocommerce_subscriptions_lite_renewal_paid' => 1 ], $this->fired );
+		$this->assert_lock_released( $contract_id );
 	}
 
 	public function test_a_paid_order_bills_a_processing_cycle(): void {
@@ -187,7 +216,7 @@ final class SettlementTest extends LiteIntegrationTestCase {
 				'next_payment_gmt' => null,
 			]
 		);
-		HoldAnchor::store( $contract_id, '2026-03-15 00:00:00' );
+		$this->store_hold_anchor( $contract_id, '2026-03-15 00:00:00' );
 		$this->pay( $order );
 
 		( new Settlement() )->settle( $order, $this->utc( '2026-04-01 00:00:00' ) );
@@ -210,7 +239,7 @@ final class SettlementTest extends LiteIntegrationTestCase {
 				'next_payment_gmt' => null,
 			]
 		);
-		HoldAnchor::store( $contract_id, '2026-03-15 00:00:00' );
+		$this->store_hold_anchor( $contract_id, '2026-03-15 00:00:00' );
 		$order->update_status( 'failed' );
 
 		( new Settlement() )->settle( $order, $this->utc( '2026-02-16 12:00:00' ) );
@@ -222,7 +251,7 @@ final class SettlementTest extends LiteIntegrationTestCase {
 
 	public function test_a_failed_order_on_an_active_contract_drops_a_leftover_hold_anchor(): void {
 		[ $contract_id, $order ] = $this->seed_renewal();
-		HoldAnchor::store( $contract_id, '2026-01-15 00:00:00' );
+		$this->store_hold_anchor( $contract_id, '2026-01-15 00:00:00' );
 		$order->update_status( 'failed' );
 
 		( new Settlement() )->settle( $order, $this->utc( '2026-02-16 12:00:00' ) );
@@ -289,7 +318,7 @@ final class SettlementTest extends LiteIntegrationTestCase {
 				'created_via' => RenewalOrderBuilder::CREATED_VIA,
 			]
 		);
-		Contracts::add_cycle(
+		$this->add_cycle_with_lock(
 			$contract_id,
 			[
 				'status'         => CycleStatus::PENDING,
@@ -308,6 +337,28 @@ final class SettlementTest extends LiteIntegrationTestCase {
 		$this->assertSame( CycleStatus::PENDING, $this->head( $contract_id )->get_status() );
 		$this->assertNotSame( Package::EXTENSION_SLUG, $this->get_contract( $contract_id )->get_extension_slug() );
 		$this->assertSame( ContractStatus::ACTIVE, $this->get_contract( $contract_id )->get_status() );
+	}
+
+	public function test_a_foreign_cycle_linked_to_the_same_order_is_ignored(): void {
+		[ $contract_id, $order ] = $this->seed_renewal();
+		$foreign_id              = $this->link_foreign_cycle( $order );
+		$order->update_status( OrderStatus::FAILED );
+
+		( new Settlement() )->settle( $order, $this->utc( '2026-02-16 12:00:00' ) );
+
+		$this->assertSame( CycleStatus::FAILED, $this->head( $contract_id )->get_status() );
+		$this->assertSame( CycleStatus::PENDING, $this->head( $foreign_id )->get_status() );
+		$this->assertSame( ContractStatus::ACTIVE, $this->get_contract( $foreign_id )->get_status() );
+	}
+
+	public function test_a_removed_order_ignores_a_foreign_cycle_linked_to_it(): void {
+		[ $contract_id, $order ] = $this->seed_renewal();
+		$foreign_id              = $this->link_foreign_cycle( $order );
+
+		( new Settlement() )->handle_removed_order( $order->get_id() );
+
+		$this->assertSame( CycleStatus::FAILED, $this->head( $contract_id )->get_status() );
+		$this->assertSame( CycleStatus::PENDING, $this->head( $foreign_id )->get_status() );
 	}
 
 	public function test_a_late_payment_on_a_cancelled_contract_bills_the_cycle_and_keeps_the_status(): void {
@@ -353,6 +404,7 @@ final class SettlementTest extends LiteIntegrationTestCase {
 
 		$this->assertTrue( $this->has_logged( 'settling renewal order' ) );
 		$this->assertSame( CycleStatus::BILLED, $this->head( $contract_id )->get_status() );
+		$this->assert_lock_released( $contract_id );
 	}
 
 	/**
@@ -376,7 +428,7 @@ final class SettlementTest extends LiteIntegrationTestCase {
 				'next_payment_gmt' => $next_payment,
 			]
 		);
-		HoldAnchor::store( $contract_id, $anchor );
+		$this->store_hold_anchor( $contract_id, $anchor );
 
 		( new Settlement() )->settle( $order, $this->utc( '2026-02-20 12:00:00' ) );
 
@@ -414,5 +466,202 @@ final class SettlementTest extends LiteIntegrationTestCase {
 		$this->assertSame( CycleStatus::BILLED, $this->head( $contract_id )->get_status() );
 		$this->assertSame( 1, $this->fired['woocommerce_subscriptions_lite_renewal_paid'] ?? 0 );
 		$this->assertGreaterThan( gmdate( 'Y-m-d H:i:s' ), (string) $this->get_contract( $contract_id )->get_next_payment_gmt() );
+	}
+
+	/**
+	 * Pending settlement retries for an order.
+	 *
+	 * @param int $order_id Order id.
+	 * @return array<int, int> Action ids.
+	 */
+	private function pending_retries( int $order_id ): array {
+		$actions = $this->get_pending_actions( 'woocommerce_subscriptions_lite_settle_order' );
+
+		return array_keys(
+			array_filter(
+				$actions,
+				static function ( $action ) use ( $order_id ): bool {
+					return ( $action->get_args()['order_id'] ?? null ) === $order_id;
+				}
+			)
+		);
+	}
+
+	public function test_a_paid_order_under_another_operations_lock_is_retried_once_and_settles_after_release(): void {
+		[ $contract_id, $order ] = $this->seed_renewal();
+		$lock                    = $this->hold_lock( $contract_id, 'hold' );
+		$this->pay( $order );
+
+		( new Settlement() )->handle_order( $order->get_id() );
+		( new Settlement() )->handle_order( $order->get_id() );
+
+		$this->assertCount( 1, $this->pending_retries( $order->get_id() ), 'One retry, however many signals.' );
+		$this->assertSame( CycleStatus::PENDING, $this->head( $contract_id )->get_status(), 'Nothing written under the other lock.' );
+		$this->assertSame( [], $this->fired );
+
+		$lock->release();
+		( new Settlement() )->retry( $order->get_id() );
+
+		$this->assertSame( CycleStatus::BILLED, $this->head( $contract_id )->get_status() );
+		$this->assertSame( ContractStatus::ACTIVE, $this->get_contract( $contract_id )->get_status() );
+		$this->assertNotNull( $this->get_contract( $contract_id )->get_next_payment_gmt(), 'Re-armed.' );
+		$this->assertSame( [ 'woocommerce_subscriptions_lite_renewal_paid' => 1 ], $this->fired );
+		$this->assert_lock_released( $contract_id );
+	}
+
+	public function test_settle_under_another_operations_lock_returns_the_conflict_and_writes_nothing(): void {
+		[ $contract_id, $order ] = $this->seed_renewal();
+		$lock                    = $this->hold_lock( $contract_id, 'hold' );
+		$this->pay( $order );
+
+		$conflict = ( new Settlement() )->settle( $order, $this->utc( '2026-02-16 12:00:00' ) );
+
+		$this->assert_lock_conflict( $conflict, $contract_id, 'hold' );
+		$this->assertSame( CycleStatus::PENDING, $this->head( $contract_id )->get_status() );
+		$this->assertSame( [], $this->fired );
+		$lock->release();
+		$this->assertNull( ( new Settlement() )->settle( $order, $this->utc( '2026-02-16 12:00:00' ) ) );
+		$this->assertSame( CycleStatus::BILLED, $this->head( $contract_id )->get_status() );
+	}
+
+	public function test_a_retry_refused_again_schedules_the_next_one(): void {
+		[ $contract_id, $order ] = $this->seed_renewal();
+		$this->hold_lock( $contract_id, 'hold' );
+		$this->pay( $order );
+		( new Settlement() )->handle_order( $order->get_id() );
+		$first = $this->pending_retries( $order->get_id() );
+		\ActionScheduler::store()->mark_complete( (int) $first[0] );
+
+		( new Settlement() )->retry( $order->get_id() );
+
+		$this->assertCount( 1, $this->pending_retries( $order->get_id() ) );
+		$this->assertSame( CycleStatus::PENDING, $this->head( $contract_id )->get_status() );
+	}
+
+	public function test_a_running_retry_refused_again_schedules_the_next_one(): void {
+		[ $contract_id, $order ] = $this->seed_renewal();
+		$this->hold_lock( $contract_id, 'hold' );
+		$this->pay( $order );
+		( new Settlement() )->handle_order( $order->get_id() );
+		$running = $this->pending_retries( $order->get_id() );
+		\ActionScheduler::store()->log_execution( (int) $running[0] );
+
+		( new Settlement() )->retry( $order->get_id() );
+
+		$next = $this->pending_retries( $order->get_id() );
+		$this->assertCount( 1, $next, 'The running retry does not count as pending.' );
+		$this->assertNotSame( $running, $next );
+		$this->assertSame( CycleStatus::PENDING, $this->head( $contract_id )->get_status() );
+	}
+
+	public function test_an_unpaid_renewal_order_deleted_under_another_lock_fails_its_cycle_on_the_retry(): void {
+		[ $contract_id, $order ] = $this->seed_renewal();
+		$lock                    = $this->hold_lock( $contract_id, 'renewal' );
+		$order_id                = $order->get_id();
+
+		( new Settlement() )->handle_removed_order( $order_id );
+		$order->delete( true );
+		$this->assertCount( 1, $this->pending_retries( $order_id ) );
+		$this->assertSame( CycleStatus::PENDING, $this->head( $contract_id )->get_status() );
+
+		$lock->release();
+		( new Settlement() )->retry( $order_id );
+
+		$cycle = $this->head( $contract_id );
+		$this->assertSame( CycleStatus::FAILED, $cycle->get_status() );
+		$this->assertSame( Settlement::REASON_ORDER_CANCELLED, $cycle->get_reason() );
+		$contract = $this->get_contract( $contract_id );
+		$this->assertSame( ContractStatus::ON_HOLD, $contract->get_status() );
+		$this->assertNull( $contract->get_next_payment_gmt() );
+		$this->assertSame( '', Contracts::get_meta( $contract_id, HoldAnchor::META_KEY, true ), 'The system hold carries no anchor.' );
+		$this->assert_lock_released( $contract_id );
+	}
+
+	public function test_a_paid_order_whose_cycle_was_cancelled_is_flagged_for_a_refund_once(): void {
+		[ $contract_id, $order ] = $this->seed_renewal();
+		$this->transition_cycle_with_lock(
+			$contract_id,
+			$this->head( $contract_id )->get_id(),
+			[
+				'from_status' => CycleStatus::PENDING,
+				'to_status'   => CycleStatus::CANCELLED,
+			]
+		);
+		$this->pay( $order );
+
+		( new Settlement() )->settle( $order, $this->utc( '2026-02-16 12:00:00' ) );
+		( new Settlement() )->settle( $order, $this->utc( '2026-02-16 12:00:00' ) );
+
+		$this->assertCount( 1, $this->get_order_notes_containing( $order->get_id(), 'Refund this payment' ) );
+		$this->assertSame( '1', (string) wc_get_order( $order->get_id() )->get_meta( '_wcsl_refund_flagged' ) );
+		$this->assertSame( CycleStatus::CANCELLED, $this->head( $contract_id )->get_status() );
+		$this->assertSame( [], $this->fired );
+	}
+
+	/**
+	 * A customer hold that takes the lock first is not overwritten: the settlement retries and
+	 * then reads the contract on hold with its anchor, so the hold absorbs the payment.
+	 */
+	public function test_a_settlement_racing_a_customer_hold_keeps_the_hold(): void {
+		[ $contract_id, $order ] = $this->seed_renewal();
+		$hold_lock               = $this->hold_lock( $contract_id, Hold::OPERATION );
+		$this->pay( $order );
+
+		( new Settlement() )->handle_order( $order->get_id() );
+		$hold_lock->release();
+		( new Hold() )->hold( $contract_id );
+		( new Settlement() )->retry( $order->get_id() );
+
+		$this->assertSame( CycleStatus::BILLED, $this->head( $contract_id )->get_status() );
+		$contract = $this->get_contract( $contract_id );
+		$this->assertSame( ContractStatus::ON_HOLD, $contract->get_status(), 'The customer hold stands.' );
+		$this->assertNull( $contract->get_next_payment_gmt() );
+		$this->assertNotSame( '', Contracts::get_meta( $contract_id, HoldAnchor::META_KEY, true ), 'The hold keeps its anchor.' );
+	}
+
+	public function test_the_bound_listeners_retry_a_refused_settlement_through_the_retry_hook(): void {
+		[ $contract_id, $order ] = $this->seed_renewal();
+		Settlement::register();
+		$lock = $this->hold_lock( $contract_id, 'hold' );
+
+		$order->payment_complete();
+
+		$this->assertCount( 1, $this->pending_retries( $order->get_id() ) );
+		$this->assertSame( CycleStatus::PENDING, $this->head( $contract_id )->get_status() );
+
+		$lock->release();
+		do_action( 'woocommerce_subscriptions_lite_settle_order', $order->get_id() );
+
+		$this->assertSame( CycleStatus::BILLED, $this->head( $contract_id )->get_status() );
+	}
+
+	public function test_a_retry_carries_whether_the_order_was_paid(): void {
+		[ $contract_id, $order ] = $this->seed_renewal();
+		$this->hold_lock( $contract_id, 'hold' );
+		$this->pay( $order );
+
+		( new Settlement() )->handle_order( $order->get_id() );
+
+		$actions = $this->get_pending_actions(
+			'woocommerce_subscriptions_lite_settle_order',
+			[
+				'order_id' => $order->get_id(),
+				'paid'     => true,
+			]
+		);
+		$this->assertCount( 1, $actions );
+	}
+
+	public function test_a_paid_order_deleted_before_its_retry_fails_nothing_and_logs_a_warning(): void {
+		[ $contract_id, $order ] = $this->seed_renewal();
+		$order_id                = $order->get_id();
+		$order->delete( true );
+		$this->capture_log();
+
+		( new Settlement() )->retry( $order_id, true );
+
+		$this->assertSame( CycleStatus::PENDING, $this->head( $contract_id )->get_status(), 'The cycle is not failed.' );
+		$this->assertSame( ContractStatus::ACTIVE, $this->get_contract( $contract_id )->get_status(), 'The contract is not held.' );
+		$this->assertTrue( $this->has_logged( 'was paid and then deleted before its settlement' ) );
 	}
 }

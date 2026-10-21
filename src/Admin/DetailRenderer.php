@@ -178,7 +178,10 @@ final class DetailRenderer {
 			</h1>
 			<hr class="wp-header-end" />
 
-			<?php PageController::render_flash_notice(); ?>
+			<?php
+			PageController::render_flash_notice();
+			self::render_lock_notice( $contract );
+			?>
 
 			<?php
 			wp_nonce_field( 'meta-box-order', 'meta-box-order-nonce', false );
@@ -200,6 +203,32 @@ final class DetailRenderer {
 			</div>
 		</div>
 		<?php
+	}
+
+	/**
+	 * Inline notice while another operation holds the contract's lock (state as of the read).
+	 * Renew now / Cancel stay offered: the lock may lapse before the merchant acts, and a
+	 * refused action already returns the conflict notice.
+	 *
+	 * @param ContractView $contract The contract being viewed.
+	 */
+	private static function render_lock_notice( ContractView $contract ): void {
+		$lock = $contract->get_lock_state();
+		if ( null === $lock ) {
+			return;
+		}
+
+		$format = wc_date_format() . ' ' . wc_time_format();
+		printf(
+			'<div class="notice notice-warning inline wc-subs-lite-lock-notice"><p>%s</p></div>',
+			esc_html(
+				StatusLabels::get_lock_conflict_message( $contract->get_id(), $lock['operation'] ) . ' ' . sprintf(
+					/* translators: %s: date and time the lock expires. */
+					__( 'Try again after %s.', 'woocommerce-subscriptions-lite' ),
+					(string) wp_date( $format, $lock['locked_until']->getTimestamp() )
+				)
+			)
+		);
 	}
 
 	/**

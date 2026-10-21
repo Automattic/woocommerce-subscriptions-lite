@@ -94,10 +94,31 @@ final class ContractCreationOutcomesTest extends LiteIntegrationTestCase {
 		$created = ( new ContractCreationHandler() )->create_contract( $order, $plan );
 		$this->assertInstanceOf( ContractView::class, $created );
 
+		// Written under the checkout lock, so the returned view still shows it; a fresh read
+		// after the release does not, and otherwise matches.
+		$this->assertSame( ContractCreationHandler::OPERATION, $created->get_lock_state()['operation'] ?? null );
 		$view = Contracts::get( $created->get_id() );
-		$this->assertEquals( $view, $created, 'The returned view matches a fresh read.' );
+		$this->assertNull( $view->get_lock_state() );
+		$this->assertSame( $this->get_unlocked_fields( $view ), $this->get_unlocked_fields( $created ), 'The returned view matches a fresh read.' );
 
 		return $view;
+	}
+
+	/**
+	 * Every public getter of the view except the lock state, by method name.
+	 *
+	 * @param ContractView $view The view.
+	 * @return array<string, mixed>
+	 */
+	private function get_unlocked_fields( ContractView $view ): array {
+		$fields = [];
+		foreach ( get_class_methods( $view ) as $method ) {
+			if ( 0 === strpos( $method, 'get_' ) && 'get_lock_state' !== $method ) {
+				$fields[ $method ] = $view->$method();
+			}
+		}
+
+		return $fields;
 	}
 
 	public function test_a_taxed_discounted_order_records_its_recurring_money(): void {
@@ -169,7 +190,7 @@ final class ContractCreationOutcomesTest extends LiteIntegrationTestCase {
 			'An order note names the draft.'
 		);
 		$this->assertSame( '', $this->deferral_reason( $order ), 'The draft, not a deferral flag, holds the retries.' );
-		$this->assertSame( [], $this->notes_containing( $order, 'creation_failed' ) );
+		$this->assertSame( [], $this->get_order_notes_containing( $order->get_id(), 'creation_failed' ) );
 	}
 
 	public function test_an_unparseable_plan_billing_payload_defers_the_order(): void {
@@ -197,7 +218,7 @@ final class ContractCreationOutcomesTest extends LiteIntegrationTestCase {
 
 		$this->assertSame( [], Contracts::find_by_origin_order( $order->get_id() ) );
 		$this->assertSame( ContractCreationHandler::REASON_PLAN_UNAVAILABLE, $this->deferral_reason( $order ), 'The stamped line whose plan is not billable defers the order.' );
-		$this->assertNotEmpty( $this->notes_containing( $order, 'plan_unavailable' ), 'An order note records the deferral.' );
+		$this->assertNotEmpty( $this->get_order_notes_containing( $order->get_id(), 'plan_unavailable' ), 'An order note records the deferral.' );
 	}
 
 	public function test_a_failed_contract_insert_is_noted_and_retried_on_the_next_paid_status(): void {
@@ -223,8 +244,8 @@ final class ContractCreationOutcomesTest extends LiteIntegrationTestCase {
 
 		$this->assertSame( [], Contracts::find_by_origin_order( $order->get_id() ), 'The insert failed, so no contract exists.' );
 		$this->assertSame( '', $this->deferral_reason( $order ), 'A database failure may be transient, so nothing blocks a retry.' );
-		$this->assertSame( [], $this->notes_containing( $order, 'creation_failed' ) );
-		$this->assertCount( 1, $this->notes_containing( $order, 'will be retried on the next paid status change' ), 'The merchant can see the failure.' );
+		$this->assertSame( [], $this->get_order_notes_containing( $order->get_id(), 'creation_failed' ) );
+		$this->assertCount( 1, $this->get_order_notes_containing( $order->get_id(), 'will be retried on the next paid status change' ), 'The merchant can see the failure.' );
 
 		// The next paid transition retries and, with the database back, creates the contract.
 		$order->update_status( 'completed' );
@@ -254,7 +275,7 @@ final class ContractCreationOutcomesTest extends LiteIntegrationTestCase {
 
 		$this->assertSame( [], Contracts::find_by_origin_order( $order->get_id() ) );
 		$this->assertSame( ContractCreationHandler::REASON_CREATION_FAILED, $this->deferral_reason( $order ) );
-		$this->assertCount( 1, $this->notes_containing( $order, 'creation_failed' ), 'The deferral flag stops the retry.' );
+		$this->assertCount( 1, $this->get_order_notes_containing( $order->get_id(), 'creation_failed' ), 'The deferral flag stops the retry.' );
 	}
 
 	/**
@@ -280,21 +301,5 @@ final class ContractCreationOutcomesTest extends LiteIntegrationTestCase {
 		$this->assertInstanceOf( WC_Order::class, $fresh );
 
 		return (string) $fresh->get_meta( ContractCreationHandler::CREATION_DEFERRED_META );
-	}
-
-	/**
-	 * The order notes containing `$needle`.
-	 *
-	 * @param WC_Order $order  The order.
-	 * @param string   $needle Text to look for.
-	 * @return array<int, string>
-	 */
-	private function notes_containing( WC_Order $order, string $needle ): array {
-		$notes = array_map(
-			static fn ( $note ): string => (string) $note->content,
-			wc_get_order_notes( [ 'order_id' => $order->get_id() ] )
-		);
-
-		return array_values( array_filter( $notes, static fn ( string $note ): bool => false !== strpos( $note, $needle ) ) );
 	}
 }

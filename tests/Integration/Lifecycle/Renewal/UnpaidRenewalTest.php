@@ -60,7 +60,7 @@ final class UnpaidRenewalTest extends LiteIntegrationTestCase {
 
 	public function test_a_pending_renewal_without_an_order_is_not_unpaid(): void {
 		$contract_id = $this->create_contract( $this->create_customer(), [ 'payment_method' => 'cod' ] );
-		Contracts::add_cycle(
+		$this->add_cycle_with_lock(
 			$contract_id,
 			[
 				'status'         => CycleStatus::PENDING,

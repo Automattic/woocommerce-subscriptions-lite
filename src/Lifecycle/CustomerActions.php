@@ -16,6 +16,7 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Lifecycle;
 
 use WP_Error;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\ContractActions;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\ContractLockedException;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 use Automattic\WooCommerce\SubscriptionsLite\Contracts\CustomerVisibility;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
@@ -131,10 +132,11 @@ final class CustomerActions {
 
 	/**
 	 * Run a lifecycle flow and map its outcome: a missing contract is a 404, a status the flow
-	 * rejects a 409.
+	 * rejects a 409, and a lock conflict (lost acquire or refused write) a 409 the portal shows
+	 * (its retry advice comes from the portal's error suffix), with only its code and message.
 	 *
-	 * @param callable( int ): ?ContractView $flow        Lifecycle flow method.
-	 * @param int                            $contract_id Contract id.
+	 * @param callable( int ): (ContractView|WP_Error|null) $flow        Lifecycle flow method.
+	 * @param int                                           $contract_id Contract id.
 	 * @return ContractView|WP_Error
 	 */
 	private static function run( callable $flow, int $contract_id ) {
@@ -146,6 +148,12 @@ final class CustomerActions {
 				__( 'That action is not available for this subscription right now.', 'woocommerce-subscriptions-lite' ),
 				[ 'status' => 409 ]
 			);
+		} catch ( ContractLockedException $e ) {
+			$result = HeldLocks::get_refused_conflict( $e );
+		}
+
+		if ( $result instanceof WP_Error ) {
+			return new WP_Error( $result->get_error_code(), $result->get_error_message(), [ 'status' => 409 ] );
 		}
 
 		if ( null === $result ) {

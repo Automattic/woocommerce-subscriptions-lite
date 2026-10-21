@@ -50,7 +50,7 @@ final class RenewalOrderBuilderTest extends LiteIntegrationTestCase {
 	 * @param string $expected_total Expected total.
 	 */
 	private function add_cycle_two( int $contract_id, string $expected_total = '19.99' ): CycleView {
-		return Contracts::add_cycle(
+		return $this->add_cycle_with_lock(
 			$contract_id,
 			[
 				'status'         => CycleStatus::PENDING,
