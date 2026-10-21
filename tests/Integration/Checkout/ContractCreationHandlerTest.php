@@ -31,6 +31,7 @@ use Automattic\WooCommerce\SubscriptionsLite\Plans\ApplicabilityStore;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ProductApplicability;
 use Automattic\WooCommerce\SubscriptionsLite\Utilities\ScheduledActions;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
+use DomainException;
 use WC_Order;
 use WC_Order_Item_Fee;
 use WC_Order_Item_Shipping;
@@ -504,6 +505,31 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 		$this->assertNull( ( new ContractCreationHandler() )->create_contract( $order, $plan ), 'The creation key is taken.' );
 
 		$this->assertCount( 1, Contracts::list_for_customer( $customer_id ) );
+	}
+
+	public function test_create_contract_refuses_a_plan_without_billing_terms(): void {
+		$plan  = $this->make_unvalidated_plan(
+			'month',
+			1,
+			null,
+			[
+				'billing_policy' => [
+					'period'   => 'month',
+					'interval' => '1',
+				],
+			]
+		);
+		$order = $this->create_subscription_order( $this->create_customer() );
+		$this->apply_and_stamp( $order, $plan );
+
+		try {
+			( new ContractCreationHandler() )->create_contract( $order, $plan );
+			$this->fail( 'A plan without billing terms must be refused.' );
+		} catch ( DomainException $e ) {
+			$this->assertStringContainsString( 'no billable billing terms', $e->getMessage() );
+		}
+
+		$this->assertSame( [], Contracts::find_by_origin_order( $order->get_id() ) );
 	}
 
 	/**

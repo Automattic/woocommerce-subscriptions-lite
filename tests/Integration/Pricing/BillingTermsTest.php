@@ -11,7 +11,6 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Pricing;
 
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\PlanView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Support\ValidationErrorCode;
-use Automattic\WooCommerce\SubscriptionsEngine\Core\ValueObject\BillingPolicy;
 use Automattic\WooCommerce\SubscriptionsLite\Pricing\BillingTerms;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
 use DateTimeImmutable;
@@ -625,7 +624,10 @@ final class BillingTermsTest extends LiteIntegrationTestCase {
 			]
 		);
 
-		$next = BillingTerms::get_first_renewal_from( $plan, new DateTimeImmutable( '2026-01-01 00:00:00', new DateTimeZone( 'UTC' ) ) );
+		$terms = BillingTerms::from_plan( $plan );
+		$this->assertInstanceOf( BillingTerms::class, $terms );
+
+		$next = $terms->get_first_renewal_from( new DateTimeImmutable( '2026-01-01 00:00:00', new DateTimeZone( 'UTC' ) ) );
 
 		$this->assertSame( '2026-01-15 00:00:00', $next->format( 'Y-m-d H:i:s' ) );
 	}
@@ -691,9 +693,10 @@ final class BillingTermsTest extends LiteIntegrationTestCase {
 	 * @param string               $start          Contract start (UTC unless it carries an offset).
 	 */
 	private function first_renewal( array $billing_policy, string $start ): string {
-		$plan = $this->make_plan( 'month', 1, null, [ 'billing_policy' => $billing_policy ] );
+		$terms = BillingTerms::from_plan( $this->make_plan( 'month', 1, null, [ 'billing_policy' => $billing_policy ] ) );
+		$this->assertInstanceOf( BillingTerms::class, $terms );
 
-		return BillingTerms::get_first_renewal_from( $plan, new DateTimeImmutable( $start, new DateTimeZone( 'UTC' ) ) )->format( 'Y-m-d H:i:s' );
+		return $terms->get_first_renewal_from( new DateTimeImmutable( $start, new DateTimeZone( 'UTC' ) ) )->format( 'Y-m-d H:i:s' );
 	}
 
 	/**
@@ -724,13 +727,16 @@ final class BillingTermsTest extends LiteIntegrationTestCase {
 	}
 
 	/**
-	 * A billing policy.
+	 * Billing terms read from a plan with the given cadence.
 	 *
 	 * @param string $period   Period.
 	 * @param int    $interval Interval.
 	 */
-	private function policy( string $period = 'month', int $interval = 1 ): BillingPolicy {
-		return new BillingPolicy( $period, $interval, null, null, null );
+	private function terms( string $period = 'month', int $interval = 1 ): BillingTerms {
+		$terms = BillingTerms::from_plan( $this->make_plan( $period, $interval ) );
+		$this->assertInstanceOf( BillingTerms::class, $terms );
+
+		return $terms;
 	}
 
 	/**
@@ -744,20 +750,20 @@ final class BillingTermsTest extends LiteIntegrationTestCase {
 	}
 
 	public function test_a_future_anchor_starts_the_period(): void {
-		$period = BillingTerms::get_period_to_bill( $this->utc( '2026-05-01 00:00:00' ), $this->utc( '2026-04-15 00:00:00' ), $this->policy() );
+		$period = $this->terms()->get_period_to_bill( $this->utc( '2026-05-01 00:00:00' ), $this->utc( '2026-04-15 00:00:00' ) );
 
 		$this->assertSame( [ '2026-05-01 00:00:00', '2026-06-01 00:00:00' ], $this->format( $period ) );
 	}
 
 	public function test_an_anchor_due_now_bills_the_period_starting_at_it(): void {
-		$period = BillingTerms::get_period_to_bill( $this->utc( '2026-05-01 00:00:00' ), $this->utc( '2026-05-01 00:00:00' ), $this->policy() );
+		$period = $this->terms()->get_period_to_bill( $this->utc( '2026-05-01 00:00:00' ), $this->utc( '2026-05-01 00:00:00' ) );
 
 		$this->assertSame( [ '2026-05-01 00:00:00', '2026-06-01 00:00:00' ], $this->format( $period ) );
 	}
 
 	public function test_an_anchor_several_periods_behind_bills_the_one_period_containing_now(): void {
 		$now    = $this->utc( '2026-04-15 12:00:00' );
-		$period = BillingTerms::get_period_to_bill( $this->utc( '2026-01-01 00:00:00' ), $now, $this->policy() );
+		$period = $this->terms()->get_period_to_bill( $this->utc( '2026-01-01 00:00:00' ), $now );
 
 		$this->assertSame( [ '2026-04-01 00:00:00', '2026-05-01 00:00:00' ], $this->format( $period ) );
 		$this->assertLessThanOrEqual( $now, $period[0] );
@@ -765,7 +771,7 @@ final class BillingTermsTest extends LiteIntegrationTestCase {
 	}
 
 	public function test_a_boundary_equal_to_now_rolls_into_the_next_period(): void {
-		$period = BillingTerms::get_period_to_bill( $this->utc( '2026-03-01 00:00:00' ), $this->utc( '2026-04-01 00:00:00' ), $this->policy() );
+		$period = $this->terms()->get_period_to_bill( $this->utc( '2026-03-01 00:00:00' ), $this->utc( '2026-04-01 00:00:00' ) );
 
 		$this->assertSame( [ '2026-04-01 00:00:00', '2026-05-01 00:00:00' ], $this->format( $period ) );
 	}
@@ -773,26 +779,26 @@ final class BillingTermsTest extends LiteIntegrationTestCase {
 	public function test_get_period_to_bill_floors_at_now_and_logs_when_the_roll_cap_runs_out(): void {
 		$this->capture_log();
 
-		$period = BillingTerms::get_period_to_bill( $this->utc( '2020-01-01 00:00:00' ), $this->utc( '2026-07-06 00:00:00' ), $this->policy( 'day' ) );
+		$period = $this->terms( 'day' )->get_period_to_bill( $this->utc( '2020-01-01 00:00:00' ), $this->utc( '2026-07-06 00:00:00' ) );
 
 		$this->assertSame( [ '2026-07-06 00:00:00', '2026-07-07 00:00:00' ], $this->format( $period ) );
 		$this->assertTrue( $this->has_logged( 'exhausted the roll cap' ) );
 	}
 
 	public function test_get_next_due_after_keeps_a_future_moment(): void {
-		$next = BillingTerms::get_next_due_after( $this->utc( '2026-06-01 00:00:00' ), $this->utc( '2026-05-15 00:00:00' ), $this->policy() );
+		$next = $this->terms()->get_next_due_after( $this->utc( '2026-06-01 00:00:00' ), $this->utc( '2026-05-15 00:00:00' ) );
 
 		$this->assertSame( '2026-06-01 00:00:00', $next->format( 'Y-m-d H:i:s' ) );
 	}
 
 	public function test_get_next_due_after_rolls_a_past_moment_past_now(): void {
-		$next = BillingTerms::get_next_due_after( $this->utc( '2026-02-01 00:00:00' ), $this->utc( '2026-04-15 09:30:00' ), $this->policy() );
+		$next = $this->terms()->get_next_due_after( $this->utc( '2026-02-01 00:00:00' ), $this->utc( '2026-04-15 09:30:00' ) );
 
 		$this->assertSame( '2026-05-01 00:00:00', $next->format( 'Y-m-d H:i:s' ) );
 	}
 
 	public function test_get_next_due_after_rolls_a_moment_equal_to_now(): void {
-		$next = BillingTerms::get_next_due_after( $this->utc( '2026-04-01 00:00:00' ), $this->utc( '2026-04-01 00:00:00' ), $this->policy( 'week', 2 ) );
+		$next = $this->terms( 'week', 2 )->get_next_due_after( $this->utc( '2026-04-01 00:00:00' ), $this->utc( '2026-04-01 00:00:00' ) );
 
 		$this->assertSame( '2026-04-15 00:00:00', $next->format( 'Y-m-d H:i:s' ) );
 	}
@@ -800,34 +806,34 @@ final class BillingTermsTest extends LiteIntegrationTestCase {
 	public function test_get_next_due_after_floors_one_period_after_now_when_the_roll_cap_runs_out(): void {
 		$this->capture_log();
 
-		$next = BillingTerms::get_next_due_after( $this->utc( '2020-01-01 00:00:00' ), $this->utc( '2026-07-06 00:00:00' ), $this->policy( 'day' ) );
+		$next = $this->terms( 'day' )->get_next_due_after( $this->utc( '2020-01-01 00:00:00' ), $this->utc( '2026-07-06 00:00:00' ) );
 
 		$this->assertSame( '2026-07-07 00:00:00', $next->format( 'Y-m-d H:i:s' ) );
 		$this->assertTrue( $this->has_logged( 'exhausted the roll cap' ) );
 	}
 
 	public function test_a_month_end_anchor_rolls_with_overflow(): void {
-		$period = BillingTerms::get_period_to_bill( $this->utc( '2026-01-31 00:00:00' ), $this->utc( '2026-03-10 00:00:00' ), $this->policy() );
+		$period = $this->terms()->get_period_to_bill( $this->utc( '2026-01-31 00:00:00' ), $this->utc( '2026-03-10 00:00:00' ) );
 
 		$this->assertSame( [ '2026-03-03 00:00:00', '2026-04-03 00:00:00' ], $this->format( $period ) );
 	}
 
 	public function test_get_next_due_after_overflows_a_month_end(): void {
-		$next = BillingTerms::get_next_due_after( $this->utc( '2026-01-31 00:00:00' ), $this->utc( '2026-02-15 00:00:00' ), $this->policy() );
+		$next = $this->terms()->get_next_due_after( $this->utc( '2026-01-31 00:00:00' ), $this->utc( '2026-02-15 00:00:00' ) );
 
 		$this->assertSame( '2026-03-03 00:00:00', $next->format( 'Y-m-d H:i:s' ) );
 	}
 
 	public function test_a_leap_day_anchor_rolls_by_year(): void {
-		$period = BillingTerms::get_period_to_bill( $this->utc( '2024-02-29 00:00:00' ), $this->utc( '2025-06-01 00:00:00' ), $this->policy( 'year' ) );
-		$next   = BillingTerms::get_next_due_after( $this->utc( '2024-02-29 00:00:00' ), $this->utc( '2024-03-01 00:00:00' ), $this->policy( 'year' ) );
+		$period = $this->terms( 'year' )->get_period_to_bill( $this->utc( '2024-02-29 00:00:00' ), $this->utc( '2025-06-01 00:00:00' ) );
+		$next   = $this->terms( 'year' )->get_next_due_after( $this->utc( '2024-02-29 00:00:00' ), $this->utc( '2024-03-01 00:00:00' ) );
 
 		$this->assertSame( [ '2025-03-01 00:00:00', '2026-03-01 00:00:00' ], $this->format( $period ) );
 		$this->assertSame( '2025-03-01 00:00:00', $next->format( 'Y-m-d H:i:s' ) );
 	}
 
 	public function test_a_non_utc_anchor_is_billed_in_utc(): void {
-		$period = BillingTerms::get_period_to_bill( new DateTimeImmutable( '2026-01-31T23:30:00+02:00' ), $this->utc( '2026-02-01 00:00:00' ), $this->policy() );
+		$period = $this->terms()->get_period_to_bill( new DateTimeImmutable( '2026-01-31T23:30:00+02:00' ), $this->utc( '2026-02-01 00:00:00' ) );
 
 		$this->assertSame( [ '2026-01-31 21:30:00', '2026-03-03 21:30:00' ], $this->format( $period ) );
 	}

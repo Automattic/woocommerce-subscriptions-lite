@@ -28,7 +28,6 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Pricing;
 
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\PlanView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Support\ValidationErrorCode;
-use Automattic\WooCommerce\SubscriptionsEngine\Core\ValueObject\BillingPolicy;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 use DateTimeImmutable;
 use DateTimeZone;
@@ -288,25 +287,29 @@ final class BillingTerms {
 	}
 
 	/**
-	 * The first renewal moment of a contract on `$plan` starting at `$start`.
+	 * The first renewal of a contract starting at `$start` (UTC): the end of the trial when the
+	 * terms have one, else one cadence after the start.
 	 *
-	 * @param PlanView          $plan  Plan.
 	 * @param DateTimeImmutable $start Contract start.
-	 * @throws \DomainException When the billing payload is not billable.
 	 */
-	public static function get_first_renewal_from( PlanView $plan, DateTimeImmutable $start ): DateTimeImmutable {
-		return self::parse_first_renewal( $plan->get_billing_policy() ?? [], $start );
+	public function get_first_renewal_from( DateTimeImmutable $start ): DateTimeImmutable {
+		if ( null === $this->trial_duration ) {
+			return $this->get_next_renewal_from( $start );
+		}
+
+		return $start->setTimezone( new DateTimeZone( 'UTC' ) )
+			->modify( sprintf( '+%d %s', $this->trial_duration['length'], $this->trial_duration['unit'] ) );
 	}
 
 	/**
-	 * Parse a billing payload with the engine's `BillingPolicy` and compute the first renewal.
+	 * One cadence after `$anchor`, in UTC. Calendar math follows `DateTimeImmutable::modify()`:
+	 * 31 Jan + 1 month is 3 Mar, not 28 Feb.
 	 *
-	 * @param array<string, mixed> $policy Billing payload.
-	 * @param DateTimeImmutable    $start  Contract start.
-	 * @throws \DomainException When the payload does not parse or has no usable cadence.
+	 * @param DateTimeImmutable $anchor The moment to add the cadence to.
 	 */
-	private static function parse_first_renewal( array $policy, DateTimeImmutable $start ): DateTimeImmutable {
-		return BillingPolicy::from_array( $policy )->compute_first_renewal_from( $start );
+	private function get_next_renewal_from( DateTimeImmutable $anchor ): DateTimeImmutable {
+		return $anchor->setTimezone( new DateTimeZone( 'UTC' ) )
+			->modify( sprintf( '+%d %s', $this->interval, $this->period ) );
 	}
 
 	/**
@@ -316,25 +319,24 @@ final class BillingTerms {
 	 *
 	 * @param DateTimeImmutable $anchor The due moment the renewal was anchored on.
 	 * @param DateTimeImmutable $now    The current moment.
-	 * @param BillingPolicy     $policy The plan's billing policy.
 	 * @return array{0: DateTimeImmutable, 1: DateTimeImmutable} Period start and end (UTC).
 	 */
-	public static function get_period_to_bill( DateTimeImmutable $anchor, DateTimeImmutable $now, BillingPolicy $policy ): array {
+	public function get_period_to_bill( DateTimeImmutable $anchor, DateTimeImmutable $now ): array {
 		$utc   = new DateTimeZone( 'UTC' );
 		$start = $anchor->setTimezone( $utc );
 		$now   = $now->setTimezone( $utc );
-		$end   = $policy->compute_next_renewal_from( $start );
+		$end   = $this->get_next_renewal_from( $start );
 
 		$rolls_left = self::MAX_ROLLS;
 		while ( $end <= $now && $rolls_left-- > 0 ) {
 			$start = $end;
-			$end   = $policy->compute_next_renewal_from( $start );
+			$end   = $this->get_next_renewal_from( $start );
 		}
 
 		if ( $end <= $now ) {
 			self::log_cap( 'get_period_to_bill', $anchor );
 			$start = $now;
-			$end   = $policy->compute_next_renewal_from( $start );
+			$end   = $this->get_next_renewal_from( $start );
 		}
 
 		return [ $start, $end ];
@@ -345,23 +347,22 @@ final class BillingTerms {
 	 * whole cadences until it is. When the roll cap runs out it is one cadence after `$now`
 	 * (logged).
 	 *
-	 * @param DateTimeImmutable $from   The moment to start from (typically a period end).
-	 * @param DateTimeImmutable $now    The current moment.
-	 * @param BillingPolicy     $policy The plan's billing policy.
+	 * @param DateTimeImmutable $from The moment to start from (typically a period end).
+	 * @param DateTimeImmutable $now  The current moment.
 	 */
-	public static function get_next_due_after( DateTimeImmutable $from, DateTimeImmutable $now, BillingPolicy $policy ): DateTimeImmutable {
+	public function get_next_due_after( DateTimeImmutable $from, DateTimeImmutable $now ): DateTimeImmutable {
 		$utc  = new DateTimeZone( 'UTC' );
 		$next = $from->setTimezone( $utc );
 		$now  = $now->setTimezone( $utc );
 
 		$rolls_left = self::MAX_ROLLS;
 		while ( $next <= $now && $rolls_left-- > 0 ) {
-			$next = $policy->compute_next_renewal_from( $next );
+			$next = $this->get_next_renewal_from( $next );
 		}
 
 		if ( $next <= $now ) {
 			self::log_cap( 'get_next_due_after', $from );
-			$next = $policy->compute_next_renewal_from( $now );
+			$next = $this->get_next_renewal_from( $now );
 		}
 
 		return $next;
