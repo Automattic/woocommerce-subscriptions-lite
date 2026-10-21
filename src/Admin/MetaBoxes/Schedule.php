@@ -19,7 +19,6 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Admin\MetaBoxes;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\Formatting;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ContractPlans;
-use Automattic\WooCommerce\SubscriptionsLite\Pricing\BillingTerms;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -76,19 +75,19 @@ final class Schedule {
 	 * @return array<int, array{label: string, value: string}>
 	 */
 	private static function plan_rows( ContractView $contract ): array {
-		$policy = BillingTerms::from_plan( ContractPlans::for_contract( $contract ) );
-		if ( null === $policy ) {
+		$terms = ContractPlans::get_billing_terms_for( $contract );
+		if ( null === $terms ) {
 			return [];
 		}
 
 		$rows = [
 			[
 				'label' => __( 'Billing', 'woocommerce-subscriptions-lite' ),
-				'value' => esc_html( Formatting::billing_cadence( $policy->get_period(), $policy->get_interval() ) ),
+				'value' => esc_html( Formatting::billing_cadence( $terms->get_period(), $terms->get_interval() ) ),
 			],
 		];
 
-		$max_cycles = $policy->get_max_cycles();
+		$max_cycles = $terms->get_max_cycles();
 		if ( null !== $max_cycles ) {
 			$rows[] = [
 				'label' => __( 'Billing cycles', 'woocommerce-subscriptions-lite' ),
@@ -102,7 +101,7 @@ final class Schedule {
 			];
 		}
 
-		$trial = $policy->get_trial_duration();
+		$trial = $terms->get_trial_duration();
 		if ( null !== $trial ) {
 			$rows[] = [
 				'label' => __( 'Free trial', 'woocommerce-subscriptions-lite' ),

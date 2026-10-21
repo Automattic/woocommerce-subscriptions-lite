@@ -19,6 +19,7 @@ use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\PlanView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\ValueObject\BillingPolicy;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
+use Automattic\WooCommerce\SubscriptionsLite\Pricing\BillingTerms;
 use DomainException;
 
 defined( 'ABSPATH' ) || exit;
@@ -35,6 +36,16 @@ final class ContractPlans {
 	 */
 	public static function for_contract( ContractView $contract ): ?PlanView {
 		return self::for_contracts( [ $contract ] )[ (int) $contract->get_selling_plan_id() ] ?? null;
+	}
+
+	/**
+	 * The billing terms of a contract's live plan, or null when there are none: no plan, a
+	 * deleted or foreign plan, or billing {@see BillingTerms::validate()} refuses.
+	 *
+	 * @param ContractView $contract Contract.
+	 */
+	public static function get_billing_terms_for( ContractView $contract ): ?BillingTerms {
+		return BillingTerms::from_plan( self::for_contract( $contract ) );
 	}
 
 	/**
