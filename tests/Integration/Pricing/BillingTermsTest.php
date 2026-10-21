@@ -9,9 +9,7 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Pricing;
 
-use Automattic\WooCommerce\SubscriptionsEngine\Api\ValidationException;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\PlanView;
-use Automattic\WooCommerce\SubscriptionsEngine\Core\Support\InvalidInputException;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Support\ValidationErrorCode;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\ValueObject\BillingPolicy;
 use Automattic\WooCommerce\SubscriptionsLite\Pricing\BillingTerms;
@@ -140,14 +138,14 @@ final class BillingTermsTest extends LiteIntegrationTestCase {
 	}
 
 	/**
-	 * A string cycle limit reads by the engine's integer rule, so Lite shows the limit the engine parses.
+	 * A string cycle limit reads as an integer by `FILTER_VALIDATE_INT`.
 	 *
 	 * @dataProvider provide_string_cycle_limits
 	 *
 	 * @param string   $max_cycles Stored cycle limit.
 	 * @param int|null $expected   Expected limit; null when the plan is not billable.
 	 */
-	public function test_a_string_cycle_limit_reads_like_the_engine( string $max_cycles, ?int $expected ): void {
+	public function test_a_string_cycle_limit_reads_as_an_integer( string $max_cycles, ?int $expected ): void {
 		$terms = BillingTerms::from_plan(
 			$this->foreign_plan(
 				[
@@ -229,33 +227,33 @@ final class BillingTermsTest extends LiteIntegrationTestCase {
 		$units = [ 'allowed' => [ 'day', 'week', 'month', 'year' ] ];
 
 		return [
-			'null'                       => [ null, [ [ 'required', 'billing_policy', [] ] ] ],
-			'no period'                  => [
+			'null'                      => [ null, [ [ 'required', 'billing_policy', [] ] ] ],
+			'no period'                 => [
 				[ 'interval' => 1 ],
 				[ [ 'required', 'billing_policy.period', [] ] ],
 			],
-			'unknown period'             => [
+			'unknown period'            => [
 				[
 					'period'   => 'fortnight',
 					'interval' => 1,
 				],
 				[ [ 'not_in_enum', 'billing_policy.period', $units ] ],
 			],
-			'zero interval'              => [
+			'zero interval'             => [
 				[
 					'period'   => 'month',
 					'interval' => 0,
 				],
 				[ [ 'out_of_bounds', 'billing_policy.interval', [ 'min' => 1 ] ] ],
 			],
-			'string interval'            => [
+			'string interval'           => [
 				[
 					'period'   => 'month',
 					'interval' => '2',
 				],
 				[ [ 'invalid_type', 'billing_policy.interval', [ 'type' => 'integer' ] ] ],
 			],
-			'zero max cycles'            => [
+			'zero max cycles'           => [
 				[
 					'period'     => 'month',
 					'interval'   => 1,
@@ -263,7 +261,7 @@ final class BillingTermsTest extends LiteIntegrationTestCase {
 				],
 				[ [ 'out_of_bounds', 'billing_policy.max_cycles', [ 'min' => 1 ] ] ],
 			],
-			'zero interval and max'      => [
+			'zero interval and max'     => [
 				[
 					'period'     => 'month',
 					'interval'   => 0,
@@ -274,15 +272,15 @@ final class BillingTermsTest extends LiteIntegrationTestCase {
 					[ 'out_of_bounds', 'billing_policy.max_cycles', [ 'min' => 1 ] ],
 				],
 			],
-			'negative max cycles'        => [
+			'negative max cycles'       => [
 				[
 					'period'     => 'month',
 					'interval'   => 1,
 					'max_cycles' => -1,
 				],
-				[ [ 'out_of_bounds', 'billing_policy.max_cycles', [ 'min' => 0 ] ] ],
+				[ [ 'out_of_bounds', 'billing_policy.max_cycles', [ 'min' => 1 ] ] ],
 			],
-			'leading-zero max cycles'    => [
+			'leading-zero max cycles'   => [
 				[
 					'period'     => 'month',
 					'interval'   => 1,
@@ -290,7 +288,7 @@ final class BillingTermsTest extends LiteIntegrationTestCase {
 				],
 				[ [ 'out_of_bounds', 'billing_policy.max_cycles', [ 'min' => 1 ] ] ],
 			],
-			'min above max'              => [
+			'min above max'             => [
 				[
 					'period'     => 'month',
 					'interval'   => 1,
@@ -299,7 +297,7 @@ final class BillingTermsTest extends LiteIntegrationTestCase {
 				],
 				[ [ 'out_of_bounds', 'billing_policy.min_cycles', [ 'max' => 2 ] ] ],
 			],
-			'unknown trial unit'         => [
+			'unknown trial unit'        => [
 				[
 					'period'         => 'month',
 					'interval'       => 1,
@@ -310,7 +308,7 @@ final class BillingTermsTest extends LiteIntegrationTestCase {
 				],
 				[ [ 'not_in_enum', 'billing_policy.trial_duration.unit', $units ] ],
 			],
-			'zero trial length'          => [
+			'zero trial length'         => [
 				[
 					'period'         => 'month',
 					'interval'       => 1,
@@ -321,7 +319,7 @@ final class BillingTermsTest extends LiteIntegrationTestCase {
 				],
 				[ [ 'out_of_bounds', 'billing_policy.trial_duration.length', [ 'min' => 1 ] ] ],
 			],
-			'every engine field at once' => [
+			'every field at once'       => [
 				[
 					'period'         => 'fortnight',
 					'interval'       => '2',
@@ -335,11 +333,132 @@ final class BillingTermsTest extends LiteIntegrationTestCase {
 					[ 'not_in_enum', 'billing_policy.period', $units ],
 					[ 'not_in_enum', 'billing_policy.trial_duration.unit', $units ],
 					[ 'invalid_type', 'billing_policy.interval', [ 'type' => 'integer' ] ],
-					[ 'out_of_bounds', 'billing_policy.max_cycles', [ 'min' => 0 ] ],
+					[ 'out_of_bounds', 'billing_policy.max_cycles', [ 'min' => 1 ] ],
 					[ 'out_of_bounds', 'billing_policy.trial_duration.length', [ 'min' => 1 ] ],
 				],
 			],
+			'missing interval'          => [
+				[ 'period' => 'month' ],
+				[ [ 'required', 'billing_policy.interval', [] ] ],
+			],
+			'non-string period'         => [
+				[
+					'period'   => 5,
+					'interval' => 1,
+				],
+				[ [ 'invalid_type', 'billing_policy.period', [ 'type' => 'string' ] ] ],
+			],
+			'null period'               => [
+				[
+					'period'   => null,
+					'interval' => 1,
+				],
+				[ [ 'invalid_type', 'billing_policy.period', [ 'type' => 'string' ] ] ],
+			],
+			'word min cycles'           => [
+				self::month_with( [ 'min_cycles' => 'abc' ] ),
+				[ [ 'invalid_type', 'billing_policy.min_cycles', [ 'type' => 'integer' ] ] ],
+			],
+			'decimal min cycles'        => [
+				self::month_with( [ 'min_cycles' => 1.5 ] ),
+				[ [ 'invalid_type', 'billing_policy.min_cycles', [ 'type' => 'integer' ] ] ],
+			],
+			'boolean min cycles'        => [
+				self::month_with( [ 'min_cycles' => true ] ),
+				[ [ 'invalid_type', 'billing_policy.min_cycles', [ 'type' => 'integer' ] ] ],
+			],
+			'leading-zero min cycles'   => [
+				self::month_with( [ 'min_cycles' => '007' ] ),
+				[ [ 'invalid_type', 'billing_policy.min_cycles', [ 'type' => 'integer' ] ] ],
+			],
+			'negative min cycles'       => [
+				self::month_with( [ 'min_cycles' => -1 ] ),
+				[ [ 'out_of_bounds', 'billing_policy.min_cycles', [ 'min' => 0 ] ] ],
+			],
+			'string min above max'      => [
+				self::month_with(
+					[
+						'min_cycles' => '5',
+						'max_cycles' => 2,
+					]
+				),
+				[ [ 'out_of_bounds', 'billing_policy.min_cycles', [ 'max' => 2 ] ] ],
+			],
+			'min above a zero max'      => [
+				self::month_with(
+					[
+						'min_cycles' => 5,
+						'max_cycles' => 0,
+					]
+				),
+				[ [ 'out_of_bounds', 'billing_policy.max_cycles', [ 'min' => 1 ] ] ],
+			],
+			'zero max and trial length' => [
+				self::month_with(
+					[
+						'max_cycles'     => 0,
+						'trial_duration' => [
+							'length' => 0,
+							'unit'   => 'day',
+						],
+					]
+				),
+				[
+					[ 'out_of_bounds', 'billing_policy.max_cycles', [ 'min' => 1 ] ],
+					[ 'out_of_bounds', 'billing_policy.trial_duration.length', [ 'min' => 1 ] ],
+				],
+			],
+			'string trial'              => [
+				self::month_with( [ 'trial_duration' => 'x' ] ),
+				[ [ 'invalid_type', 'billing_policy.trial_duration', [ 'type' => 'object' ] ] ],
+			],
+			'trial without a length'    => [
+				self::month_with( [ 'trial_duration' => [ 'unit' => 'day' ] ] ),
+				[ [ 'required', 'billing_policy.trial_duration.length', [] ] ],
+			],
+			'trial without a unit'      => [
+				self::month_with( [ 'trial_duration' => [ 'length' => 7 ] ] ),
+				[ [ 'required', 'billing_policy.trial_duration.unit', [] ] ],
+			],
+			'string trial length'       => [
+				self::month_with(
+					[
+						'trial_duration' => [
+							'length' => '7',
+							'unit'   => 'day',
+						],
+					]
+				),
+				[ [ 'invalid_type', 'billing_policy.trial_duration.length', [ 'type' => 'integer' ] ] ],
+			],
+			'non-string trial unit'     => [
+				self::month_with(
+					[
+						'trial_duration' => [
+							'length' => 7,
+							'unit'   => 5,
+						],
+					]
+				),
+				[ [ 'invalid_type', 'billing_policy.trial_duration.unit', [ 'type' => 'string' ] ] ],
+			],
 		];
+	}
+
+	/**
+	 * A monthly payload with extra keys.
+	 *
+	 * @param array<string, mixed> $extra Keys to add.
+	 * @return array<string, mixed>
+	 */
+	private static function month_with( array $extra ): array {
+		return array_merge(
+			[
+				'period'   => 'month',
+				'interval' => 1,
+			],
+			$extra
+		);
 	}
 
 	/**
@@ -369,7 +488,6 @@ final class BillingTermsTest extends LiteIntegrationTestCase {
 		return array_merge(
 			$rows,
 			[
-				'missing interval'     => [ [ 'period' => 'month' ], false ],
 				'billable, no limit'   => [
 					[
 						'period'   => 'month',
@@ -400,7 +518,7 @@ final class BillingTermsTest extends LiteIntegrationTestCase {
 		);
 	}
 
-	public function test_validate_keeps_the_engine_params(): void {
+	public function test_validate_reports_the_cross_field_bound(): void {
 		$errors = BillingTerms::validate(
 			[
 				'period'     => 'month',
@@ -419,13 +537,54 @@ final class BillingTermsTest extends LiteIntegrationTestCase {
 		);
 	}
 
-	public function test_validate_reports_a_null_payload_with_the_engine_message(): void {
-		$required = ValidationException::from_core( new InvalidInputException( ValidationErrorCode::REQUIRED, 'billing_policy', 'billing_policy is required.' ) );
+	public function test_validate_reports_a_null_payload_as_required(): void {
+		$this->assertSame( 'This field is required.', BillingTerms::validate( null )->get_error_message( 'required' ) );
 
-		$message = BillingTerms::validate( null )->get_error_message( 'required' );
+		$translate = static function ( string $translation, string $text, string $domain ): string {
+			return 'woocommerce-subscriptions-lite' === $domain && 'This field is required.' === $text ? 'Translated required' : $translation;
+		};
+		add_filter( 'gettext', $translate, 10, 3 );
 
-		$this->assertNotSame( '', $message );
-		$this->assertSame( $required->get_errors()->get_error_message( 'required' ), $message );
+		try {
+			$message = BillingTerms::validate( null )->get_error_message( 'required' );
+		} finally {
+			remove_filter( 'gettext', $translate, 10 );
+		}
+
+		$this->assertSame( 'Translated required', $message );
+	}
+
+	public function test_validate_lists_the_allowed_periods(): void {
+		$errors = BillingTerms::validate(
+			[
+				'period'   => 'fortnight',
+				'interval' => 1,
+			]
+		);
+
+		$this->assertSame( 'Must be one of day, week, month, and year.', $errors->get_error_message( 'not_in_enum' ) );
+	}
+
+	public function test_validate_names_the_cycle_bound_it_exceeds(): void {
+		$translate = static function ( string $translation, string $text, string $domain ): string {
+			return 'woocommerce-subscriptions-lite' === $domain && 'Must not exceed %d.' === $text ? 'No more than %d.' : $translation;
+		};
+		add_filter( 'gettext', $translate, 10, 3 );
+
+		try {
+			$errors = BillingTerms::validate(
+				[
+					'period'     => 'month',
+					'interval'   => 1,
+					'min_cycles' => 5,
+					'max_cycles' => 2,
+				]
+			);
+		} finally {
+			remove_filter( 'gettext', $translate, 10 );
+		}
+
+		$this->assertSame( 'No more than 2.', $errors->get_error_message( 'out_of_bounds' ) );
 	}
 
 	public function test_validate_translates_its_own_messages(): void {
