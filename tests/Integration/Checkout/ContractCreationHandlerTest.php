@@ -791,6 +791,8 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 		$draft_id = $this->leave_draft( $order );
 		( new PlanRepository() )->delete( $plan->get_id(), Package::EXTENSION_SLUG );
 		$this->capture_log();
+		// Only the run's own reschedule may satisfy the pending check below.
+		ScheduledActions::unschedule( 'woocommerce_subscriptions_lite_resume_checkout', [ 'order_id' => $order->get_id() ] );
 
 		do_action( 'woocommerce_subscriptions_lite_resume_checkout', $order->get_id() );
 
@@ -824,5 +826,46 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 		$this->assertSame( ContractStatus::ACTIVE, $this->get_contract( $draft_id )->get_status(), 'A mixed cart now, yet the draft resumes.' );
 		$this->assertSame( $plan->get_id(), $this->get_contract( $draft_id )->get_selling_plan_id() );
 		$this->assertCount( 1, $this->get_order_notes_containing( $order->get_id(), 'activated after its creation was interrupted' ) );
+	}
+
+	/**
+	 * A resume whose activation write is refused because another operation took the draft's
+	 * lock meanwhile (forced by a query filter that hands the lock row to a `renewal` holder
+	 * just before the write) is not a failed run: the refusal is logged and the resume rescheduled.
+	 */
+	public function test_a_resume_refused_mid_flow_is_rescheduled_without_counting_a_failure(): void {
+		global $wpdb;
+
+		$customer_id = $this->create_customer();
+		$plan        = $this->make_plan();
+		$order       = $this->create_subscription_order( $customer_id );
+		$this->apply_and_stamp( $order, $plan );
+		$draft_id = $this->leave_draft( $order );
+		ScheduledActions::unschedule( 'woocommerce_subscriptions_lite_resume_checkout', [ 'order_id' => $order->get_id() ] );
+		$contracts = SchemaInstaller::get_table_name( SchemaInstaller::TABLE_CONTRACTS );
+		$taken     = 0;
+		$take_lock = static function ( string $query ) use ( $contracts, $draft_id, &$taken, $wpdb ): string {
+			if ( 0 !== $taken || 1 !== preg_match( "/^UPDATE `?{$contracts}`? /", $query ) || false === strpos( $query, "'" . ContractStatus::ACTIVE . "'" ) ) {
+				return $query;
+			}
+			++$taken;
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+			$wpdb->query( $wpdb->prepare( "UPDATE {$contracts} SET lock_token = %s, lock_operation = 'renewal', locked_until_gmt = DATE_ADD( UTC_TIMESTAMP(), INTERVAL 10 MINUTE ) WHERE id = %d", str_repeat( 'f', 32 ), $draft_id ) );
+
+			return $query;
+		};
+		$this->capture_log();
+		add_filter( 'query', $take_lock );
+		try {
+			do_action( 'woocommerce_subscriptions_lite_resume_checkout', $order->get_id() );
+		} finally {
+			remove_filter( 'query', $take_lock );
+		}
+
+		$this->assertSame( 1, $taken, 'The filter handed the lock over.' );
+		$this->assertSame( ContractStatus::DRAFT, $this->get_contract( $draft_id )->get_status() );
+		$this->assertTrue( $this->has_logged( sprintf( 'a write to contract %d was refused mid-flow; another operation (renewal)', $draft_id ) ) );
+		$this->assertCount( 1, $this->pending_resumes( $order->get_id() ), 'Resumed again later.' );
+		$this->assertSame( '', (string) wc_get_order( $order->get_id() )->get_meta( '_wcsl_resume_attempts' ), 'Not counted as a failed run.' );
 	}
 }

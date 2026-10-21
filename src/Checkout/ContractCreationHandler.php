@@ -144,6 +144,8 @@ final class ContractCreationHandler {
 	private function record_failed_resume( WC_Order $order ): void {
 		$order_id = $order->get_id();
 		try {
+			// The count is read from the database: a parallel resume run may have counted since.
+			$order->read_meta_data( true );
 			$attempts = (int) $order->get_meta( self::RESUME_ATTEMPTS_META ) + 1;
 			$order->update_meta_data( self::RESUME_ATTEMPTS_META, (string) $attempts );
 			$order->save();
@@ -273,9 +275,10 @@ final class ContractCreationHandler {
 			try {
 				$locked = ! $this->resume_draft( $order, $contract->get_id(), $plan );
 			} catch ( ContractLockedException $e ) {
-				// Refused mid-flow: logged with the holder's operation, then resumed later.
-				HeldLocks::get_refused_conflict( $e );
-				$locked = true;
+				// Refused mid-flow: not a failed run; it is resumed once the holder is done.
+				HeldLocks::log_refused_write( $e );
+				self::schedule_resume( $order->get_id(), ScheduledActions::LOCK_RETRY_DELAY_SECONDS );
+				continue;
 			} catch ( Throwable $e ) {
 				$resumed = false;
 				$this->log_error( sprintf( 'failed to resume draft contract %d of order %d: %s', $contract->get_id(), $order->get_id(), $e->getMessage() ) );
