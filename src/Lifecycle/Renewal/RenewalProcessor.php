@@ -65,14 +65,14 @@ final class RenewalProcessor {
 	 * @param bool              $manual   Whether a person asked for the renewal (retries a failed cycle).
 	 * @param ContractLock      $lock     The held lock on the contract.
 	 * @return WC_Order|null The renewal order; null when nothing was renewed (in flight,
-	 *                       awaiting payment, no billing policy, or the order could not be built).
+	 *                       awaiting payment, no valid billing terms, or the order could not be built).
 	 */
 	public function renew( ContractView $contract, DateTimeImmutable $anchor, DateTimeImmutable $now, bool $manual, ContractLock $lock ): ?WC_Order {
 		$contract_id = $contract->get_id();
 		$terms       = ContractPlans::get_billing_terms_for( $contract );
 		$head        = Contracts::get_cycles( $contract_id, 1 )[0] ?? null;
 		if ( null === $terms || null === $head ) {
-			$this->log( 'warning', sprintf( 'contract %d has no billing policy or no billing chain; its due moment is cleared.', $contract_id ), $contract_id );
+			$this->log( 'warning', sprintf( 'contract %d cannot be renewed automatically: it has no plan with valid billing terms, or no billing chain; its next payment date is cleared.', $contract_id ), $contract_id );
 			Contracts::update( $contract_id, [ 'next_payment_gmt' => null ], $lock );
 			return null;
 		}

@@ -26,6 +26,7 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Pricing;
 
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\PlanView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Support\ValidationErrorCode;
+use Automattic\WooCommerce\SubscriptionsLite\Utilities\Integers;
 use WP_Error;
 
 defined( 'ABSPATH' ) || exit;
@@ -276,14 +277,7 @@ final class PricingTerms {
 
 		$type = $entry['type'] ?? null;
 		if ( ! is_string( $type ) || ! in_array( $type, self::TYPES, true ) ) {
-			ValidationErrors::add(
-				$errors,
-				ValidationErrorCode::NOT_IN_ENUM,
-				$path . '.type',
-				/* translators: %l: list of policy types, such as "percentage, fixed_amount, price, and bogo". */
-				wp_sprintf( __( 'Must be one of %l.', 'woocommerce-subscriptions-lite' ), self::TYPES ),
-				[ 'allowed' => self::TYPES ]
-			);
+			ValidationErrors::add_not_in_enum( $errors, $path . '.type', self::TYPES );
 			return;
 		}
 
@@ -305,21 +299,9 @@ final class PricingTerms {
 			$field = $path . '.' . $gate;
 			$cycle = self::cycle_gate( $entry[ $gate ] );
 			if ( null === $cycle ) {
-				ValidationErrors::add(
-					$errors,
-					ValidationErrorCode::INVALID_TYPE,
-					$field,
-					__( 'Must be an integer.', 'woocommerce-subscriptions-lite' ),
-					[ 'type' => 'integer' ]
-				);
+				ValidationErrors::add_not_integer( $errors, $field );
 			} elseif ( $cycle < 1 ) {
-				ValidationErrors::add(
-					$errors,
-					ValidationErrorCode::OUT_OF_BOUNDS,
-					$field,
-					__( 'Must be 1 or greater.', 'woocommerce-subscriptions-lite' ),
-					[ 'min' => 1 ]
-				);
+				ValidationErrors::add_below_minimum( $errors, $field, 1 );
 			}
 		}
 	}
@@ -343,7 +325,7 @@ final class PricingTerms {
 		if ( $value < 0 ) {
 			return [
 				'code'    => ValidationErrorCode::OUT_OF_BOUNDS,
-				'message' => self::get_non_negative_message(),
+				'message' => ValidationErrors::get_below_minimum_message( 0 ),
 				'params'  => [ 'min' => 0 ],
 			];
 		}
@@ -385,7 +367,7 @@ final class PricingTerms {
 		} elseif ( ! is_finite( (float) $amount ) ) {
 			ValidationErrors::add( $errors, ValidationErrorCode::INVALID_VALUE, $field, self::get_finite_message() );
 		} elseif ( (float) $amount < 0 ) {
-			ValidationErrors::add( $errors, ValidationErrorCode::OUT_OF_BOUNDS, $field, self::get_non_negative_message(), [ 'min' => 0 ] );
+			ValidationErrors::add_below_minimum( $errors, $field, 0 );
 		}
 
 		$taxable = $entry['taxable'] ?? null;
@@ -451,29 +433,16 @@ final class PricingTerms {
 	}
 
 	/**
-	 * Message for a negative number, shared by policy values and fee amounts.
-	 */
-	private static function get_non_negative_message(): string {
-		return __( 'Must not be negative.', 'woocommerce-subscriptions-lite' );
-	}
-
-	/**
-	 * An integer-like cycle gate as int (int, whole float, integer string), or null.
+	 * A cycle gate as int: {@see Integers::parse()} plus whole floats (`2.0`), which a JSON
+	 * client may send for a cycle number; else null.
 	 *
 	 * @param mixed $value Raw gate value.
 	 */
 	private static function cycle_gate( $value ): ?int {
-		if ( is_int( $value ) ) {
-			return $value;
-		}
 		if ( is_float( $value ) && is_finite( $value ) && floor( $value ) === $value ) {
 			return (int) $value;
 		}
-		if ( is_string( $value ) ) {
-			$validated = filter_var( $value, FILTER_VALIDATE_INT );
-			return false === $validated ? null : $validated;
-		}
 
-		return null;
+		return Integers::parse( $value );
 	}
 }

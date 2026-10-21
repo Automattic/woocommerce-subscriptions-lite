@@ -29,6 +29,7 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Pricing;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\PlanView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Support\ValidationErrorCode;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
+use Automattic\WooCommerce\SubscriptionsLite\Utilities\Integers;
 use DateTimeImmutable;
 use DateTimeZone;
 use WP_Error;
@@ -129,7 +130,7 @@ final class BillingTerms {
 		$errors = new WP_Error();
 
 		if ( null === $policy ) {
-			self::add_required_error( $errors, self::FIELD );
+			ValidationErrors::add_required( $errors, self::FIELD );
 			return $errors;
 		}
 
@@ -164,7 +165,7 @@ final class BillingTerms {
 	 */
 	private static function validate_unit( WP_Error $errors, array $data, string $key, string $field ): void {
 		if ( ! array_key_exists( $key, $data ) ) {
-			self::add_required_error( $errors, $field );
+			ValidationErrors::add_required( $errors, $field );
 		} elseif ( ! is_string( $data[ $key ] ) ) {
 			ValidationErrors::add(
 				$errors,
@@ -174,14 +175,7 @@ final class BillingTerms {
 				[ 'type' => 'string' ]
 			);
 		} elseif ( ! in_array( $data[ $key ], self::PERIODS, true ) ) {
-			ValidationErrors::add(
-				$errors,
-				ValidationErrorCode::NOT_IN_ENUM,
-				$field,
-				/* translators: %l: list of billing periods, such as "day, week, month, and year". */
-				wp_sprintf( __( 'Must be one of %l.', 'woocommerce-subscriptions-lite' ), self::PERIODS ),
-				[ 'allowed' => self::PERIODS ]
-			);
+			ValidationErrors::add_not_in_enum( $errors, $field, self::PERIODS );
 		}
 	}
 
@@ -195,17 +189,11 @@ final class BillingTerms {
 	 */
 	private static function validate_count( WP_Error $errors, array $data, string $key, string $field ): void {
 		if ( ! array_key_exists( $key, $data ) ) {
-			self::add_required_error( $errors, $field );
+			ValidationErrors::add_required( $errors, $field );
 		} elseif ( ! is_int( $data[ $key ] ) ) {
-			self::add_integer_error( $errors, $field );
+			ValidationErrors::add_not_integer( $errors, $field );
 		} elseif ( $data[ $key ] < 1 ) {
-			ValidationErrors::add(
-				$errors,
-				ValidationErrorCode::OUT_OF_BOUNDS,
-				$field,
-				__( 'Must be 1 or greater.', 'woocommerce-subscriptions-lite' ),
-				[ 'min' => 1 ]
-			);
+			ValidationErrors::add_below_minimum( $errors, $field, 1 );
 		}
 	}
 
@@ -219,24 +207,18 @@ final class BillingTerms {
 	private static function validate_cycle_bounds( WP_Error $errors, array $policy ): void {
 		$min_field = self::FIELD . '.min_cycles';
 		$raw_min   = $policy['min_cycles'] ?? null;
-		$min       = self::int_like( $raw_min );
+		$min       = Integers::parse( $raw_min );
 		$min_ok    = true;
 		if ( null !== $raw_min && null === $min ) {
-			self::add_integer_error( $errors, $min_field );
+			ValidationErrors::add_not_integer( $errors, $min_field );
 			$min_ok = false;
 		} elseif ( null !== $min && $min < 0 ) {
-			ValidationErrors::add(
-				$errors,
-				ValidationErrorCode::OUT_OF_BOUNDS,
-				$min_field,
-				__( 'Must not be negative.', 'woocommerce-subscriptions-lite' ),
-				[ 'min' => 0 ]
-			);
+			ValidationErrors::add_below_minimum( $errors, $min_field, 0 );
 			$min_ok = false;
 		}
 
 		$raw_max = $policy['max_cycles'] ?? null;
-		$max     = self::int_like( $raw_max );
+		$max     = Integers::parse( $raw_max );
 		$max_ok  = null === $raw_max || ( null !== $max && $max >= 1 );
 		if ( ! $max_ok ) {
 			ValidationErrors::add(
@@ -258,32 +240,6 @@ final class BillingTerms {
 				[ 'max' => $max ]
 			);
 		}
-	}
-
-	/**
-	 * Add a `required` error.
-	 *
-	 * @param WP_Error $errors Error collector.
-	 * @param string   $field  Field path.
-	 */
-	private static function add_required_error( WP_Error $errors, string $field ): void {
-		ValidationErrors::add( $errors, ValidationErrorCode::REQUIRED, $field, __( 'This field is required.', 'woocommerce-subscriptions-lite' ) );
-	}
-
-	/**
-	 * Add an `invalid_type` integer error.
-	 *
-	 * @param WP_Error $errors Error collector.
-	 * @param string   $field  Field path.
-	 */
-	private static function add_integer_error( WP_Error $errors, string $field ): void {
-		ValidationErrors::add(
-			$errors,
-			ValidationErrorCode::INVALID_TYPE,
-			$field,
-			__( 'Must be an integer.', 'woocommerce-subscriptions-lite' ),
-			[ 'type' => 'integer' ]
-		);
 	}
 
 	/**
@@ -392,7 +348,7 @@ final class BillingTerms {
 		return new self(
 			$policy['period'],
 			$policy['interval'],
-			self::int_like( $policy['max_cycles'] ?? null ),
+			Integers::parse( $policy['max_cycles'] ?? null ),
 			is_array( $trial ) ? [
 				'length' => $trial['length'],
 				'unit'   => $trial['unit'],
@@ -428,24 +384,5 @@ final class BillingTerms {
 	 */
 	public function get_trial_duration(): ?array {
 		return $this->trial_duration;
-	}
-
-	/**
-	 * An integer from an int or an integer string, else null. Strings follow
-	 * `FILTER_VALIDATE_INT`: `'5'` and `'+5'` pass, while `'007'`, `'1.5'` and `'1e2'` do not.
-	 *
-	 * @param mixed $value Raw value.
-	 */
-	private static function int_like( $value ): ?int {
-		if ( is_int( $value ) ) {
-			return $value;
-		}
-		if ( ! is_string( $value ) ) {
-			return null;
-		}
-
-		$validated = filter_var( $value, FILTER_VALIDATE_INT );
-
-		return false === $validated ? null : $validated;
 	}
 }

@@ -503,7 +503,7 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 		$this->assertNull( $this->get_contract( $contract_id )->get_next_payment_gmt() );
 		$this->assertSame( CycleStatus::BILLED, $this->head( $contract_id )->get_status() );
 		$this->assertSame( 1, $this->head( $contract_id )->get_count() );
-		$this->assertTrue( $this->has_logged( 'no billing policy' ) );
+		$this->assertTrue( $this->has_logged( 'cannot be renewed automatically' ) );
 	}
 
 	public function test_a_contract_whose_plan_billing_is_not_billable_is_parked(): void {
@@ -526,7 +526,7 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 		$this->assertNull( $this->get_contract( $contract_id )->get_next_payment_gmt() );
 		$this->assertSame( CycleStatus::BILLED, $this->head( $contract_id )->get_status() );
 		$this->assertSame( 1, $this->head( $contract_id )->get_count() );
-		$this->assertTrue( $this->has_logged( 'no billing policy' ) );
+		$this->assertTrue( $this->has_logged( 'cannot be renewed automatically' ) );
 	}
 
 	public function test_a_free_renewal_is_completed_without_a_charge(): void {

@@ -15,6 +15,7 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Plans;
 
+use Automattic\WooCommerce\SubscriptionsLite\Utilities\Integers;
 use InvalidArgumentException;
 
 defined( 'ABSPATH' ) || exit;
@@ -77,7 +78,7 @@ final class ProductApplicability {
 
 		$normalized = [];
 		foreach ( $plan_ids as $plan_id ) {
-			$id = self::coerce_int( $plan_id );
+			$id = Integers::parse( $plan_id ) ?? 0;
 			if ( $id <= 0 ) {
 				throw new InvalidArgumentException( 'ProductApplicability: plan ids must be positive integers.' );
 			}
@@ -107,7 +108,7 @@ final class ProductApplicability {
 		$plan_ids = [];
 		$raw_ids  = is_array( $row['plan_ids'] ?? null ) ? $row['plan_ids'] : [];
 		foreach ( $raw_ids as $raw_id ) {
-			$id = self::coerce_int( $raw_id );
+			$id = Integers::parse( $raw_id ) ?? 0;
 			if ( $id > 0 ) {
 				$plan_ids[ $id ] = $id;
 			}
@@ -158,22 +159,5 @@ final class ProductApplicability {
 			'plan_ids'       => $this->plan_ids,
 			'allow_one_time' => $this->allow_one_time ? 'yes' : 'no',
 		];
-	}
-
-	/**
-	 * Coerce a value to an int, falling back to 0 when it is not an integer.
-	 * Only genuine integers and integer-valued strings pass; fractional or
-	 * exponent forms ('1.5', '1e2') fall back rather than being truncated.
-	 *
-	 * @param mixed $value The raw value.
-	 */
-	private static function coerce_int( $value ): int {
-		if ( is_int( $value ) ) {
-			return $value;
-		}
-
-		$validated = is_string( $value ) ? filter_var( $value, FILTER_VALIDATE_INT ) : false;
-
-		return false !== $validated ? $validated : 0;
 	}
 }

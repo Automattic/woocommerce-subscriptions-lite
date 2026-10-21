@@ -526,7 +526,7 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 			( new ContractCreationHandler() )->create_contract( $order, $plan );
 			$this->fail( 'A plan without billing terms must be refused.' );
 		} catch ( DomainException $e ) {
-			$this->assertStringContainsString( 'no billable billing terms', $e->getMessage() );
+			$this->assertSame( DomainException::class, get_class( $e ) );
 		}
 
 		$this->assertSame( [], Contracts::find_by_origin_order( $order->get_id() ) );

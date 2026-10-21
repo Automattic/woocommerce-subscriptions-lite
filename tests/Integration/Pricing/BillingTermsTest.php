@@ -487,14 +487,14 @@ final class BillingTermsTest extends LiteIntegrationTestCase {
 		return array_merge(
 			$rows,
 			[
-				'billable, no limit'   => [
+				'billable, no limit'                => [
 					[
 						'period'   => 'month',
 						'interval' => 1,
 					],
 					true,
 				],
-				'billable, six cycles' => [
+				'billable, six cycles'              => [
 					[
 						'period'     => 'week',
 						'interval'   => 2,
@@ -502,7 +502,41 @@ final class BillingTermsTest extends LiteIntegrationTestCase {
 					],
 					true,
 				],
-				'billable, with trial' => [
+				'billable, no minimum cycles'       => [
+					[
+						'period'     => 'month',
+						'interval'   => 1,
+						'min_cycles' => 0,
+					],
+					true,
+				],
+				'billable, min equals max cycles'   => [
+					[
+						'period'     => 'month',
+						'interval'   => 1,
+						'min_cycles' => 3,
+						'max_cycles' => 3,
+					],
+					true,
+				],
+				'billable, min cycles digit string' => [
+					[
+						'period'     => 'month',
+						'interval'   => 1,
+						'min_cycles' => '3',
+						'max_cycles' => 6,
+					],
+					true,
+				],
+				'billable, min cycles and no limit' => [
+					[
+						'period'     => 'month',
+						'interval'   => 1,
+						'min_cycles' => 2,
+					],
+					true,
+				],
+				'billable, with trial'              => [
 					[
 						'period'         => 'month',
 						'interval'       => 1,
