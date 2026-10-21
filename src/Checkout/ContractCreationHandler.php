@@ -16,6 +16,7 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Checkout;
 
 use DateTimeImmutable;
 use DateTimeZone;
+use DomainException;
 use LogicException;
 use Throwable;
 use WC_Order;
@@ -493,6 +494,7 @@ final class ContractCreationHandler {
 	 * @param WC_Order $order The paid order.
 	 * @param PlanView $plan  The order's selling plan.
 	 * @return array{0: DateTimeImmutable, 1: DateTimeImmutable}
+	 * @throws DomainException When the plan has invalid billing terms.
 	 */
 	private static function get_first_period( WC_Order $order, PlanView $plan ): array {
 		$paid  = $order->get_date_paid();
@@ -500,7 +502,12 @@ final class ContractCreationHandler {
 			? new DateTimeImmutable( '@' . $paid->getTimestamp() )
 			: new DateTimeImmutable( 'now', new DateTimeZone( 'UTC' ) );
 
-		return [ $start, BillingTerms::get_first_renewal_from( $plan, $start ) ];
+		$terms = BillingTerms::from_plan( $plan );
+		if ( null === $terms ) {
+			throw new DomainException( sprintf( 'Selling plan %d has invalid billing terms, so no contract can be created from it.', (int) $plan->get_id() ) );
+		}
+
+		return [ $start, $terms->get_first_renewal_from( $start ) ];
 	}
 
 	/**

@@ -2,16 +2,16 @@
 /**
  * BillingTerms - Lite's reader of the billing payload it writes on its plans.
  *
- * The engine stores plan policies as opaque extension payloads; Lite writes
- * `billing_policy` in the array shape the engine's opt-in `BillingPolicy` parser reads:
+ * The engine stores plan policies as opaque extension payloads; Lite owns the shape of
+ * `billing_policy`:
  *   { period: day|week|month|year, interval: int, min_cycles: ?int, max_cycles: ?int,
  *     trial_duration: { length: int, unit: day|week|month|year } | null }
  *
- * A live plan is read strictly: {@see self::from_plan()} returns terms only when the
- * payload is billable, meaning contract creation can parse it through `BillingPolicy`
- * and compute a first renewal ({@see self::is_billable()}; {@see self::validate()} says
- * why not). The storefront, the cart and checkout all use that one rule. A missing plan
- * reads as no terms (null). Reads never throw.
+ * {@see self::validate()} is the one rule for that payload and reports every problem at once;
+ * {@see self::is_billable()} is true exactly when it reports no errors. A live plan is read
+ * strictly: {@see self::from_plan()} returns terms only when the payload is billable. The
+ * storefront, the cart, checkout, contract creation and renewal all use that one rule. A
+ * missing plan reads as no terms (null). Reads never throw.
  *
  * It also turns the cadence into dates (UTC): the first renewal of a new contract, the period
  * a renewal bills and the next due moment after it. Catch-up rule: a contract that comes back
@@ -26,12 +26,10 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Pricing;
 
-use Automattic\WooCommerce\SubscriptionsEngine\Api\ValidationException;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\PlanView;
-use Automattic\WooCommerce\SubscriptionsEngine\Core\Support\InvalidInputException;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Support\ValidationErrorCode;
-use Automattic\WooCommerce\SubscriptionsEngine\Core\ValueObject\BillingPolicy;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
+use Automattic\WooCommerce\SubscriptionsLite\Utilities\Integers;
 use DateTimeImmutable;
 use DateTimeZone;
 use WP_Error;
@@ -46,8 +44,6 @@ final class BillingTerms {
 	private const PERIODS = [ 'day', 'week', 'month', 'year' ];
 
 	private const FIELD = 'billing_policy';
-
-	private const MAX_CYCLES_FIELD = 'billing_policy.max_cycles';
 
 	/**
 	 * Bound on the forward roll, so a fine-grained cadence far behind cannot loop unboundedly.
@@ -114,22 +110,18 @@ final class BillingTerms {
 	}
 
 	/**
-	 * Whether a `billing_policy` payload can be billed: the same rule as {@see self::validate()},
-	 * without building the errors, for read paths.
+	 * Whether a `billing_policy` payload can be billed: {@see self::validate()} reports no errors.
 	 *
 	 * @param array<string, mixed>|null $policy Billing payload.
 	 */
 	public static function is_billable( ?array $policy ): bool {
-		return null !== $policy && self::has_valid_max_cycles( $policy ) && null === self::get_parse_error( $policy );
+		return ! self::validate( $policy )->has_errors();
 	}
 
 	/**
-	 * Problems that keep a `billing_policy` payload from being billed. The payload must
-	 * parse through the engine's `BillingPolicy` with a first renewal date, exactly as
-	 * contract creation reads it; the engine's errors land on their exact field
-	 * (`billing_policy.period`, `billing_policy.trial_duration.unit`). Lite adds its own
-	 * rule: `max_cycles` is null (no limit) or a positive integer. Each error carries an
-	 * engine error code, a translated field-free message and `field` (dot path) / `params` data.
+	 * Problems that keep a `billing_policy` payload from being billed, every one at once, in
+	 * field order. Each error carries a validation error code, a translated field-free
+	 * message and `field` (dot path, such as `billing_policy.trial_duration.unit`) / `params` data.
 	 *
 	 * @param array<string, mixed>|null $policy Billing payload.
 	 * @return WP_Error Validation errors; none when billable.
@@ -138,91 +130,142 @@ final class BillingTerms {
 		$errors = new WP_Error();
 
 		if ( null === $policy ) {
-			$required = new InvalidInputException( ValidationErrorCode::REQUIRED, self::FIELD, 'billing_policy is required.' );
-			$errors->merge_from( ValidationException::from_core( $required )->get_errors() );
+			ValidationErrors::add_required( $errors, self::FIELD );
 			return $errors;
 		}
 
-		$engine_fields = [];
-		$parse_error   = self::get_parse_error( $policy );
-		if ( null !== $parse_error ) {
-			$nested = [];
-			foreach ( $parse_error->get_errors() as $error ) {
-				$nested[]        = self::with_full_path( $error );
-				$engine_fields[] = self::FIELD . '.' . $error->get_field();
-			}
-			$errors->merge_from( ValidationException::from_core( InvalidInputException::from_errors( $nested ) )->get_errors() );
-		}
+		self::validate_unit( $errors, $policy, 'period', self::FIELD . '.period' );
+		self::validate_count( $errors, $policy, 'interval', self::FIELD . '.interval' );
+		self::validate_cycle_bounds( $errors, $policy );
 
-		// Per field, the first failure: the engine's own max_cycles error wins.
-		if ( ! self::has_valid_max_cycles( $policy ) && ! in_array( self::MAX_CYCLES_FIELD, $engine_fields, true ) ) {
+		$trial = $policy['trial_duration'] ?? null;
+		if ( null !== $trial && ! is_array( $trial ) ) {
 			ValidationErrors::add(
 				$errors,
-				ValidationErrorCode::OUT_OF_BOUNDS,
-				self::MAX_CYCLES_FIELD,
-				__( 'Must be a positive integer, or empty for no limit.', 'woocommerce-subscriptions-lite' ),
-				[ 'min' => 1 ]
+				ValidationErrorCode::INVALID_TYPE,
+				self::FIELD . '.trial_duration',
+				__( 'Must be an object or null.', 'woocommerce-subscriptions-lite' ),
+				[ 'type' => 'object' ]
 			);
+		} elseif ( is_array( $trial ) ) {
+			self::validate_count( $errors, $trial, 'length', self::FIELD . '.trial_duration.length' );
+			self::validate_unit( $errors, $trial, 'unit', self::FIELD . '.trial_duration.unit' );
 		}
 
 		return $errors;
 	}
 
 	/**
-	 * Whether `max_cycles` is absent, null or a positive integer. The engine counts cycles
-	 * against it, so 0 would read as already reached.
+	 * Add the error of a unit field (period, trial unit): required, a string, one of {@see self::PERIODS}.
 	 *
-	 * @param array<string, mixed> $policy Billing payload.
+	 * @param WP_Error                $errors Error collector.
+	 * @param array<array-key, mixed> $data   Payload holding the field.
+	 * @param string                  $key    Key in `$data`.
+	 * @param string                  $field  Field path.
 	 */
-	private static function has_valid_max_cycles( array $policy ): bool {
-		return null === ( $policy['max_cycles'] ?? null ) || null !== self::positive_int( $policy['max_cycles'] );
+	private static function validate_unit( WP_Error $errors, array $data, string $key, string $field ): void {
+		if ( ! array_key_exists( $key, $data ) ) {
+			ValidationErrors::add_required( $errors, $field );
+		} elseif ( ! is_string( $data[ $key ] ) ) {
+			ValidationErrors::add(
+				$errors,
+				ValidationErrorCode::INVALID_TYPE,
+				$field,
+				__( 'Must be a string.', 'woocommerce-subscriptions-lite' ),
+				[ 'type' => 'string' ]
+			);
+		} elseif ( ! in_array( $data[ $key ], self::PERIODS, true ) ) {
+			ValidationErrors::add_not_in_enum( $errors, $field, self::PERIODS );
+		}
 	}
 
 	/**
-	 * The engine's errors for a payload it cannot parse into a first renewal, or null.
+	 * Add the error of a count field (interval, trial length): required, a real integer, 1 or greater.
 	 *
+	 * @param WP_Error                $errors Error collector.
+	 * @param array<array-key, mixed> $data   Payload holding the field.
+	 * @param string                  $key    Key in `$data`.
+	 * @param string                  $field  Field path.
+	 */
+	private static function validate_count( WP_Error $errors, array $data, string $key, string $field ): void {
+		if ( ! array_key_exists( $key, $data ) ) {
+			ValidationErrors::add_required( $errors, $field );
+		} elseif ( ! is_int( $data[ $key ] ) ) {
+			ValidationErrors::add_not_integer( $errors, $field );
+		} elseif ( $data[ $key ] < 1 ) {
+			ValidationErrors::add_below_minimum( $errors, $field, 1 );
+		}
+	}
+
+	/**
+	 * Add the cycle bound errors: each bound's own, then `min_cycles` above `max_cycles` only
+	 * when both are set and passed their own checks.
+	 *
+	 * @param WP_Error             $errors Error collector.
 	 * @param array<string, mixed> $policy Billing payload.
 	 */
-	private static function get_parse_error( array $policy ): ?InvalidInputException {
-		try {
-			self::parse_first_renewal( $policy, new DateTimeImmutable( '2000-01-01', new DateTimeZone( 'UTC' ) ) );
-		} catch ( InvalidInputException $e ) {
-			return $e;
+	private static function validate_cycle_bounds( WP_Error $errors, array $policy ): void {
+		$min_field = self::FIELD . '.min_cycles';
+		$raw_min   = $policy['min_cycles'] ?? null;
+		$min       = Integers::parse( $raw_min );
+		$min_ok    = true;
+		if ( null !== $raw_min && null === $min ) {
+			ValidationErrors::add_not_integer( $errors, $min_field );
+			$min_ok = false;
+		} elseif ( null !== $min && $min < 0 ) {
+			ValidationErrors::add_below_minimum( $errors, $min_field, 0 );
+			$min_ok = false;
 		}
 
-		return null;
+		$raw_max = $policy['max_cycles'] ?? null;
+		$max     = Integers::parse( $raw_max );
+		$max_ok  = null === $raw_max || ( null !== $max && $max >= 1 );
+		if ( ! $max_ok ) {
+			ValidationErrors::add(
+				$errors,
+				ValidationErrorCode::OUT_OF_BOUNDS,
+				self::FIELD . '.max_cycles',
+				__( 'Must be a positive integer, or empty for no limit.', 'woocommerce-subscriptions-lite' ),
+				[ 'min' => 1 ]
+			);
+		}
+
+		if ( $min_ok && $max_ok && null !== $min && null !== $max && $min > $max ) {
+			ValidationErrors::add(
+				$errors,
+				ValidationErrorCode::OUT_OF_BOUNDS,
+				$min_field,
+				/* translators: %d: the maximum number of billing cycles. */
+				sprintf( __( 'Must not exceed %d.', 'woocommerce-subscriptions-lite' ), $max ),
+				[ 'max' => $max ]
+			);
+		}
 	}
 
 	/**
-	 * The engine error rebuilt with its field nested under `billing_policy`:
-	 * `trial_duration.length` becomes `billing_policy.trial_duration.length`.
+	 * The first renewal of a contract starting at `$start` (UTC): the end of the trial when the
+	 * terms have one, else one cadence after the start.
 	 *
-	 * @param InvalidInputException $e A single error reported by the engine's `BillingPolicy`.
-	 */
-	private static function with_full_path( InvalidInputException $e ): InvalidInputException {
-		return new InvalidInputException( $e->get_error_code(), self::FIELD . '.' . $e->get_field(), $e->getMessage(), $e->get_params() );
-	}
-
-	/**
-	 * The first renewal moment of a contract on `$plan` starting at `$start`.
-	 *
-	 * @param PlanView          $plan  Plan.
 	 * @param DateTimeImmutable $start Contract start.
-	 * @throws InvalidInputException When the billing payload is not billable.
 	 */
-	public static function get_first_renewal_from( PlanView $plan, DateTimeImmutable $start ): DateTimeImmutable {
-		return self::parse_first_renewal( $plan->get_billing_policy() ?? [], $start );
+	public function get_first_renewal_from( DateTimeImmutable $start ): DateTimeImmutable {
+		if ( null === $this->trial_duration ) {
+			return $this->get_next_renewal_from( $start );
+		}
+
+		return $start->setTimezone( new DateTimeZone( 'UTC' ) )
+			->modify( sprintf( '+%d %s', $this->trial_duration['length'], $this->trial_duration['unit'] ) );
 	}
 
 	/**
-	 * Parse a billing payload with the engine's `BillingPolicy` and compute the first renewal.
+	 * One cadence after `$anchor`, in UTC. Calendar math follows `DateTimeImmutable::modify()`:
+	 * 31 Jan + 1 month is 3 Mar, not 28 Feb.
 	 *
-	 * @param array<string, mixed> $policy Billing payload.
-	 * @param DateTimeImmutable    $start  Contract start.
-	 * @throws InvalidInputException When the payload does not parse or has no usable cadence.
+	 * @param DateTimeImmutable $anchor The moment to add the cadence to.
 	 */
-	private static function parse_first_renewal( array $policy, DateTimeImmutable $start ): DateTimeImmutable {
-		return BillingPolicy::from_array( $policy )->compute_first_renewal_from( $start );
+	private function get_next_renewal_from( DateTimeImmutable $anchor ): DateTimeImmutable {
+		return $anchor->setTimezone( new DateTimeZone( 'UTC' ) )
+			->modify( sprintf( '+%d %s', $this->interval, $this->period ) );
 	}
 
 	/**
@@ -232,25 +275,24 @@ final class BillingTerms {
 	 *
 	 * @param DateTimeImmutable $anchor The due moment the renewal was anchored on.
 	 * @param DateTimeImmutable $now    The current moment.
-	 * @param BillingPolicy     $policy The plan's billing policy.
 	 * @return array{0: DateTimeImmutable, 1: DateTimeImmutable} Period start and end (UTC).
 	 */
-	public static function get_period_to_bill( DateTimeImmutable $anchor, DateTimeImmutable $now, BillingPolicy $policy ): array {
+	public function get_period_to_bill( DateTimeImmutable $anchor, DateTimeImmutable $now ): array {
 		$utc   = new DateTimeZone( 'UTC' );
 		$start = $anchor->setTimezone( $utc );
 		$now   = $now->setTimezone( $utc );
-		$end   = $policy->compute_next_renewal_from( $start );
+		$end   = $this->get_next_renewal_from( $start );
 
 		$rolls_left = self::MAX_ROLLS;
 		while ( $end <= $now && $rolls_left-- > 0 ) {
 			$start = $end;
-			$end   = $policy->compute_next_renewal_from( $start );
+			$end   = $this->get_next_renewal_from( $start );
 		}
 
 		if ( $end <= $now ) {
 			self::log_cap( 'get_period_to_bill', $anchor );
 			$start = $now;
-			$end   = $policy->compute_next_renewal_from( $start );
+			$end   = $this->get_next_renewal_from( $start );
 		}
 
 		return [ $start, $end ];
@@ -261,23 +303,22 @@ final class BillingTerms {
 	 * whole cadences until it is. When the roll cap runs out it is one cadence after `$now`
 	 * (logged).
 	 *
-	 * @param DateTimeImmutable $from   The moment to start from (typically a period end).
-	 * @param DateTimeImmutable $now    The current moment.
-	 * @param BillingPolicy     $policy The plan's billing policy.
+	 * @param DateTimeImmutable $from The moment to start from (typically a period end).
+	 * @param DateTimeImmutable $now  The current moment.
 	 */
-	public static function get_next_due_after( DateTimeImmutable $from, DateTimeImmutable $now, BillingPolicy $policy ): DateTimeImmutable {
+	public function get_next_due_after( DateTimeImmutable $from, DateTimeImmutable $now ): DateTimeImmutable {
 		$utc  = new DateTimeZone( 'UTC' );
 		$next = $from->setTimezone( $utc );
 		$now  = $now->setTimezone( $utc );
 
 		$rolls_left = self::MAX_ROLLS;
 		while ( $next <= $now && $rolls_left-- > 0 ) {
-			$next = $policy->compute_next_renewal_from( $next );
+			$next = $this->get_next_renewal_from( $next );
 		}
 
 		if ( $next <= $now ) {
 			self::log_cap( 'get_next_due_after', $from );
-			$next = $policy->compute_next_renewal_from( $now );
+			$next = $this->get_next_renewal_from( $now );
 		}
 
 		return $next;
@@ -297,32 +338,22 @@ final class BillingTerms {
 	}
 
 	/**
-	 * Tolerant parse of a `billing_policy` payload; null when it has no usable cadence.
+	 * Terms from a payload {@see self::validate()} accepted; no checks of its own.
 	 *
-	 * @param mixed $policy Raw billing_policy payload.
+	 * @param array<string, mixed> $policy Billing payload.
 	 */
-	private static function from_policy( $policy ): ?self {
-		if ( ! is_array( $policy ) ) {
-			return null;
-		}
+	private static function from_policy( array $policy ): self {
+		$trial = $policy['trial_duration'] ?? null;
 
-		$period   = $policy['period'] ?? null;
-		$interval = self::positive_int( $policy['interval'] ?? null );
-		if ( ! is_string( $period ) || ! in_array( $period, self::PERIODS, true ) || null === $interval ) {
-			return null;
-		}
-
-		$trial  = $policy['trial_duration'] ?? null;
-		$length = is_array( $trial ) ? self::positive_int( $trial['length'] ?? null ) : null;
-		$unit   = is_array( $trial ) ? ( $trial['unit'] ?? null ) : null;
-		$trial  = null !== $length && is_string( $unit ) && in_array( $unit, self::PERIODS, true )
-			? [
-				'length' => $length,
-				'unit'   => $unit,
-			]
-			: null;
-
-		return new self( $period, $interval, self::positive_int( $policy['max_cycles'] ?? null ), $trial );
+		return new self(
+			$policy['period'],
+			$policy['interval'],
+			Integers::parse( $policy['max_cycles'] ?? null ),
+			is_array( $trial ) ? [
+				'length' => $trial['length'],
+				'unit'   => $trial['unit'],
+			] : null
+		);
 	}
 
 	/**
@@ -353,27 +384,5 @@ final class BillingTerms {
 	 */
 	public function get_trial_duration(): ?array {
 		return $this->trial_duration;
-	}
-
-	/**
-	 * A positive integer from an int or an integer string, else null.
-	 *
-	 * Strings follow the engine's integer rule (`FILTER_VALIDATE_INT`, as in its
-	 * `Coercion`), so a cycle limit reads the same here as in the engine's parse:
-	 * `'5'` and `'+5'` pass, while `'007'`, `'1.5'` and `'1e2'` do not.
-	 *
-	 * @param mixed $value Raw value.
-	 */
-	private static function positive_int( $value ): ?int {
-		if ( is_int( $value ) ) {
-			return $value > 0 ? $value : null;
-		}
-		if ( ! is_string( $value ) ) {
-			return null;
-		}
-
-		$validated = filter_var( $value, FILTER_VALIDATE_INT, [ 'options' => [ 'min_range' => 1 ] ] );
-
-		return false === $validated ? null : $validated;
 	}
 }

@@ -419,9 +419,9 @@ final class PlanWriteValidationTest extends LiteIntegrationTestCase {
 		];
 	}
 
-	public function test_an_engine_billing_error_reaches_rest_translated(): void {
+	public function test_a_billing_error_reaches_rest_translated(): void {
 		$translate = static function ( string $translation, string $text, string $domain ): string {
-			return 'woocommerce' === $domain && 'Must be less than or equal to %d.' === $text ? 'At most %d.' : $translation;
+			return 'woocommerce-subscriptions-lite' === $domain && 'Must not exceed %d.' === $text ? 'At most %d.' : $translation;
 		};
 		add_filter( 'gettext', $translate, 10, 3 );
 

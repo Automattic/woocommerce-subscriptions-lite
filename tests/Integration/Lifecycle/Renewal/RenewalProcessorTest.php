@@ -503,7 +503,30 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 		$this->assertNull( $this->get_contract( $contract_id )->get_next_payment_gmt() );
 		$this->assertSame( CycleStatus::BILLED, $this->head( $contract_id )->get_status() );
 		$this->assertSame( 1, $this->head( $contract_id )->get_count() );
-		$this->assertTrue( $this->has_logged( 'no billing policy' ) );
+		$this->assertTrue( $this->has_logged( 'cannot be renewed: it has no plan with valid billing terms' ) );
+	}
+
+	public function test_a_contract_whose_plan_billing_is_not_billable_is_parked(): void {
+		$this->support_engine_charges( 'cod' );
+		$contract_id = $this->make_contract();
+		$this->update_plan_unvalidated(
+			(int) $this->get_contract( $contract_id )->get_selling_plan_id(),
+			[
+				'billing_policy' => [
+					'period'     => 'month',
+					'interval'   => 1,
+					'max_cycles' => 0,
+				],
+			]
+		);
+		$this->capture_log();
+
+		$this->assertNull( $this->renew( $contract_id ) );
+
+		$this->assertNull( $this->get_contract( $contract_id )->get_next_payment_gmt() );
+		$this->assertSame( CycleStatus::BILLED, $this->head( $contract_id )->get_status() );
+		$this->assertSame( 1, $this->head( $contract_id )->get_count() );
+		$this->assertTrue( $this->has_logged( 'cannot be renewed: it has no plan with valid billing terms' ) );
 	}
 
 	public function test_a_free_renewal_is_completed_without_a_charge(): void {

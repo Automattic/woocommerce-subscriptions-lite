@@ -130,11 +130,11 @@ final class Reactivation {
 			return $anchor;
 		}
 
-		$billing_policy = ContractPlans::get_billing_policy_for( $contract );
-		if ( null === $billing_policy ) {
+		$terms = ContractPlans::get_billing_terms_for( $contract );
+		if ( null === $terms ) {
 			return $now->format( 'Y-m-d H:i:s' );
 		}
 
-		return BillingTerms::get_next_due_after( $next_payment, $now, $billing_policy )->format( 'Y-m-d H:i:s' );
+		return $terms->get_next_due_after( $next_payment, $now )->format( 'Y-m-d H:i:s' );
 	}
 }

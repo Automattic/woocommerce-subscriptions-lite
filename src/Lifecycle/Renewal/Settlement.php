@@ -22,7 +22,6 @@ use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\CycleView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\CycleStatus;
-use Automattic\WooCommerce\SubscriptionsLite\Pricing\BillingTerms;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\HeldLocks;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\HoldAnchor;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Hold;
@@ -480,10 +479,10 @@ final class Settlement {
 			return;
 		}
 
-		$policy = ContractPlans::get_billing_policy_for( $contract );
-		$next   = null === $policy
+		$terms = ContractPlans::get_billing_terms_for( $contract );
+		$next  = null === $terms
 			? null
-			: BillingTerms::get_next_due_after( new DateTimeImmutable( $cycle->get_ends_at_gmt(), new DateTimeZone( 'UTC' ) ), $now, $policy );
+			: $terms->get_next_due_after( new DateTimeImmutable( $cycle->get_ends_at_gmt(), new DateTimeZone( 'UTC' ) ), $now );
 
 		if ( ContractStatus::ON_HOLD === $status && null !== HoldAnchor::read( $contract_id ) ) {
 			// A customer hold absorbs a late payment: it resumes from the period after this one.
@@ -527,9 +526,9 @@ final class Settlement {
 			return true;
 		}
 
-		// An active contract with no due moment and no billing policy stays parked.
+		// An active contract with no due moment and no billing terms stays parked.
 		return null === $resumes_at
-			? null === ContractPlans::get_billing_policy_for( $contract )
+			? null === ContractPlans::get_billing_terms_for( $contract )
 			: $resumes_at >= (string) $cycle->get_ends_at_gmt();
 	}
 

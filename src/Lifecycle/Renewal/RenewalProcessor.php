@@ -22,7 +22,6 @@ use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\CycleView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\CycleStatus;
-use Automattic\WooCommerce\SubscriptionsEngine\Core\ValueObject\BillingPolicy;
 use Automattic\WooCommerce\SubscriptionsLite\Pricing\BillingTerms;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\HeldLocks;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Hold;
@@ -66,19 +65,19 @@ final class RenewalProcessor {
 	 * @param bool              $manual   Whether a person asked for the renewal (retries a failed cycle).
 	 * @param ContractLock      $lock     The held lock on the contract.
 	 * @return WC_Order|null The renewal order; null when nothing was renewed (in flight,
-	 *                       awaiting payment, no billing policy, or the order could not be built).
+	 *                       awaiting payment, no valid billing terms, or the order could not be built).
 	 */
 	public function renew( ContractView $contract, DateTimeImmutable $anchor, DateTimeImmutable $now, bool $manual, ContractLock $lock ): ?WC_Order {
 		$contract_id = $contract->get_id();
-		$policy      = ContractPlans::get_billing_policy_for( $contract );
+		$terms       = ContractPlans::get_billing_terms_for( $contract );
 		$head        = Contracts::get_cycles( $contract_id, 1 )[0] ?? null;
-		if ( null === $policy || null === $head ) {
-			$this->log( 'warning', sprintf( 'contract %d has no billing policy or no billing chain; its due moment is cleared.', $contract_id ), $contract_id );
+		if ( null === $terms || null === $head ) {
+			$this->log( 'warning', sprintf( 'contract %d cannot be renewed: it has no plan with valid billing terms, or no billing chain; its next payment date is cleared.', $contract_id ), $contract_id );
 			Contracts::update( $contract_id, [ 'next_payment_gmt' => null ], $lock );
 			return null;
 		}
 
-		$cycle = $this->take_cycle( $contract, $head, $anchor, $now, $manual, $policy, $lock );
+		$cycle = $this->take_cycle( $contract, $head, $anchor, $now, $manual, $terms, $lock );
 		if ( null === $cycle ) {
 			return null;
 		}
@@ -165,10 +164,10 @@ final class RenewalProcessor {
 	 * @param DateTimeImmutable $anchor   The due moment.
 	 * @param DateTimeImmutable $now      The current moment.
 	 * @param bool              $manual   Whether a person asked.
-	 * @param BillingPolicy     $policy   The billing policy.
+	 * @param BillingTerms      $terms    The plan's billing terms.
 	 * @param ContractLock      $lock     The held lock.
 	 */
-	private function take_cycle( ContractView $contract, CycleView $head, DateTimeImmutable $anchor, DateTimeImmutable $now, bool $manual, BillingPolicy $policy, ContractLock $lock ): ?CycleView {
+	private function take_cycle( ContractView $contract, CycleView $head, DateTimeImmutable $anchor, DateTimeImmutable $now, bool $manual, BillingTerms $terms, ContractLock $lock ): ?CycleView {
 		switch ( $head->get_status() ) {
 			case CycleStatus::PENDING:
 				// The lock excludes a concurrent run, so a pending head is one an interrupted run left.
@@ -194,10 +193,10 @@ final class RenewalProcessor {
 				break;
 		}
 
-		[ $starts_at, $ends_at ] = BillingTerms::get_period_to_bill( $anchor, $now, $policy );
+		[ $starts_at, $ends_at ] = $terms->get_period_to_bill( $anchor, $now );
 
 		if ( CycleStatus::BILLED === $head->get_status() && new DateTimeImmutable( $head->get_ends_at_gmt(), new DateTimeZone( 'UTC' ) ) >= $ends_at ) {
-			$this->reapply_schedule( $contract, $head, $now, $policy, $lock );
+			$this->reapply_schedule( $contract, $head, $now, $terms, $lock );
 			return null;
 		}
 
@@ -223,14 +222,14 @@ final class RenewalProcessor {
 	 * @param ContractView      $contract The contract.
 	 * @param CycleView         $head     The billed head.
 	 * @param DateTimeImmutable $now      The current moment.
-	 * @param BillingPolicy     $policy   The billing policy.
+	 * @param BillingTerms      $terms    The plan's billing terms.
 	 * @param ContractLock      $lock     The held lock.
 	 */
-	private function reapply_schedule( ContractView $contract, CycleView $head, DateTimeImmutable $now, BillingPolicy $policy, ContractLock $lock ): void {
+	private function reapply_schedule( ContractView $contract, CycleView $head, DateTimeImmutable $now, BillingTerms $terms, ContractLock $lock ): void {
 		$this->log( 'warning', sprintf( 'contract %d is due for a period its newest cycle already billed; its next due moment is re-applied.', $contract->get_id() ), $contract->get_id() );
 		Contracts::update(
 			$contract->get_id(),
-			[ 'next_payment_gmt' => BillingTerms::get_next_due_after( new DateTimeImmutable( $head->get_ends_at_gmt(), new DateTimeZone( 'UTC' ) ), $now, $policy ) ],
+			[ 'next_payment_gmt' => $terms->get_next_due_after( new DateTimeImmutable( $head->get_ends_at_gmt(), new DateTimeZone( 'UTC' ) ), $now ) ],
 			$lock
 		);
 	}
