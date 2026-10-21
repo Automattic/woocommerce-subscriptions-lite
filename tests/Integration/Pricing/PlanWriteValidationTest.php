@@ -744,7 +744,8 @@ final class PlanWriteValidationTest extends LiteIntegrationTestCase {
 	 * @return array<string, mixed>
 	 */
 	private function error_data( WP_REST_Response $response ): array {
-		$data = $response->get_data();
+		// Read the data as a client does: the engine sends empty params as JSON objects.
+		$data = json_decode( (string) wp_json_encode( $response->get_data() ), true );
 		$this->assertIsArray( $data );
 		$this->assertIsArray( $data['data'] ?? null );
 
