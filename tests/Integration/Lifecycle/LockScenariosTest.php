@@ -363,6 +363,27 @@ final class LockScenariosTest extends LiteIntegrationTestCase {
 	}
 
 	/**
+	 * Run Renew now on the contract and let the request die once the gateway has charged: the
+	 * cycle billing write throws, and the run's lock is left held, as by a dead request.
+	 *
+	 * @param int $contract_id Contract id.
+	 */
+	private function die_during_renew_now( int $contract_id ): void {
+		$resume = $this->interrupt_billing_writes();
+		$lock   = $this->hold_lock( $contract_id, RenewalProcessor::OPERATION );
+		try {
+			HeldLocks::register( $lock );
+			( new RenewalProcessor() )->renew_now( $contract_id );
+			$this->fail( 'Expected the request to die.' );
+		} catch ( RuntimeException $e ) {
+			$this->assertSame( 'The request died.', $e->getMessage() );
+		} finally {
+			HeldLocks::unregister( $lock );
+			$resume();
+		}
+	}
+
+	/**
 	 * The scheduled moments of the pending charge settlements (unpaid settlement actions) for an order.
 	 *
 	 * @param int $order_id Order id.
@@ -399,20 +420,8 @@ final class LockScenariosTest extends LiteIntegrationTestCase {
 		$order = $this->renewal_orders()[0];
 
 		$this->support_engine_charges( 'cod', 'paid' );
-		$resume = $this->interrupt_billing_writes();
-		$lock   = $this->hold_lock( $contract_id, RenewalProcessor::OPERATION );
 		$before = time();
-		try {
-			// Registered but never released here: the request dies holding it.
-			HeldLocks::register( $lock );
-			( new RenewalProcessor() )->renew_now( $contract_id );
-			$this->fail( 'Expected the request to die.' );
-		} catch ( RuntimeException $e ) {
-			$this->assertSame( 'The request died.', $e->getMessage() );
-		} finally {
-			HeldLocks::unregister( $lock );
-			$resume();
-		}
+		$this->die_during_renew_now( $contract_id );
 
 		$this->assertTrue( wc_get_order( $order->get_id() )->is_paid(), 'Charged but not recorded.' );
 		$this->assertSame( CycleStatus::PENDING, $this->head( $contract_id )->get_status() );
@@ -453,19 +462,7 @@ final class LockScenariosTest extends LiteIntegrationTestCase {
 		$due_at      = $this->get_contract( $contract_id )->get_next_payment_gmt();
 		$this->assertGreaterThan( $this->now()->format( 'Y-m-d H:i:s' ), (string) $due_at, 'Due in the future.' );
 
-		$resume = $this->interrupt_billing_writes();
-		$lock   = $this->hold_lock( $contract_id, RenewalProcessor::OPERATION );
-		try {
-			// Registered but never released here: the request dies holding it.
-			HeldLocks::register( $lock );
-			( new RenewalProcessor() )->renew_now( $contract_id );
-			$this->fail( 'Expected the request to die.' );
-		} catch ( RuntimeException $e ) {
-			$this->assertSame( 'The request died.', $e->getMessage() );
-		} finally {
-			HeldLocks::unregister( $lock );
-			$resume();
-		}
+		$this->die_during_renew_now( $contract_id );
 
 		$order = $this->renewal_orders()[0];
 		$this->assertTrue( wc_get_order( $order->get_id() )->is_paid(), 'Charged but not recorded.' );

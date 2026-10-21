@@ -136,6 +136,7 @@ final class DeadRenewalOrderTest extends LiteIntegrationTestCase {
 		$this->assertSame( $order->get_id(), $head->get_order_id(), 'The paid order is relinked to the renewal.' );
 		$this->assertSame( 'cancelled', wc_get_order( $replacement_id )->get_status(), 'The unpaid replacement is cancelled.' );
 		$this->assertSame( ContractStatus::ACTIVE, $this->get_contract( $contract_id )->get_status() );
+		$this->assert_lock_released( $contract_id );
 	}
 
 	public function test_a_replaced_order_paid_after_its_replacement_paid_is_flagged_for_a_refund(): void {
@@ -172,22 +173,6 @@ final class DeadRenewalOrderTest extends LiteIntegrationTestCase {
 		$this->assertArrayHasKey( 'cancel', wc_get_account_orders_actions( $plain ), 'Other orders keep the cancel action.' );
 	}
 
-	/**
-	 * The refund notes an order carries.
-	 *
-	 * @param int $order_id Order id.
-	 */
-	private function refund_notes( int $order_id ): int {
-		return count(
-			array_filter(
-				wc_get_order_notes( [ 'order_id' => $order_id ] ),
-				static function ( $note ): bool {
-					return false !== stripos( $note->content, 'refund one of the two payments' );
-				}
-			)
-		);
-	}
-
 	public function test_a_late_payment_never_takes_back_a_renewal_whose_replacement_charge_is_in_flight(): void {
 		[ $contract_id, $order, $replacement_id ] = $this->replace_a_cancelled_renewal( 'on-hold' );
 		$this->assertSame( CycleStatus::PROCESSING, $this->head( $contract_id )->get_status() );
@@ -197,7 +182,7 @@ final class DeadRenewalOrderTest extends LiteIntegrationTestCase {
 
 		$this->assertSame( $replacement_id, $this->head( $contract_id )->get_order_id(), 'The in-flight replacement keeps the renewal.' );
 		$this->assertSame( 'on-hold', wc_get_order( $replacement_id )->get_status(), 'It is not cancelled under its pending charge.' );
-		$this->assertSame( 1, $this->refund_notes( $order->get_id() ) );
+		$this->assertCount( 1, $this->get_order_notes_containing( $order->get_id(), 'one of the two payments' ) );
 		$this->assertTrue( $this->has_logged( 'in flight' ) );
 
 		wc_get_order( $replacement_id )->payment_complete();
@@ -205,8 +190,8 @@ final class DeadRenewalOrderTest extends LiteIntegrationTestCase {
 		$head = $this->head( $contract_id );
 		$this->assertSame( CycleStatus::BILLED, $head->get_status() );
 		$this->assertSame( $replacement_id, $head->get_order_id(), 'One payment settles the renewal.' );
-		$this->assertSame( 0, $this->refund_notes( $replacement_id ) );
-		$this->assertSame( 1, $this->refund_notes( $order->get_id() ), 'The other is flagged once.' );
+		$this->assertCount( 0, $this->get_order_notes_containing( $replacement_id, 'one of the two payments' ) );
+		$this->assertCount( 1, $this->get_order_notes_containing( $order->get_id(), 'one of the two payments' ), 'The other is flagged once.' );
 	}
 
 	public function test_a_cancelled_replacement_that_is_paid_after_all_is_flagged_for_a_refund(): void {
@@ -218,7 +203,7 @@ final class DeadRenewalOrderTest extends LiteIntegrationTestCase {
 		wc_get_order( $replacement_id )->payment_complete();
 
 		$this->assertSame( $order->get_id(), $this->head( $contract_id )->get_order_id() );
-		$this->assertSame( 1, $this->refund_notes( $replacement_id ), 'The stamped replacement is flagged.' );
+		$this->assertCount( 1, $this->get_order_notes_containing( $replacement_id, 'one of the two payments' ), 'The stamped replacement is flagged.' );
 	}
 
 	public function test_a_trashed_manual_renewal_order_fails_its_cycle(): void {
@@ -233,6 +218,7 @@ final class DeadRenewalOrderTest extends LiteIntegrationTestCase {
 		$this->assertSame( $order_id, $head->get_order_id() );
 		$this->assertSame( 'trash', wc_get_order( $order_id )->get_status(), 'The order was trashed, not deleted.' );
 		$this->assertSame( ContractStatus::ON_HOLD, $this->get_contract( $contract_id )->get_status() );
+		$this->assert_lock_released( $contract_id );
 	}
 
 	public function test_a_permanently_deleted_unpaid_renewal_order_fails_its_cycle(): void {
@@ -370,7 +356,7 @@ final class DeadRenewalOrderTest extends LiteIntegrationTestCase {
 		$relink                                   = 'order_id = ' . $order->get_id() . ',';
 		$second                                   = 0;
 		$keep                                     = static function ( string $query ) use ( $cycles, $relink, $replacement_id, &$second ): string {
-			if ( 0 !== strpos( $query, "UPDATE {$cycles} SET" ) || false === strpos( $query, $relink ) ) {
+			if ( 1 !== preg_match( "/^UPDATE `?{$cycles}`? SET /", $query ) || false === strpos( $query, $relink ) ) {
 				return $query;
 			}
 			$query = str_replace( $relink, 'order_id = ' . $replacement_id . ',', $query );
@@ -385,6 +371,7 @@ final class DeadRenewalOrderTest extends LiteIntegrationTestCase {
 			remove_filter( 'query', $keep );
 		}
 
+		$this->assertGreaterThan( 0, $second, 'The filter rewrote the relink.' );
 		$notes = $this->get_order_notes_containing( $order->get_id(), 'Refund this payment' );
 		$this->assertCount( 1, $notes );
 		$this->assertStringContainsString( 'could not be moved back', $notes[0] );
