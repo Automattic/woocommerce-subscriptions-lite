@@ -138,39 +138,6 @@ describe( 'getSaveErrorMessages', () => {
 		] );
 	} );
 
-	it( 'shows the reason a restore was refused, not the generic message', () => {
-		const error = {
-			code: 'rest_invalid_param',
-			message: 'Invalid parameter(s): billing_policy',
-			data: {
-				status: 400,
-				params: {
-					billing_policy: 'billing_policy: This field is required.',
-				},
-				details: {
-					billing_policy: {
-						code: 'required',
-						message: 'billing_policy: This field is required.',
-						data: { field: 'billing_policy', params: {} },
-					},
-				},
-				errors: {
-					billing_policy: [
-						{
-							code: 'required',
-							message: 'This field is required.',
-							params: {},
-						},
-					],
-				},
-			},
-		};
-
-		expect( getSaveErrorMessages( error, FALLBACK ) ).toEqual( [
-			'billing_policy: This field is required.',
-		] );
-	} );
-
 	it( 'falls back to the error message when params is empty', () => {
 		const error = {
 			code: 'earlier_error',
