@@ -128,6 +128,7 @@ final class PricingTerms {
 			return $errors;
 		}
 
+		// A malformed list hides only its own entries; the other list is still checked.
 		foreach ( [ 'policies', 'one_time_fees' ] as $key ) {
 			if ( isset( $data[ $key ] ) && ! ( is_array( $data[ $key ] ) && array_is_list( $data[ $key ] ) ) ) {
 				ValidationErrors::add(
@@ -137,17 +138,16 @@ final class PricingTerms {
 					__( 'Must be a list.', 'woocommerce-subscriptions-lite' ),
 					[ 'type' => 'array' ]
 				);
+				continue;
 			}
-		}
-		if ( $errors->has_errors() ) {
-			return $errors;
-		}
-
-		foreach ( self::entries( $data, 'policies' ) as $index => $entry ) {
-			self::validate_policy( $errors, 'pricing_policy.policies.' . (int) $index, $entry );
-		}
-		foreach ( self::entries( $data, 'one_time_fees' ) as $index => $entry ) {
-			self::validate_fee( $errors, 'pricing_policy.one_time_fees.' . (int) $index, $entry );
+			foreach ( self::entries( $data, $key ) as $index => $entry ) {
+				$field = 'pricing_policy.' . $key . '.' . (int) $index;
+				if ( 'policies' === $key ) {
+					self::validate_policy( $errors, $field, $entry );
+				} else {
+					self::validate_fee( $errors, $field, $entry );
+				}
+			}
 		}
 
 		return $errors;

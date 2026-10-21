@@ -499,6 +499,26 @@ final class PricingTermsTest extends LiteIntegrationTestCase {
 					[ 'invalid_type', 'pricing_policy.one_time_fees', [ 'type' => 'array' ] ],
 				],
 			],
+			'fees not a list, bad policy'  => [
+				[
+					'policies'      => [ self::policy( 'mystery', 1 ) ],
+					'one_time_fees' => 'none',
+				],
+				[
+					[ 'not_in_enum', 'pricing_policy.policies.0.type', $allowed ],
+					[ 'invalid_type', 'pricing_policy.one_time_fees', [ 'type' => 'array' ] ],
+				],
+			],
+			'policies not a list, bad fee' => [
+				[
+					'policies'      => 'none',
+					'one_time_fees' => [ [ 'amount' => -5 ] ],
+				],
+				[
+					[ 'invalid_type', 'pricing_policy.policies', [ 'type' => 'array' ] ],
+					[ 'out_of_bounds', 'pricing_policy.one_time_fees.0.amount', [ 'min' => 0 ] ],
+				],
+			],
 			'non-object entry'             => [ [ 'policies' => [ 'bogo' ] ], [ [ 'invalid_type', 'pricing_policy.policies.0', $object ] ] ],
 			'unknown type'                 => [ [ 'policies' => [ self::policy( 'mystery', 1 ) ] ], [ [ 'not_in_enum', 'pricing_policy.policies.0.type', $allowed ] ] ],
 			'missing type'                 => [ [ 'policies' => [ [ 'value' => 1 ] ] ], [ [ 'not_in_enum', 'pricing_policy.policies.0.type', $allowed ] ] ],
