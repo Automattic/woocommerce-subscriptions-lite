@@ -9,7 +9,10 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Pricing;
 
+use Automattic\WooCommerce\SubscriptionsEngine\Api\ValidationException;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\PlanView;
+use Automattic\WooCommerce\SubscriptionsEngine\Core\Support\InvalidInputException;
+use Automattic\WooCommerce\SubscriptionsEngine\Core\Support\ValidationErrorCode;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\ValueObject\BillingPolicy;
 use Automattic\WooCommerce\SubscriptionsLite\Pricing\BillingTerms;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
@@ -320,14 +323,20 @@ final class BillingTermsTest extends LiteIntegrationTestCase {
 			],
 			'every engine field at once' => [
 				[
-					'period'     => 'fortnight',
-					'interval'   => '2',
-					'max_cycles' => -1,
+					'period'         => 'fortnight',
+					'interval'       => '2',
+					'max_cycles'     => -1,
+					'trial_duration' => [
+						'length' => 0,
+						'unit'   => 'fortnight',
+					],
 				],
 				[
 					[ 'not_in_enum', 'billing_policy.period', $units ],
+					[ 'not_in_enum', 'billing_policy.trial_duration.unit', $units ],
 					[ 'invalid_type', 'billing_policy.interval', [ 'type' => 'integer' ] ],
 					[ 'out_of_bounds', 'billing_policy.max_cycles', [ 'min' => 0 ] ],
+					[ 'out_of_bounds', 'billing_policy.trial_duration.length', [ 'min' => 1 ] ],
 				],
 			],
 		];
@@ -336,14 +345,59 @@ final class BillingTermsTest extends LiteIntegrationTestCase {
 	/**
 	 * `is_billable()` and `validate()` apply one rule.
 	 *
-	 * @dataProvider provide_billing_payloads_to_validate
-	 * @dataProvider provide_unusable_plan_billing
-	 * @dataProvider provide_unbillable_cycle_and_trial_payloads
+	 * @dataProvider provide_billability_payloads
 	 *
-	 * @param array<string, mixed>|null $policy Billing payload.
+	 * @param array<string, mixed>|null $policy   Billing payload.
+	 * @param bool                      $billable Whether the payload is billable.
 	 */
-	public function test_is_billable_agrees_with_validate( ?array $policy ): void {
-		$this->assertSame( ! BillingTerms::validate( $policy )->has_errors(), BillingTerms::is_billable( $policy ) );
+	public function test_is_billable_agrees_with_validate( ?array $policy, bool $billable ): void {
+		$this->assertSame( $billable, BillingTerms::is_billable( $policy ) );
+		$this->assertSame( ! $billable, BillingTerms::validate( $policy )->has_errors() );
+	}
+
+	/**
+	 * Every unbillable payload from the validation rows, plus billable ones.
+	 *
+	 * @return array<string, array{0: array<string, mixed>|null, 1: bool}>
+	 */
+	public function provide_billability_payloads(): array {
+		$rows = [];
+		foreach ( $this->provide_billing_payloads_to_validate() as $name => $row ) {
+			$rows[ $name ] = [ $row[0], false ];
+		}
+
+		return array_merge(
+			$rows,
+			[
+				'missing interval'     => [ [ 'period' => 'month' ], false ],
+				'billable, no limit'   => [
+					[
+						'period'   => 'month',
+						'interval' => 1,
+					],
+					true,
+				],
+				'billable, six cycles' => [
+					[
+						'period'     => 'week',
+						'interval'   => 2,
+						'max_cycles' => 6,
+					],
+					true,
+				],
+				'billable, with trial' => [
+					[
+						'period'         => 'month',
+						'interval'       => 1,
+						'trial_duration' => [
+							'length' => 14,
+							'unit'   => 'day',
+						],
+					],
+					true,
+				],
+			]
+		);
 	}
 
 	public function test_validate_keeps_the_engine_params(): void {
@@ -366,7 +420,12 @@ final class BillingTermsTest extends LiteIntegrationTestCase {
 	}
 
 	public function test_validate_reports_a_null_payload_with_the_engine_message(): void {
-		$this->assertSame( 'This field is required.', BillingTerms::validate( null )->get_error_message( 'required' ) );
+		$required = ValidationException::from_core( new InvalidInputException( ValidationErrorCode::REQUIRED, 'billing_policy', 'billing_policy is required.' ) );
+
+		$message = BillingTerms::validate( null )->get_error_message( 'required' );
+
+		$this->assertNotSame( '', $message );
+		$this->assertSame( $required->get_errors()->get_error_message( 'required' ), $message );
 	}
 
 	public function test_validate_translates_its_own_messages(): void {
