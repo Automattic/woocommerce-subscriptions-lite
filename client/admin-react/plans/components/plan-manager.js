@@ -12,6 +12,7 @@ import { buildFieldRegistry } from '../fields';
 import { usePlans } from '../hooks/use-plans';
 import { useNotifications } from '../hooks/use-notifications';
 import { useValidation } from '../hooks/use-validation';
+import { getSaveErrorMessages } from '../utils/save-error';
 import { PlansTable } from './plans-table';
 import { PlanModal } from './plan-modal';
 
@@ -27,7 +28,7 @@ const CLOSED_EDITOR = {
 	isOpen: false,
 	plan: null,
 	isSaving: false,
-	apiError: '',
+	apiErrors: [],
 	duplicateWarning: false,
 };
 
@@ -73,8 +74,8 @@ export function PlanManager() {
 
 	const handleFieldChange = useCallback( () => {
 		setEditor( ( current ) =>
-			current.apiError || current.duplicateWarning
-				? { ...current, apiError: '', duplicateWarning: false }
+			current.apiErrors.length > 0 || current.duplicateWarning
+				? { ...current, apiErrors: [], duplicateWarning: false }
 				: current
 		);
 	}, [] );
@@ -97,7 +98,7 @@ export function PlanManager() {
 			setEditor( ( current ) => ( {
 				...current,
 				isSaving: true,
-				apiError: '',
+				apiErrors: [],
 			} ) );
 
 			try {
@@ -119,12 +120,13 @@ export function PlanManager() {
 				setEditor( ( current ) => ( {
 					...current,
 					isSaving: false,
-					apiError:
-						saveError?.message ||
+					apiErrors: getSaveErrorMessages(
+						saveError,
 						__(
 							'Subscription plan could not be saved.',
 							'woocommerce-subscriptions-lite'
-						),
+						)
+					),
 				} ) );
 			}
 		},
@@ -149,11 +151,13 @@ export function PlanManager() {
 				await reload();
 			} catch ( statusError ) {
 				showError(
-					statusError?.message ||
+					getSaveErrorMessages(
+						statusError,
 						__(
 							'Plan status could not be changed.',
 							'woocommerce-subscriptions-lite'
 						)
+					).join( ' ' )
 				);
 			}
 		},
@@ -232,7 +236,7 @@ export function PlanManager() {
 					definitions={ definitions }
 					plan={ editor.plan }
 					isSaving={ editor.isSaving }
-					apiError={ editor.apiError }
+					apiErrors={ editor.apiErrors }
 					duplicateWarning={ editor.duplicateWarning }
 					onClose={ closeEditor }
 					onSave={ handleSave }

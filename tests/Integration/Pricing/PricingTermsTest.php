@@ -18,6 +18,8 @@ use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTe
  */
 final class PricingTermsTest extends LiteIntegrationTestCase {
 
+	use ListsValidationErrors;
+
 	public function test_tolerant_parse_drops_malformed_entries_and_keeps_valid_neighbours_in_order(): void {
 		$terms = PricingTerms::from_array(
 			[
@@ -386,7 +388,7 @@ final class PricingTermsTest extends LiteIntegrationTestCase {
 	 * @param mixed $payload Valid payload.
 	 */
 	public function test_validate_accepts_valid_payloads( $payload ): void {
-		$this->assertSame( [], PricingTerms::validate( $payload ) );
+		$this->assertFalse( PricingTerms::validate( $payload )->has_errors() );
 	}
 
 	/**
@@ -467,45 +469,168 @@ final class PricingTermsTest extends LiteIntegrationTestCase {
 	/**
 	 * @dataProvider provide_invalid_payloads
 	 *
-	 * @param mixed  $payload Invalid payload.
-	 * @param string $message Expected first error message.
+	 * @param mixed                                                      $payload  Invalid payload.
+	 * @param list<array{0: string, 1: string, 2: array<string, mixed>}> $expected Every error as code, field and params.
 	 */
-	public function test_validate_rejects_invalid_payloads( $payload, string $message ): void {
-		$errors = PricingTerms::validate( $payload );
-
-		$this->assertNotEmpty( $errors );
-		$this->assertSame( $message, $errors[0] );
+	public function test_validate_rejects_invalid_payloads( $payload, array $expected ): void {
+		$this->assertSame( $expected, $this->get_validation_errors( PricingTerms::validate( $payload ) ) );
 	}
 
 	/**
-	 * @return array<string, array{0: mixed, 1: string}>
+	 * @return array<string, array{0: mixed, 1: list<array{0: string, 1: string, 2: array<string, mixed>}>}>
 	 */
 	public function provide_invalid_payloads(): array {
+		$allowed = [ 'allowed' => PricingTerms::TYPES ];
+		$object  = [ 'type' => 'object' ];
+		$number  = [ 'type' => 'number' ];
+		$integer = [ 'type' => 'integer' ];
+
 		return [
-			'non-object'                   => [ 'bogo', 'pricing_policy must be an object or null.' ],
-			'policies not a list'          => [ [ 'policies' => [ 'type' => 'bogo' ] ], 'pricing_policy.policies: must be a list.' ],
-			'fees not a list'              => [ [ 'one_time_fees' => 'none' ], 'pricing_policy.one_time_fees: must be a list.' ],
-			'non-object entry'             => [ [ 'policies' => [ 'bogo' ] ], 'pricing_policy.policies[0]: must be an object, got string' ],
-			'unknown type'                 => [ [ 'policies' => [ self::policy( 'mystery', 1 ) ] ], 'pricing_policy.policies[0]: invalid type mystery' ],
-			'missing type'                 => [ [ 'policies' => [ [ 'value' => 1 ] ] ], 'pricing_policy.policies[0]: invalid type NULL' ],
-			'non-numeric value'            => [ [ 'policies' => [ self::policy( 'percentage', 'ten' ) ] ], 'pricing_policy.policies[0]: value must be numeric, got string' ],
-			'negative value'               => [ [ 'policies' => [ self::policy( 'fixed_amount', -1 ) ] ], 'pricing_policy.policies[0]: fixed_amount value must be non-negative, got -1' ],
-			'percentage over 100'          => [ [ 'policies' => [ self::policy( 'percentage', 150 ) ] ], 'pricing_policy.policies[0]: percentage must not exceed 100, got 150' ],
-			'bogo with a value'            => [ [ 'policies' => [ self::policy( 'bogo', 5 ) ] ], 'pricing_policy.policies[0]: bogo is value-less; value must be 0 or omitted, got 5' ],
-			'starting_cycle zero'          => [ [ 'policies' => [ self::policy( 'price', 5, [ 'starting_cycle' => 0 ] ) ] ], 'pricing_policy.policies[0]: starting_cycle must be at least 1, got 0' ],
-			'duration_cycles negative'     => [ [ 'policies' => [ self::policy( 'price', 5, [ 'duration_cycles' => -1 ] ) ] ], 'pricing_policy.policies[0]: duration_cycles must be at least 1, got -1' ],
-			'fractional starting float'    => [ [ 'policies' => [ self::policy( 'percentage', 10, [ 'starting_cycle' => 1.5 ] ) ] ], 'pricing_policy.policies[0]: starting_cycle must be an integer, got double' ],
-			'fractional starting string'   => [ [ 'policies' => [ self::policy( 'percentage', 10, [ 'starting_cycle' => '1.5' ] ) ] ], 'pricing_policy.policies[0]: starting_cycle must be an integer, got string' ],
-			'non-numeric starting string'  => [ [ 'policies' => [ self::policy( 'percentage', 10, [ 'starting_cycle' => 'soon' ] ) ] ], 'pricing_policy.policies[0]: starting_cycle must be an integer, got string' ],
-			'fractional duration float'    => [ [ 'policies' => [ self::policy( 'percentage', 10, [ 'duration_cycles' => 1.5 ] ) ] ], 'pricing_policy.policies[0]: duration_cycles must be an integer, got double' ],
-			'fractional duration string'   => [ [ 'policies' => [ self::policy( 'percentage', 10, [ 'duration_cycles' => '1.5' ] ) ] ], 'pricing_policy.policies[0]: duration_cycles must be an integer, got string' ],
-			'non-numeric duration string'  => [ [ 'policies' => [ self::policy( 'percentage', 10, [ 'duration_cycles' => 'forever' ] ) ] ], 'pricing_policy.policies[0]: duration_cycles must be an integer, got string' ],
-			'second entry reports index 1' => [ [ 'policies' => [ self::policy( 'bogo', 0 ), self::policy( 'percentage', 101 ) ] ], 'pricing_policy.policies[1]: percentage must not exceed 100, got 101' ],
-			'non-object fee'               => [ [ 'one_time_fees' => [ 5 ] ], 'pricing_policy.one_time_fees[0]: must be an object, got integer' ],
-			'non-numeric fee amount'       => [ [ 'one_time_fees' => [ [ 'amount' => 'five' ] ] ], 'pricing_policy.one_time_fees[0]: amount must be numeric, got string' ],
-			'negative fee amount'          => [ [ 'one_time_fees' => [ [ 'amount' => -5 ] ] ], 'pricing_policy.one_time_fees[0]: amount must be non-negative, got -5' ],
-			'infinite fee amount'          => [ [ 'one_time_fees' => [ [ 'amount' => INF ] ] ], 'pricing_policy.one_time_fees[0]: amount must be finite' ],
-			'non-bool taxable'             => [
+			'non-object'                   => [ 'bogo', [ [ 'invalid_type', 'pricing_policy', $object ] ] ],
+			'policies not a list'          => [ [ 'policies' => [ 'type' => 'bogo' ] ], [ [ 'invalid_type', 'pricing_policy.policies', [ 'type' => 'array' ] ] ] ],
+			'fees not a list'              => [ [ 'one_time_fees' => 'none' ], [ [ 'invalid_type', 'pricing_policy.one_time_fees', [ 'type' => 'array' ] ] ] ],
+			'neither is a list'            => [
+				[
+					'policies'      => 'none',
+					'one_time_fees' => 'none',
+				],
+				[
+					[ 'invalid_type', 'pricing_policy.policies', [ 'type' => 'array' ] ],
+					[ 'invalid_type', 'pricing_policy.one_time_fees', [ 'type' => 'array' ] ],
+				],
+			],
+			'fees not a list, bad policy'  => [
+				[
+					'policies'      => [ self::policy( 'mystery', 1 ) ],
+					'one_time_fees' => 'none',
+				],
+				[
+					[ 'not_in_enum', 'pricing_policy.policies.0.type', $allowed ],
+					[ 'invalid_type', 'pricing_policy.one_time_fees', [ 'type' => 'array' ] ],
+				],
+			],
+			'policies not a list, bad fee' => [
+				[
+					'policies'      => 'none',
+					'one_time_fees' => [ [ 'amount' => -5 ] ],
+				],
+				[
+					[ 'invalid_type', 'pricing_policy.policies', [ 'type' => 'array' ] ],
+					[ 'out_of_bounds', 'pricing_policy.one_time_fees.0.amount', [ 'min' => 0 ] ],
+				],
+			],
+			'non-object entry'             => [ [ 'policies' => [ 'bogo' ] ], [ [ 'invalid_type', 'pricing_policy.policies.0', $object ] ] ],
+			'unknown type'                 => [ [ 'policies' => [ self::policy( 'mystery', 1 ) ] ], [ [ 'not_in_enum', 'pricing_policy.policies.0.type', $allowed ] ] ],
+			'missing type'                 => [ [ 'policies' => [ [ 'value' => 1 ] ] ], [ [ 'not_in_enum', 'pricing_policy.policies.0.type', $allowed ] ] ],
+			'non-numeric value'            => [ [ 'policies' => [ self::policy( 'percentage', 'ten' ) ] ], [ [ 'invalid_type', 'pricing_policy.policies.0.value', $number ] ] ],
+			'infinite value'               => [ [ 'policies' => [ self::policy( 'fixed_amount', INF ) ] ], [ [ 'invalid_value', 'pricing_policy.policies.0.value', [] ] ] ],
+			'negative value'               => [ [ 'policies' => [ self::policy( 'fixed_amount', -1 ) ] ], [ [ 'out_of_bounds', 'pricing_policy.policies.0.value', [ 'min' => 0 ] ] ] ],
+			'percentage over 100'          => [ [ 'policies' => [ self::policy( 'percentage', 150 ) ] ], [ [ 'out_of_bounds', 'pricing_policy.policies.0.value', [ 'max' => 100 ] ] ] ],
+			'bogo with a value'            => [ [ 'policies' => [ self::policy( 'bogo', 5 ) ] ], [ [ 'invalid_value', 'pricing_policy.policies.0.value', [] ] ] ],
+			'starting_cycle zero'          => [ [ 'policies' => [ self::policy( 'price', 5, [ 'starting_cycle' => 0 ] ) ] ], [ [ 'out_of_bounds', 'pricing_policy.policies.0.starting_cycle', [ 'min' => 1 ] ] ] ],
+			'duration_cycles negative'     => [ [ 'policies' => [ self::policy( 'price', 5, [ 'duration_cycles' => -1 ] ) ] ], [ [ 'out_of_bounds', 'pricing_policy.policies.0.duration_cycles', [ 'min' => 1 ] ] ] ],
+			'fractional starting float'    => [ [ 'policies' => [ self::policy( 'percentage', 10, [ 'starting_cycle' => 1.5 ] ) ] ], [ [ 'invalid_type', 'pricing_policy.policies.0.starting_cycle', $integer ] ] ],
+			'fractional starting string'   => [ [ 'policies' => [ self::policy( 'percentage', 10, [ 'starting_cycle' => '1.5' ] ) ] ], [ [ 'invalid_type', 'pricing_policy.policies.0.starting_cycle', $integer ] ] ],
+			'non-numeric starting string'  => [ [ 'policies' => [ self::policy( 'percentage', 10, [ 'starting_cycle' => 'soon' ] ) ] ], [ [ 'invalid_type', 'pricing_policy.policies.0.starting_cycle', $integer ] ] ],
+			'fractional duration float'    => [ [ 'policies' => [ self::policy( 'percentage', 10, [ 'duration_cycles' => 1.5 ] ) ] ], [ [ 'invalid_type', 'pricing_policy.policies.0.duration_cycles', $integer ] ] ],
+			'fractional duration string'   => [ [ 'policies' => [ self::policy( 'percentage', 10, [ 'duration_cycles' => '1.5' ] ) ] ], [ [ 'invalid_type', 'pricing_policy.policies.0.duration_cycles', $integer ] ] ],
+			'non-numeric duration string'  => [ [ 'policies' => [ self::policy( 'percentage', 10, [ 'duration_cycles' => 'forever' ] ) ] ], [ [ 'invalid_type', 'pricing_policy.policies.0.duration_cycles', $integer ] ] ],
+			'bad value and both gates'     => [
+				[
+					'policies' => [
+						self::policy(
+							'percentage',
+							150,
+							[
+								'starting_cycle'  => 0,
+								'duration_cycles' => 'forever',
+							]
+						),
+					],
+				],
+				[
+					[ 'out_of_bounds', 'pricing_policy.policies.0.value', [ 'max' => 100 ] ],
+					[ 'out_of_bounds', 'pricing_policy.policies.0.starting_cycle', [ 'min' => 1 ] ],
+					[ 'invalid_type', 'pricing_policy.policies.0.duration_cycles', $integer ],
+				],
+			],
+			'second entry reports index 1' => [ [ 'policies' => [ self::policy( 'bogo', 0 ), self::policy( 'percentage', 101 ) ] ], [ [ 'out_of_bounds', 'pricing_policy.policies.1.value', [ 'max' => 100 ] ] ] ],
+			'two bad policy values'        => [
+				[ 'policies' => [ self::policy( 'percentage', 150 ), self::policy( 'percentage', 120 ) ] ],
+				[
+					[ 'out_of_bounds', 'pricing_policy.policies.0.value', [ 'max' => 100 ] ],
+					[ 'out_of_bounds', 'pricing_policy.policies.1.value', [ 'max' => 100 ] ],
+				],
+			],
+			'non-object fee'               => [ [ 'one_time_fees' => [ 5 ] ], [ [ 'invalid_type', 'pricing_policy.one_time_fees.0', $object ] ] ],
+			'non-numeric fee amount'       => [ [ 'one_time_fees' => [ [ 'amount' => 'five' ] ] ], [ [ 'invalid_type', 'pricing_policy.one_time_fees.0.amount', $number ] ] ],
+			'negative fee amount'          => [ [ 'one_time_fees' => [ [ 'amount' => -5 ] ] ], [ [ 'out_of_bounds', 'pricing_policy.one_time_fees.0.amount', [ 'min' => 0 ] ] ] ],
+			'infinite fee amount'          => [ [ 'one_time_fees' => [ [ 'amount' => INF ] ] ], [ [ 'invalid_value', 'pricing_policy.one_time_fees.0.amount', [] ] ] ],
+			'every bad fee field'          => [
+				[
+					'one_time_fees' => [
+						[
+							'amount'    => -5,
+							'taxable'   => 'maybe',
+							'tax_class' => [ 'reduced' ],
+						],
+					],
+				],
+				[
+					[ 'out_of_bounds', 'pricing_policy.one_time_fees.0.amount', [ 'min' => 0 ] ],
+					[ 'invalid_type', 'pricing_policy.one_time_fees.0.taxable', [ 'type' => 'boolean' ] ],
+					[ 'invalid_type', 'pricing_policy.one_time_fees.0.tax_class', [ 'type' => 'string' ] ],
+				],
+			],
+			'policy and fee errors'        => [
+				[
+					'policies'      => [ self::policy( 'percentage', 150 ) ],
+					'one_time_fees' => [ [ 'amount' => -5 ] ],
+				],
+				[
+					[ 'out_of_bounds', 'pricing_policy.policies.0.value', [ 'max' => 100 ] ],
+					[ 'out_of_bounds', 'pricing_policy.one_time_fees.0.amount', [ 'min' => 0 ] ],
+				],
+			],
+		];
+	}
+
+	/**
+	 * Every message is non-empty and names no field: the field rides in the error data.
+	 *
+	 * @dataProvider provide_single_error_payloads
+	 *
+	 * @param mixed $payload Invalid payload with one error.
+	 */
+	public function test_validate_reports_a_field_free_message( $payload ): void {
+		$errors   = PricingTerms::validate( $payload );
+		$messages = $errors->get_error_messages();
+
+		$this->assertCount( 1, $messages );
+		$this->assertNotSame( '', $messages[0] );
+		$this->assertStringNotContainsString( 'pricing_policy', $messages[0] );
+		$this->assertStringNotContainsString( $errors->get_error_data()['field'], $messages[0] );
+	}
+
+	/**
+	 * One row per message family.
+	 *
+	 * @return array<string, array{0: mixed}>
+	 */
+	public function provide_single_error_payloads(): array {
+		return [
+			'non-object payload'  => [ 'bogo' ],
+			'not a list'          => [ [ 'policies' => 'none' ] ],
+			'non-object entry'    => [ [ 'policies' => [ 'bogo' ] ] ],
+			'unknown type'        => [ [ 'policies' => [ self::policy( 'mystery', 1 ) ] ] ],
+			'non-numeric value'   => [ [ 'policies' => [ self::policy( 'percentage', 'ten' ) ] ] ],
+			'infinite amount'     => [ [ 'one_time_fees' => [ [ 'amount' => INF ] ] ] ],
+			'negative amount'     => [ [ 'one_time_fees' => [ [ 'amount' => -5 ] ] ] ],
+			'percentage over 100' => [ [ 'policies' => [ self::policy( 'percentage', 150 ) ] ] ],
+			'bogo with a value'   => [ [ 'policies' => [ self::policy( 'bogo', 5 ) ] ] ],
+			'fractional gate'     => [ [ 'policies' => [ self::policy( 'price', 5, [ 'starting_cycle' => 1.5 ] ) ] ] ],
+			'zero gate'           => [ [ 'policies' => [ self::policy( 'price', 5, [ 'starting_cycle' => 0 ] ) ] ] ],
+			'non-bool taxable'    => [
 				[
 					'one_time_fees' => [
 						[
@@ -514,20 +639,55 @@ final class PricingTermsTest extends LiteIntegrationTestCase {
 						],
 					],
 				],
-				'pricing_policy.one_time_fees[0]: taxable must be a bool, got string',
 			],
-			'non-string tax_class'         => [
+			'non-string class'    => [
 				[
 					'one_time_fees' => [
 						[
 							'amount'    => 5,
-							'tax_class' => [ 'reduced' ],
+							'tax_class' => 1,
 						],
 					],
 				],
-				'pricing_policy.one_time_fees[0]: tax_class must be string or null, got array',
 			],
 		];
+	}
+
+	/**
+	 * @dataProvider provide_message_wording
+	 *
+	 * @param mixed  $payload Invalid payload with one error.
+	 * @param string $message Expected message.
+	 */
+	public function test_validate_message_wording( $payload, string $message ): void {
+		$this->assertSame( [ $message ], PricingTerms::validate( $payload )->get_error_messages() );
+	}
+
+	/**
+	 * A plain message and the type list joined by `wp_sprintf( '%l' )`.
+	 *
+	 * @return array<string, array{0: mixed, 1: string}>
+	 */
+	public function provide_message_wording(): array {
+		return [
+			'plain message' => [ [ 'policies' => 'none' ], 'Must be a list.' ],
+			'type list'     => [ [ 'policies' => [ self::policy( 'mystery', 1 ) ] ], 'Must be one of percentage, fixed_amount, price, and bogo.' ],
+		];
+	}
+
+	public function test_validate_translates_its_messages(): void {
+		$translate = static function ( string $translation, string $text, string $domain ): string {
+			return 'woocommerce-subscriptions-lite' === $domain && 'Must be a list.' === $text ? 'Translated list message' : $translation;
+		};
+		add_filter( 'gettext', $translate, 10, 3 );
+
+		try {
+			$errors = PricingTerms::validate( [ 'policies' => 'none' ] );
+		} finally {
+			remove_filter( 'gettext', $translate, 10 );
+		}
+
+		$this->assertSame( 'Translated list message', $errors->get_error_message() );
 	}
 
 	/**

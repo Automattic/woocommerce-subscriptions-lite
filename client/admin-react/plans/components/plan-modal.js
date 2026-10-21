@@ -12,7 +12,7 @@ import { PlanForm } from './plan-form';
  * @param {Object}        props.definitions      Normalized engine definitions.
  * @param {Object|null}   props.plan             Plan being edited, or null.
  * @param {boolean}       props.isSaving         Whether a save is in progress.
- * @param {string}        props.apiError         API error message, if any.
+ * @param {string[]}      props.apiErrors        API error messages: one per field, plus errors without a field; empty when none.
  * @param {boolean}       props.duplicateWarning Whether a duplicate was detected.
  * @param {Function}      props.onClose          Close callback.
  * @param {Function}      props.onSave           Save callback (payload, formData).
@@ -24,7 +24,7 @@ export function PlanModal( {
 	definitions,
 	plan,
 	isSaving = false,
-	apiError = '',
+	apiErrors = [],
 	duplicateWarning = false,
 	onClose,
 	onSave,
@@ -55,7 +55,7 @@ export function PlanModal( {
 					'woocommerce-subscriptions-lite'
 				) }
 			</p>
-			{ apiError && (
+			{ apiErrors.length > 0 && (
 				<Notice status="error" isDismissible={ false }>
 					<strong>
 						{ __(
@@ -63,7 +63,15 @@ export function PlanModal( {
 							'woocommerce-subscriptions-lite'
 						) }
 					</strong>{ ' ' }
-					{ apiError }
+					{ apiErrors.length === 1 ? (
+						apiErrors[ 0 ]
+					) : (
+						<ul className="ul-disc">
+							{ apiErrors.map( ( message ) => (
+								<li key={ message }>{ message }</li>
+							) ) }
+						</ul>
+					) }
 				</Notice>
 			) }
 			{ duplicateWarning && (

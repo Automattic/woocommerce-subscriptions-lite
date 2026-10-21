@@ -13,7 +13,11 @@
  * prices the carts and orders that carry it). Only a write to a plan that is not
  * active and keeps its stored billing skips it, so a plan with unusable stored
  * billing can still be archived; restoring it checks billing again. Each problem is
- * added to the collector; the plan is stored exactly as sent.
+ * added to the collector with an engine error code, a translated field-free message
+ * and `field` (dot path, such as `billing_policy.max_cycles`) / `params` data, so the
+ * engine's plans route reports it under that field and its request arg. The engine
+ * fires the action even for a plan it refuses, so its own errors (an empty name) and
+ * Lite's arrive in one response. The plan is stored exactly as sent.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Pricing
  */
@@ -43,7 +47,7 @@ final class PlanWriteValidation {
 	}
 
 	/**
-	 * Add an error for each invalid billing or pricing term of a Lite plan.
+	 * Add a coded error for each invalid billing or pricing term of a Lite plan.
 	 *
 	 * @param WP_Error $errors         Error collector.
 	 * @param PlanView $plan           View of the plan about to be written.
@@ -54,9 +58,8 @@ final class PlanWriteValidation {
 			return;
 		}
 
-		$billing_errors = $this->billing_needs_validation( $plan ) ? BillingTerms::validate( $plan->get_billing_policy() ) : [];
-		foreach ( $billing_errors as $message ) {
-			$errors->add( 'rest_invalid_param', $message, [ 'status' => 400 ] );
+		if ( $this->billing_needs_validation( $plan ) ) {
+			$errors->merge_from( BillingTerms::validate( $plan->get_billing_policy() ) );
 		}
 
 		$pricing_policy = $plan->get_pricing_policy();
@@ -64,9 +67,7 @@ final class PlanWriteValidation {
 			return;
 		}
 
-		foreach ( PricingTerms::validate( $pricing_policy ) as $message ) {
-			$errors->add( 'rest_invalid_param', $message, [ 'status' => 400 ] );
-		}
+		$errors->merge_from( PricingTerms::validate( $pricing_policy ) );
 	}
 
 	/**
