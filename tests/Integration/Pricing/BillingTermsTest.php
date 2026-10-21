@@ -472,6 +472,72 @@ final class BillingTermsTest extends LiteIntegrationTestCase {
 	}
 
 	/**
+	 * First renewal dates for every cadence and trial unit, pinned: month and year overflow
+	 * (31 Jan + 1 month = 3 Mar), a trial wins over the cadence, and results are in UTC.
+	 *
+	 * @dataProvider provide_first_renewals
+	 *
+	 * @param array<string, mixed> $billing_policy Plan billing payload.
+	 * @param string               $start          Contract start.
+	 * @param string               $expected       Expected first renewal (UTC).
+	 */
+	public function test_the_first_renewal_matches_the_pinned_dates( array $billing_policy, string $start, string $expected ): void {
+		$this->assertSame( $expected, $this->first_renewal( $billing_policy, $start ) );
+	}
+
+	/**
+	 * @return array<string, array{0: array<string, mixed>, 1: string, 2: string}>
+	 */
+	public function provide_first_renewals(): array {
+		$start   = '2026-01-31 10:00:00';
+		$cadence = static function ( string $period, int $interval, ?array $trial = null ): array {
+			return [
+				'period'         => $period,
+				'interval'       => $interval,
+				'trial_duration' => $trial,
+			];
+		};
+		$trial   = static function ( int $length, string $unit ) use ( $cadence ): array {
+			return $cadence(
+				'month',
+				1,
+				[
+					'length' => $length,
+					'unit'   => $unit,
+				]
+			);
+		};
+
+		return [
+			'every day'                  => [ $cadence( 'day', 1 ), $start, '2026-02-01 10:00:00' ],
+			'every week'                 => [ $cadence( 'week', 1 ), $start, '2026-02-07 10:00:00' ],
+			'every two weeks'            => [ $cadence( 'week', 2 ), $start, '2026-02-14 10:00:00' ],
+			'every month overflows'      => [ $cadence( 'month', 1 ), $start, '2026-03-03 10:00:00' ],
+			'every three months'         => [ $cadence( 'month', 3 ), $start, '2026-05-01 10:00:00' ],
+			'every year'                 => [ $cadence( 'year', 1 ), $start, '2027-01-31 10:00:00' ],
+			'every year from a leap day' => [ $cadence( 'year', 1 ), '2024-02-29 00:00:00', '2025-03-01 00:00:00' ],
+			'14 day trial'               => [ $trial( 14, 'day' ), $start, '2026-02-14 10:00:00' ],
+			'2 week trial'               => [ $trial( 2, 'week' ), $start, '2026-02-14 10:00:00' ],
+			'1 month trial'              => [ $trial( 1, 'month' ), $start, '2026-03-03 10:00:00' ],
+			'1 year trial'               => [ $trial( 1, 'year' ), $start, '2027-01-31 10:00:00' ],
+			'non-UTC start'              => [ $cadence( 'month', 1 ), '2026-01-31T23:30:00+02:00', '2026-03-03 21:30:00' ],
+			'non-UTC start with trial'   => [ $trial( 1, 'month' ), '2026-01-31T23:30:00+02:00', '2026-03-03 21:30:00' ],
+		];
+	}
+
+	/**
+	 * The first renewal of a contract starting at `$start` on a plan with `$billing_policy`.
+	 *
+	 * @param array<string, mixed> $billing_policy Plan billing payload.
+	 * @param string               $start          Contract start (UTC unless it carries an offset).
+	 */
+	private function first_renewal( array $billing_policy, string $start ): string {
+		$plan = $this->make_plan( 'month', 1, null, [ 'billing_policy' => $billing_policy ] );
+
+		return BillingTerms::get_first_renewal_from( $plan, new DateTimeImmutable( $start, new DateTimeZone( 'UTC' ) ) )->format( 'Y-m-d H:i:s' );
+	}
+
+	/**
 	 * A plan with the given billing payload, built on a foreign owner's plan: Lite refuses
 	 * such payloads on its own plans.
 	 *
@@ -579,5 +645,31 @@ final class BillingTermsTest extends LiteIntegrationTestCase {
 
 		$this->assertSame( '2026-07-07 00:00:00', $next->format( 'Y-m-d H:i:s' ) );
 		$this->assertTrue( $this->has_logged( 'exhausted the roll cap' ) );
+	}
+
+	public function test_a_month_end_anchor_rolls_with_overflow(): void {
+		$period = BillingTerms::get_period_to_bill( $this->utc( '2026-01-31 00:00:00' ), $this->utc( '2026-03-10 00:00:00' ), $this->policy() );
+
+		$this->assertSame( [ '2026-03-03 00:00:00', '2026-04-03 00:00:00' ], $this->format( $period ) );
+	}
+
+	public function test_get_next_due_after_overflows_a_month_end(): void {
+		$next = BillingTerms::get_next_due_after( $this->utc( '2026-01-31 00:00:00' ), $this->utc( '2026-02-15 00:00:00' ), $this->policy() );
+
+		$this->assertSame( '2026-03-03 00:00:00', $next->format( 'Y-m-d H:i:s' ) );
+	}
+
+	public function test_a_leap_day_anchor_rolls_by_year(): void {
+		$period = BillingTerms::get_period_to_bill( $this->utc( '2024-02-29 00:00:00' ), $this->utc( '2025-06-01 00:00:00' ), $this->policy( 'year' ) );
+		$next   = BillingTerms::get_next_due_after( $this->utc( '2024-02-29 00:00:00' ), $this->utc( '2024-03-01 00:00:00' ), $this->policy( 'year' ) );
+
+		$this->assertSame( [ '2025-03-01 00:00:00', '2026-03-01 00:00:00' ], $this->format( $period ) );
+		$this->assertSame( '2025-03-01 00:00:00', $next->format( 'Y-m-d H:i:s' ) );
+	}
+
+	public function test_a_non_utc_anchor_is_billed_in_utc(): void {
+		$period = BillingTerms::get_period_to_bill( new DateTimeImmutable( '2026-01-31T23:30:00+02:00' ), $this->utc( '2026-02-01 00:00:00' ), $this->policy() );
+
+		$this->assertSame( [ '2026-01-31 21:30:00', '2026-03-03 21:30:00' ], $this->format( $period ) );
 	}
 }
