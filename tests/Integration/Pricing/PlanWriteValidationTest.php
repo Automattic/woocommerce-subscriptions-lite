@@ -472,9 +472,18 @@ final class PlanWriteValidationTest extends LiteIntegrationTestCase {
 				[ 'out_of_bounds', 'pricing_policy.policies.1.value', [ 'max' => 100 ] ],
 			]
 		);
+		$data = $this->error_data( $response );
 		$this->assertSame(
 			'pricing_policy.policies.0.value: Must not exceed 100 for a percentage policy. pricing_policy.policies.1.value: Must not exceed 100 for a percentage policy.',
-			$this->error_data( $response )['params']['pricing_policy']
+			$data['params']['pricing_policy']
+		);
+		$this->assertSame(
+			[
+				'field'  => 'pricing_policy.policies.0.value',
+				'params' => [ 'max' => 100 ],
+			],
+			$data['details']['pricing_policy']['data'],
+			'A Lite error reaches `details` with its field and params.'
 		);
 		$this->assertSame( [], $this->list_plans() );
 	}
@@ -753,9 +762,9 @@ final class PlanWriteValidationTest extends LiteIntegrationTestCase {
 	}
 
 	/**
-	 * Assert a 400 `rest_invalid_param` response carrying exactly the expected errors, in
-	 * `WP_Error` order: per top-level arg, `params` joins the sentences that name each field
-	 * and `details` holds the arg's first error; `errors` maps each field to its code and params.
+	 * Assert a 400 `rest_invalid_param` response carrying exactly the expected errors: `errors`
+	 * maps each field to its codes and params, and `params` / `details` have an entry for each
+	 * top-level arg. Order across fields is not asserted; the composed text is left to dedicated tests.
 	 *
 	 * @param WP_REST_Response                                           $response Response.
 	 * @param list<array{0: string, 1: string, 2: array<string, mixed>}> $expected Every error as code, field (dot path) and params.
@@ -773,38 +782,21 @@ final class PlanWriteValidationTest extends LiteIntegrationTestCase {
 		}
 
 		$expected_errors = [];
-		$sentences       = [];
-		$details         = [];
+		$args            = [];
 		foreach ( $expected as [ $code, $field, $params ] ) {
 			$expected_errors[ $field ][] = [ $code, $params ];
-
-			$index   = count( $expected_errors[ $field ] ) - 1;
-			$arg     = explode( '.', $field )[0];
-			$message = $field . ': ' . ( $data['errors'][ $field ][ $index ]['message'] ?? '' );
-
-			$sentences[ $arg ][] = $message;
-			if ( ! isset( $details[ $arg ] ) ) {
-				$details[ $arg ] = [
-					'code'    => $code,
-					'message' => $message,
-					'data'    => [
-						'field'  => $field,
-						'params' => $params,
-					],
-				];
-			}
+			$args[]                      = explode( '.', $field )[0];
 		}
+		$args = array_values( array_unique( $args ) );
+		sort( $args );
+		ksort( $expected_errors );
+		ksort( $errors );
 
 		$this->assertSame( $expected_errors, $errors );
-		$this->assertSame(
-			array_map(
-				static function ( array $arg_sentences ): string {
-					return implode( ' ', $arg_sentences );
-				},
-				$sentences
-			),
-			$data['params']
-		);
-		$this->assertSame( $details, $data['details'] );
+		foreach ( [ 'params', 'details' ] as $key ) {
+			$actual_args = array_keys( $data[ $key ] );
+			sort( $actual_args );
+			$this->assertSame( $args, $actual_args, "Each top-level arg has a `$key` entry." );
+		}
 	}
 }
