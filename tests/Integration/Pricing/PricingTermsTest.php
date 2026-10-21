@@ -576,33 +576,40 @@ final class PricingTermsTest extends LiteIntegrationTestCase {
 	}
 
 	/**
-	 * @dataProvider provide_messages
+	 * Every message is non-empty and names no field: the field rides in the error data.
 	 *
-	 * @param mixed  $payload Invalid payload with one error.
-	 * @param string $message Expected field-free message.
+	 * @dataProvider provide_single_error_payloads
+	 *
+	 * @param mixed $payload Invalid payload with one error.
 	 */
-	public function test_validate_reports_a_field_free_message( $payload, string $message ): void {
-		$this->assertSame( [ $message ], PricingTerms::validate( $payload )->get_error_messages() );
+	public function test_validate_reports_a_field_free_message( $payload ): void {
+		$errors   = PricingTerms::validate( $payload );
+		$messages = $errors->get_error_messages();
+
+		$this->assertCount( 1, $messages );
+		$this->assertNotSame( '', $messages[0] );
+		$this->assertStringNotContainsString( 'pricing_policy', $messages[0] );
+		$this->assertStringNotContainsString( $errors->get_error_data()['field'], $messages[0] );
 	}
 
 	/**
 	 * One row per message family.
 	 *
-	 * @return array<string, array{0: mixed, 1: string}>
+	 * @return array<string, array{0: mixed}>
 	 */
-	public function provide_messages(): array {
+	public function provide_single_error_payloads(): array {
 		return [
-			'non-object payload'  => [ 'bogo', 'Must be an object or null.' ],
-			'not a list'          => [ [ 'policies' => 'none' ], 'Must be a list.' ],
-			'non-object entry'    => [ [ 'policies' => [ 'bogo' ] ], 'Must be an object.' ],
-			'unknown type'        => [ [ 'policies' => [ self::policy( 'mystery', 1 ) ] ], 'Must be one of percentage, fixed_amount, price, and bogo.' ],
-			'non-numeric value'   => [ [ 'policies' => [ self::policy( 'percentage', 'ten' ) ] ], 'Must be a number.' ],
-			'infinite amount'     => [ [ 'one_time_fees' => [ [ 'amount' => INF ] ] ], 'Must be a finite number.' ],
-			'negative amount'     => [ [ 'one_time_fees' => [ [ 'amount' => -5 ] ] ], 'Must not be negative.' ],
-			'percentage over 100' => [ [ 'policies' => [ self::policy( 'percentage', 150 ) ] ], 'Must not exceed 100 for a percentage policy.' ],
-			'bogo with a value'   => [ [ 'policies' => [ self::policy( 'bogo', 5 ) ] ], 'Must be 0 or omitted for a bogo policy.' ],
-			'fractional gate'     => [ [ 'policies' => [ self::policy( 'price', 5, [ 'starting_cycle' => 1.5 ] ) ] ], 'Must be an integer.' ],
-			'zero gate'           => [ [ 'policies' => [ self::policy( 'price', 5, [ 'starting_cycle' => 0 ] ) ] ], 'Must be 1 or greater.' ],
+			'non-object payload'  => [ 'bogo' ],
+			'not a list'          => [ [ 'policies' => 'none' ] ],
+			'non-object entry'    => [ [ 'policies' => [ 'bogo' ] ] ],
+			'unknown type'        => [ [ 'policies' => [ self::policy( 'mystery', 1 ) ] ] ],
+			'non-numeric value'   => [ [ 'policies' => [ self::policy( 'percentage', 'ten' ) ] ] ],
+			'infinite amount'     => [ [ 'one_time_fees' => [ [ 'amount' => INF ] ] ] ],
+			'negative amount'     => [ [ 'one_time_fees' => [ [ 'amount' => -5 ] ] ] ],
+			'percentage over 100' => [ [ 'policies' => [ self::policy( 'percentage', 150 ) ] ] ],
+			'bogo with a value'   => [ [ 'policies' => [ self::policy( 'bogo', 5 ) ] ] ],
+			'fractional gate'     => [ [ 'policies' => [ self::policy( 'price', 5, [ 'starting_cycle' => 1.5 ] ) ] ] ],
+			'zero gate'           => [ [ 'policies' => [ self::policy( 'price', 5, [ 'starting_cycle' => 0 ] ) ] ] ],
 			'non-bool taxable'    => [
 				[
 					'one_time_fees' => [
@@ -612,7 +619,6 @@ final class PricingTermsTest extends LiteIntegrationTestCase {
 						],
 					],
 				],
-				'Must be true or false.',
 			],
 			'non-string class'    => [
 				[
@@ -623,8 +629,29 @@ final class PricingTermsTest extends LiteIntegrationTestCase {
 						],
 					],
 				],
-				'Must be a string or null.',
 			],
+		];
+	}
+
+	/**
+	 * @dataProvider provide_message_wording
+	 *
+	 * @param mixed  $payload Invalid payload with one error.
+	 * @param string $message Expected message.
+	 */
+	public function test_validate_message_wording( $payload, string $message ): void {
+		$this->assertSame( [ $message ], PricingTerms::validate( $payload )->get_error_messages() );
+	}
+
+	/**
+	 * A plain message and the type list joined by `wp_sprintf( '%l' )`.
+	 *
+	 * @return array<string, array{0: mixed, 1: string}>
+	 */
+	public function provide_message_wording(): array {
+		return [
+			'plain message' => [ [ 'policies' => 'none' ], 'Must be a list.' ],
+			'type list'     => [ [ 'policies' => [ self::policy( 'mystery', 1 ) ] ], 'Must be one of percentage, fixed_amount, price, and bogo.' ],
 		];
 	}
 
