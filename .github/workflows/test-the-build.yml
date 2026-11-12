@@ -11,17 +11,15 @@ permissions:
   contents: read
 
 # Builds an installable zip of the pull request and posts a "Test the build" comment
-# with three ways to try it: Jetpack Beta, Jurassic Ninja and WordPress Playground.
+# with links that open it in WordPress Playground.
 #
 # Two jobs on purpose. `build` runs the pull request's code (composer and npm scripts)
-# with a read-only token and no secrets. `comment` holds the write token and the
-# Jetpack Beta Builder secret, and runs nothing from the pull request.
+# with a read-only token. `comment` holds the write token and runs nothing from the
+# pull request.
 jobs:
   build:
     name: Build the plugin zip
     runs-on: ubuntu-latest
-    outputs:
-      version: ${{ steps.package.outputs.version }}
     defaults:
       run:
         working-directory: woocommerce-subscriptions-lite
@@ -58,18 +56,16 @@ jobs:
         run: npm ci
 
       # The repository has no release build yet, so this job packages the plugin
-      # itself: everything except development files. The folder and zip carry the
-      # "-dev" suffix that Jetpack Beta expects, and the plugin header gets the pull
+      # itself: everything except development files. The plugin header gets the pull
       # request and commit so the Plugins screen shows which build is installed.
       - name: Package the plugin
-        id: package
         env:
           PR_NUMBER: ${{ github.event.number }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          SLUG=woocommerce-subscriptions-lite-dev
+          SLUG=woocommerce-subscriptions-lite
           OUT="$GITHUB_WORKSPACE/out"
-          mkdir -p "$OUT/plugins" "$OUT/preview" "$OUT/stage/$SLUG"
+          mkdir -p "$OUT/preview" "$OUT/stage/$SLUG"
 
           rsync -a \
             --exclude='/.*' \
@@ -89,27 +85,15 @@ jobs:
 
           sed -i -E "s/^( \* Version: .*)$/\1_PR-${PR_NUMBER}_commit-${PR_HEAD_SHA:0:7}/" "$OUT/stage/$SLUG/woocommerce-subscriptions-lite.php"
           VERSION=$( sed -n -E 's/^ \* Version: (.*)$/\1/p' "$OUT/stage/$SLUG/woocommerce-subscriptions-lite.php" )
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-
-          ( cd "$OUT/stage" && zip -q -r "$OUT/plugins/$SLUG.zip" "$SLUG" )
 
           # The Playground preview needs the plugin zip and the sample-data script.
-          cp "$OUT/plugins/$SLUG.zip" .github/playground/setup.php "$OUT/preview/"
+          ( cd "$OUT/stage" && zip -q -r "$OUT/preview/$SLUG.zip" "$SLUG" )
+          cp .github/playground/setup.php "$OUT/preview/"
 
           echo "Built \`$SLUG.zip\`, version \`$VERSION\`." >> "$GITHUB_STEP_SUMMARY"
 
-      # The artifact name is fixed by the Jetpack Beta Builder, which fetches it soon
-      # after the webhook call in the next job.
-      - name: Upload the zip for the Jetpack Beta Builder
-        uses: actions/upload-artifact@v4
-        with:
-          name: plugins
-          path: out/plugins
-          if-no-files-found: error
-          retention-days: 1
-
       # The Playground links download this artifact on every click, so it is kept for
-      # longer. The run ID in the name ties a link to the files of one run.
+      # 14 days. The run ID in the name ties a link to the files of one run.
       - name: Upload the files for the Playground preview
         uses: actions/upload-artifact@v4
         with:
@@ -125,40 +109,6 @@ jobs:
     permissions:
       pull-requests: write
     steps:
-      # Jetpack Beta and Jurassic Ninja install the builds the Jetpack Beta Builder
-      # knows about. Without the secret (not set up yet, or a pull request from a
-      # fork) nothing is sent and the comment says the two options are not available.
-      - name: Send the build to the Jetpack Beta Builder
-        id: beta
-        env:
-          SECRET: ${{ secrets.JETPACK_BETA_BUILDER_SECRET }}
-          VERSION: ${{ needs.build.outputs.version }}
-          PR_NUMBER: ${{ github.event.number }}
-          PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
-          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          if [ -z "$SECRET" ]; then
-            echo "state=not-set-up" >> "$GITHUB_OUTPUT"
-            echo "The JETPACK_BETA_BUILDER_SECRET secret is not available to this run. Nothing was sent to the Jetpack Beta Builder." >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-
-          PLUGIN_DATA=$( jq -cn --arg version "$VERSION" '{ "woocommerce-subscriptions-lite": { version: $version } }' )
-
-          # On pull_request events GITHUB_REF is refs/pull/<n>/merge, so the head
-          # branch is sent explicitly: Jurassic Ninja looks builds up by that name.
-          if curl --silent --show-error --fail --location \
-            --url "https://betadownload.jetpack.me/gh-action.php?run_id=$GITHUB_RUN_ID&pr=$PR_NUMBER&commit=$PR_HEAD_SHA" \
-            --form-string "repo=$GITHUB_REPOSITORY" \
-            --form-string "branch=$PR_HEAD_REF" \
-            --form-string "plugins=$PLUGIN_DATA" \
-            --form-string "secret=$SECRET"; then
-            echo "state=sent" >> "$GITHUB_OUTPUT"
-          else
-            echo "state=refused" >> "$GITHUB_OUTPUT"
-            echo "::warning::The Jetpack Beta Builder did not accept this build."
-          fi
-
       # WordPress Playground runs in the visitor's browser and only fetches public
       # URLs. Its artifact proxy serves this workflow's artifacts for the pull request,
       # looked up by workflow name, hence GITHUB_WORKFLOW instead of a literal that a
@@ -198,7 +148,7 @@ jobs:
                 { step: "installPlugin", pluginData: { resource: "wordpress.org/plugins", slug: "woocommerce" }, options: { activate: true } },
                 { step: "runPHP", code: $store_setup },
                 { step: "unzip", zipFile: { resource: "url", url: $artifact, caption: "Downloading the build of this pull request" }, extractToPath: "/tmp/pr" },
-                { step: "installPlugin", pluginData: { resource: "vfs", path: "/tmp/pr/woocommerce-subscriptions-lite-dev.zip" }, options: { activate: true } },
+                { step: "installPlugin", pluginData: { resource: "vfs", path: "/tmp/pr/woocommerce-subscriptions-lite.zip" }, options: { activate: true } },
                 { step: "runPHP", code: "<?php require \"/wordpress/wp-load.php\"; require \"/tmp/pr/setup.php\";" }
               ]
             }' )
@@ -214,52 +164,14 @@ jobs:
 
       - name: Write the comment
         env:
-          BETA_STATE: ${{ steps.beta.outputs.state }}
           PLAYGROUND_ADMIN_URL: ${{ steps.playground.outputs.admin_url }}
           PLAYGROUND_PRODUCT_URL: ${{ steps.playground.outputs.product_url }}
-          PR_NUMBER: ${{ github.event.number }}
-          PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          # A branch name is free text: keep it from closing the code span, and
-          # encode it for the Jurassic Ninja link.
-          BRANCH_TEXT=${PR_HEAD_REF//\`/}
-          BRANCH_URI=$( jq -rn --arg branch "$PR_HEAD_REF" '$branch|@uri' )
-
-          case "$BETA_STATE" in
-            sent)
-              OPTION_1="- Install and activate [Jetpack Beta](https://jetpack.com/beta/#download-and-install) on a site that has WooCommerce.
-          - Use this build by searching for PR number \`${PR_NUMBER}\` or branch name \`${BRANCH_TEXT}\` in your-test.site/wp-admin/admin.php?page=jetpack-beta&plugin=woocommerce-subscriptions-lite
-
-          :information_source: Your site gets the plugin and nothing else: create a plan under WooCommerce > Settings > Subscriptions and switch plans on for a product before you test."
-              OPTION_2=":warning: Log in at [jurassic.ninja](https://jurassic.ninja/) first. Without a login, the link below takes you to the Jurassic Ninja homepage and no site is created.
-
-          :rocket: [Launch a JN site with this branch and sample products](https://jurassic.ninja/create/?jetpack-beta&nojetpack&woocommerce&woocommerce-import-sample-data&branches.woocommerce-subscriptions-lite=${BRANCH_URI}) :rocket:
-
-          :information_source: The site has WooCommerce's sample products but no plans: create one under WooCommerce > Settings > Subscriptions and switch plans on for a product. Renewals are only charged automatically with a payment gateway that supports the subscriptions engine."
-              ;;
-            refused)
-              OPTION_1=":construction: Not available for this build. The Jetpack Beta Builder did not accept it; the reason is in [the workflow run](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID})."
-              OPTION_2=":construction: Not available for this build. Jurassic Ninja installs a branch through Jetpack Beta, so it needs what Option 1 needs."
-              ;;
-            *)
-              OPTION_1=":construction: Not available yet. Jetpack Beta only offers builds that were sent to the Jetpack Beta Builder. For that, WooCommerce Subscriptions Lite has to be registered there, and the run needs the \`JETPACK_BETA_BUILDER_SECRET\` secret, which pull requests from forks never receive."
-              OPTION_2=":construction: Not available yet. Jurassic Ninja installs a branch through Jetpack Beta, so it needs what Option 1 needs."
-              ;;
-          esac
-
           cat > comment.md <<EOF
           ### Test the build
 
-          #### Option 1. Jetpack Beta
-
-          ${OPTION_1}
-
-          #### Option 2. Jurassic Ninja - available for logged-in A12s
-
-          ${OPTION_2}
-
-          #### Option 3. WordPress Playground - runs in your browser
+          #### WordPress Playground - runs in your browser
 
           - :clipboard: [Open the subscriptions list](${PLAYGROUND_ADMIN_URL}): WooCommerce > Subscriptions in wp-admin, with one sample subscription.
           - :shopping_cart: [Open the sample product](${PLAYGROUND_PRODUCT_URL}): the storefront page with the plan picker. Choose a plan, add it to the cart and pay with "Cash on delivery" to create a subscription.
