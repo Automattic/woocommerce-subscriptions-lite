@@ -1,0 +1,298 @@
+name: Test the build
+
+on:
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+# Builds an installable zip of the pull request and posts a "Test the build" comment
+# with three ways to try it: Jetpack Beta, Jurassic Ninja and WordPress Playground.
+#
+# Two jobs on purpose. `build` runs the pull request's code (composer and npm scripts)
+# with a read-only token and no secrets. `comment` holds the write token and the
+# Jetpack Beta Builder secret, and runs nothing from the pull request.
+jobs:
+  build:
+    name: Build the plugin zip
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.package.outputs.version }}
+    defaults:
+      run:
+        working-directory: woocommerce-subscriptions-lite
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: woocommerce-subscriptions-lite
+          persist-credentials: false
+
+      # Same layout as ci.yml: the engine is a composer path repository expecting the
+      # WooCommerce monorepo as a sibling checkout. The build bundles the engine as it
+      # is on the monorepo trunk at build time.
+      - name: Check out the engine package (monorepo sparse clone)
+        working-directory: ${{ github.workspace }}
+        run: |
+          git clone --depth 1 --filter=blob:none --sparse https://github.com/woocommerce/woocommerce.git woocommerce
+          git -C woocommerce sparse-checkout set packages/php/woocommerce-subscriptions-engine
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          coverage: none
+
+      - name: Install composer dependencies (no dev packages)
+        run: composer install --no-dev --prefer-dist --no-progress --optimize-autoloader
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: woocommerce-subscriptions-lite/package-lock.json
+
+      - name: Install npm dependencies (builds the bundles)
+        run: npm ci
+
+      # The repository has no release build yet, so this job packages the plugin
+      # itself: everything except development files. The folder and zip carry the
+      # "-dev" suffix that Jetpack Beta expects, and the plugin header gets the pull
+      # request and commit so the Plugins screen shows which build is installed.
+      - name: Package the plugin
+        id: package
+        env:
+          PR_NUMBER: ${{ github.event.number }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          SLUG=woocommerce-subscriptions-lite-dev
+          OUT="$GITHUB_WORKSPACE/out"
+          mkdir -p "$OUT/plugins" "$OUT/preview" "$OUT/stage/$SLUG"
+
+          rsync -a \
+            --exclude='/.*' \
+            --exclude='/node_modules' \
+            --exclude='/tests' \
+            --exclude='/client' \
+            --exclude='/docs' \
+            --exclude='/src/js' \
+            --exclude='/*.json' \
+            --exclude='/*.lock' \
+            --exclude='/*.js' \
+            --exclude='/*.cjs' \
+            --exclude='/*.dist' \
+            --exclude='/AGENTS.md' \
+            --exclude='/CLAUDE.md' \
+            ./ "$OUT/stage/$SLUG/"
+
+          sed -i -E "s/^( \* Version: .*)$/\1_PR-${PR_NUMBER}_commit-${PR_HEAD_SHA:0:7}/" "$OUT/stage/$SLUG/woocommerce-subscriptions-lite.php"
+          VERSION=$( sed -n -E 's/^ \* Version: (.*)$/\1/p' "$OUT/stage/$SLUG/woocommerce-subscriptions-lite.php" )
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+          ( cd "$OUT/stage" && zip -q -r "$OUT/plugins/$SLUG.zip" "$SLUG" )
+
+          # The Playground preview needs the plugin zip and the sample-data script.
+          cp "$OUT/plugins/$SLUG.zip" .github/playground/setup.php "$OUT/preview/"
+
+          echo "Built \`$SLUG.zip\`, version \`$VERSION\`." >> "$GITHUB_STEP_SUMMARY"
+
+      # The artifact name is fixed by the Jetpack Beta Builder, which fetches it soon
+      # after the webhook call in the next job.
+      - name: Upload the zip for the Jetpack Beta Builder
+        uses: actions/upload-artifact@v4
+        with:
+          name: plugins
+          path: out/plugins
+          if-no-files-found: error
+          retention-days: 1
+
+      # The Playground links download this artifact on every click, so it is kept for
+      # longer. The run ID in the name ties a link to the files of one run.
+      - name: Upload the files for the Playground preview
+        uses: actions/upload-artifact@v4
+        with:
+          name: playground-preview-${{ github.run_id }}
+          path: out/preview
+          if-no-files-found: error
+          retention-days: 14
+
+  comment:
+    name: Comment on the pull request
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      # Jetpack Beta and Jurassic Ninja install the builds the Jetpack Beta Builder
+      # knows about. Without the secret (not set up yet, or a pull request from a
+      # fork) nothing is sent and the comment says the two options are not available.
+      - name: Send the build to the Jetpack Beta Builder
+        id: beta
+        env:
+          SECRET: ${{ secrets.JETPACK_BETA_BUILDER_SECRET }}
+          VERSION: ${{ needs.build.outputs.version }}
+          PR_NUMBER: ${{ github.event.number }}
+          PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ -z "$SECRET" ]; then
+            echo "state=not-set-up" >> "$GITHUB_OUTPUT"
+            echo "The JETPACK_BETA_BUILDER_SECRET secret is not available to this run. Nothing was sent to the Jetpack Beta Builder." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          PLUGIN_DATA=$( jq -cn --arg version "$VERSION" '{ "woocommerce-subscriptions-lite": { version: $version } }' )
+
+          # On pull_request events GITHUB_REF is refs/pull/<n>/merge, so the head
+          # branch is sent explicitly: Jurassic Ninja looks builds up by that name.
+          if curl --silent --show-error --fail --location \
+            --url "https://betadownload.jetpack.me/gh-action.php?run_id=$GITHUB_RUN_ID&pr=$PR_NUMBER&commit=$PR_HEAD_SHA" \
+            --form-string "repo=$GITHUB_REPOSITORY" \
+            --form-string "branch=$PR_HEAD_REF" \
+            --form-string "plugins=$PLUGIN_DATA" \
+            --form-string "secret=$SECRET"; then
+            echo "state=sent" >> "$GITHUB_OUTPUT"
+          else
+            echo "state=refused" >> "$GITHUB_OUTPUT"
+            echo "::warning::The Jetpack Beta Builder did not accept this build."
+          fi
+
+      # WordPress Playground runs in the visitor's browser and only fetches public
+      # URLs. Its artifact proxy serves this workflow's artifacts for the pull request,
+      # looked up by workflow name, hence GITHUB_WORKFLOW instead of a literal that a
+      # rename would break. An artifact is a zip around the uploaded files, so the
+      # Blueprint unzips it before installing the plugin zip inside.
+      - name: Build the WordPress Playground links
+        id: playground
+        env:
+          PR_NUMBER: ${{ github.event.number }}
+        run: |
+          ARTIFACT_URL=$( jq -rn \
+            --arg org "$GITHUB_REPOSITORY_OWNER" \
+            --arg repo "${GITHUB_REPOSITORY#*/}" \
+            --arg workflow "$GITHUB_WORKFLOW" \
+            --arg pr "$PR_NUMBER" \
+            --arg artifact "playground-preview-$GITHUB_RUN_ID" \
+            '"https://playground.wordpress.net/plugin-proxy.php?org=\($org|@uri)&repo=\($repo|@uri)&workflow=\($workflow|@uri)&pr=\($pr|@uri)&artifact=\($artifact|@uri)"' )
+
+          # Before the plugin is installed: skip WooCommerce's setup wizard, open the
+          # store to visitors, use the order storage new stores get, and switch on a
+          # payment method that needs no account.
+          STORE_SETUP='<?php
+          require "/wordpress/wp-load.php";
+          delete_transient( "_wc_activation_redirect" );
+          update_option( "woocommerce_onboarding_profile", array( "skipped" => true ) );
+          update_option( "woocommerce_coming_soon", "no" );
+          update_option( "woocommerce_custom_orders_table_enabled", "yes" );
+          update_option( "woocommerce_cod_settings", array( "enabled" => "yes" ) );'
+
+          BLUEPRINT=$( jq -cn --arg artifact "$ARTIFACT_URL" --arg store_setup "$STORE_SETUP" '
+            {
+              "$schema": "https://playground.wordpress.net/blueprint-schema.json",
+              preferredVersions: { php: "8.3", wp: "latest" },
+              features: { networking: true },
+              steps: [
+                { step: "login", username: "admin" },
+                { step: "installPlugin", pluginData: { resource: "wordpress.org/plugins", slug: "woocommerce" }, options: { activate: true } },
+                { step: "runPHP", code: $store_setup },
+                { step: "unzip", zipFile: { resource: "url", url: $artifact, caption: "Downloading the build of this pull request" }, extractToPath: "/tmp/pr" },
+                { step: "installPlugin", pluginData: { resource: "vfs", path: "/tmp/pr/woocommerce-subscriptions-lite-dev.zip" }, options: { activate: true } },
+                { step: "runPHP", code: "<?php require \"/wordpress/wp-load.php\"; require \"/tmp/pr/setup.php\";" }
+              ]
+            }' )
+
+          link() {
+            echo "https://playground.wordpress.net/#$( jq -rn --argjson blueprint "$BLUEPRINT" --arg landing "$1" '$blueprint + { landingPage: $landing } | tojson | @uri' )"
+          }
+
+          {
+            echo "admin_url=$( link "/wp-admin/admin.php?page=wc-subscriptions-lite" )"
+            echo "product_url=$( link "/product/coffee-beans/" )"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Write the comment
+        env:
+          BETA_STATE: ${{ steps.beta.outputs.state }}
+          PLAYGROUND_ADMIN_URL: ${{ steps.playground.outputs.admin_url }}
+          PLAYGROUND_PRODUCT_URL: ${{ steps.playground.outputs.product_url }}
+          PR_NUMBER: ${{ github.event.number }}
+          PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          # A branch name is free text: keep it from closing the code span, and
+          # encode it for the Jurassic Ninja link.
+          BRANCH_TEXT=${PR_HEAD_REF//\`/}
+          BRANCH_URI=$( jq -rn --arg branch "$PR_HEAD_REF" '$branch|@uri' )
+
+          case "$BETA_STATE" in
+            sent)
+              OPTION_1="- Install and activate [Jetpack Beta](https://jetpack.com/beta/#download-and-install) on a site that has WooCommerce.
+          - Use this build by searching for PR number \`${PR_NUMBER}\` or branch name \`${BRANCH_TEXT}\` in your-test.site/wp-admin/admin.php?page=jetpack-beta&plugin=woocommerce-subscriptions-lite
+
+          :information_source: Your site gets the plugin and nothing else: create a plan under WooCommerce > Settings > Subscriptions and switch plans on for a product before you test."
+              OPTION_2=":warning: Log in at [jurassic.ninja](https://jurassic.ninja/) first. Without a login, the link below takes you to the Jurassic Ninja homepage and no site is created.
+
+          :rocket: [Launch a JN site with this branch and sample products](https://jurassic.ninja/create/?jetpack-beta&nojetpack&woocommerce&woocommerce-import-sample-data&branches.woocommerce-subscriptions-lite=${BRANCH_URI}) :rocket:
+
+          :information_source: The site has WooCommerce's sample products but no plans: create one under WooCommerce > Settings > Subscriptions and switch plans on for a product. Renewals are only charged automatically with a payment gateway that supports the subscriptions engine."
+              ;;
+            refused)
+              OPTION_1=":construction: Not available for this build. The Jetpack Beta Builder did not accept it; the reason is in [the workflow run](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID})."
+              OPTION_2=":construction: Not available for this build. Jurassic Ninja installs a branch through Jetpack Beta, so it needs what Option 1 needs."
+              ;;
+            *)
+              OPTION_1=":construction: Not available yet. Jetpack Beta only offers builds that were sent to the Jetpack Beta Builder. For that, WooCommerce Subscriptions Lite has to be registered there, and the run needs the \`JETPACK_BETA_BUILDER_SECRET\` secret, which pull requests from forks never receive."
+              OPTION_2=":construction: Not available yet. Jurassic Ninja installs a branch through Jetpack Beta, so it needs what Option 1 needs."
+              ;;
+          esac
+
+          cat > comment.md <<EOF
+          ### Test the build
+
+          #### Option 1. Jetpack Beta
+
+          ${OPTION_1}
+
+          #### Option 2. Jurassic Ninja - available for logged-in A12s
+
+          ${OPTION_2}
+
+          #### Option 3. WordPress Playground - runs in your browser
+
+          - :clipboard: [Open the subscriptions list](${PLAYGROUND_ADMIN_URL}): WooCommerce > Subscriptions in wp-admin, with one sample subscription.
+          - :shopping_cart: [Open the sample product](${PLAYGROUND_PRODUCT_URL}): the storefront page with the plan picker. Choose a plan, add it to the cart and pay with "Cash on delivery" to create a subscription.
+
+          :information_source: Both open the same store, logged in as the admin: two plans (WooCommerce > Settings > Subscriptions), one product that sells on them and one subscription, also under My account > Subscriptions. Nothing renews by itself, because Playground does not run scheduled actions: use "Renew now" on a subscription. Renewal orders wait for payment, because no payment gateway in the preview can be charged automatically. No email is sent. The build bundles the subscriptions engine from WooCommerce \`trunk\` as it was at build time. The site lives in your browser tab, and the links stop working 14 days after the last build.
+
+          ---
+
+          Build info:
+
+          - Latest commit: ${PR_HEAD_SHA}
+          - Build time: $( date -u "+%Y-%m-%d %H:%M:%S UTC" )
+
+          _Note: the build is updated when a new commit is pushed to this PR._
+          EOF
+
+          cat comment.md >> "$GITHUB_STEP_SUMMARY"
+
+      # A pull request from a fork gets a read-only token, so its comment text stays
+      # in the run summary written above.
+      - name: Add or update the comment in the pull request
+        if: github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.number }}
+        run: |
+          COMMENT_ID=$( gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" --paginate \
+            --jq '.[] | select( .user.login == "github-actions[bot]" and ( .body | startswith( "### Test the build" ) ) ) | .id' | head -n 1 )
+
+          if [ -n "$COMMENT_ID" ]; then
+            gh api --method PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$COMMENT_ID" -F body=@comment.md --silent
+            echo "Updated comment $COMMENT_ID."
+          else
+            gh api --method POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -F body=@comment.md --silent
+            echo "Created the comment."
+          fi
