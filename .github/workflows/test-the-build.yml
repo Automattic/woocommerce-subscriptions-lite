@@ -1,0 +1,210 @@
+name: Test the build
+
+on:
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+# Builds an installable zip of the pull request and posts a "Test the build" comment
+# with links that open it in WordPress Playground.
+#
+# Two jobs on purpose. `build` runs the pull request's code (composer and npm scripts)
+# with a read-only token. `comment` holds the write token and runs nothing from the
+# pull request.
+jobs:
+  build:
+    name: Build the plugin zip
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: woocommerce-subscriptions-lite
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: woocommerce-subscriptions-lite
+          persist-credentials: false
+
+      # Same layout as ci.yml: the engine is a composer path repository expecting the
+      # WooCommerce monorepo as a sibling checkout. The build bundles the engine as it
+      # is on the monorepo trunk at build time.
+      - name: Check out the engine package (monorepo sparse clone)
+        working-directory: ${{ github.workspace }}
+        run: |
+          git clone --depth 1 --filter=blob:none --sparse https://github.com/woocommerce/woocommerce.git woocommerce
+          git -C woocommerce sparse-checkout set packages/php/woocommerce-subscriptions-engine
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          coverage: none
+
+      - name: Install composer dependencies (no dev packages)
+        run: composer install --no-dev --prefer-dist --no-progress --optimize-autoloader
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: woocommerce-subscriptions-lite/package-lock.json
+
+      - name: Install npm dependencies (builds the bundles)
+        run: npm ci
+
+      # The repository has no release build yet, so this job packages the plugin
+      # itself: everything except development files. The plugin header gets the pull
+      # request and commit so the Plugins screen shows which build is installed.
+      - name: Package the plugin
+        env:
+          PR_NUMBER: ${{ github.event.number }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          SLUG=woocommerce-subscriptions-lite
+          OUT="$GITHUB_WORKSPACE/out"
+          mkdir -p "$OUT/preview" "$OUT/stage/$SLUG"
+
+          rsync -a \
+            --exclude='/.*' \
+            --exclude='/node_modules' \
+            --exclude='/tests' \
+            --exclude='/client' \
+            --exclude='/docs' \
+            --exclude='/src/js' \
+            --exclude='/*.json' \
+            --exclude='/*.lock' \
+            --exclude='/*.js' \
+            --exclude='/*.cjs' \
+            --exclude='/*.dist' \
+            --exclude='/AGENTS.md' \
+            --exclude='/CLAUDE.md' \
+            ./ "$OUT/stage/$SLUG/"
+
+          sed -i -E "s/^( \* Version: .*)$/\1_PR-${PR_NUMBER}_commit-${PR_HEAD_SHA:0:7}/" "$OUT/stage/$SLUG/woocommerce-subscriptions-lite.php"
+          VERSION=$( sed -n -E 's/^ \* Version: (.*)$/\1/p' "$OUT/stage/$SLUG/woocommerce-subscriptions-lite.php" )
+
+          # The Playground preview needs the plugin zip and the sample-data script.
+          ( cd "$OUT/stage" && zip -q -r "$OUT/preview/$SLUG.zip" "$SLUG" )
+          cp .github/playground/setup.php "$OUT/preview/"
+
+          echo "Built \`$SLUG.zip\`, version \`$VERSION\`." >> "$GITHUB_STEP_SUMMARY"
+
+      # The Playground links download this artifact on every click, so it is kept for
+      # 14 days. The run ID in the name ties a link to the files of one run.
+      - name: Upload the files for the Playground preview
+        uses: actions/upload-artifact@v4
+        with:
+          name: playground-preview-${{ github.run_id }}
+          path: out/preview
+          if-no-files-found: error
+          retention-days: 14
+
+  comment:
+    name: Comment on the pull request
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      # WordPress Playground runs in the visitor's browser and only fetches public
+      # URLs. Its artifact proxy serves this workflow's artifacts for the pull request,
+      # looked up by workflow name, hence GITHUB_WORKFLOW instead of a literal that a
+      # rename would break. An artifact is a zip around the uploaded files, so the
+      # Blueprint unzips it before installing the plugin zip inside.
+      - name: Build the WordPress Playground links
+        id: playground
+        env:
+          PR_NUMBER: ${{ github.event.number }}
+        run: |
+          ARTIFACT_URL=$( jq -rn \
+            --arg org "$GITHUB_REPOSITORY_OWNER" \
+            --arg repo "${GITHUB_REPOSITORY#*/}" \
+            --arg workflow "$GITHUB_WORKFLOW" \
+            --arg pr "$PR_NUMBER" \
+            --arg artifact "playground-preview-$GITHUB_RUN_ID" \
+            '"https://playground.wordpress.net/plugin-proxy.php?org=\($org|@uri)&repo=\($repo|@uri)&workflow=\($workflow|@uri)&pr=\($pr|@uri)&artifact=\($artifact|@uri)"' )
+
+          # Before the plugin is installed: skip WooCommerce's setup wizard, open the
+          # store to visitors, use the order storage new stores get, and switch on a
+          # payment method that needs no account.
+          STORE_SETUP='<?php
+          require "/wordpress/wp-load.php";
+          delete_transient( "_wc_activation_redirect" );
+          update_option( "woocommerce_onboarding_profile", array( "skipped" => true ) );
+          update_option( "woocommerce_coming_soon", "no" );
+          update_option( "woocommerce_custom_orders_table_enabled", "yes" );
+          update_option( "woocommerce_cod_settings", array( "enabled" => "yes" ) );'
+
+          BLUEPRINT=$( jq -cn --arg artifact "$ARTIFACT_URL" --arg store_setup "$STORE_SETUP" '
+            {
+              "$schema": "https://playground.wordpress.net/blueprint-schema.json",
+              preferredVersions: { php: "8.3", wp: "latest" },
+              features: { networking: true },
+              steps: [
+                { step: "login", username: "admin" },
+                { step: "installPlugin", pluginData: { resource: "wordpress.org/plugins", slug: "woocommerce" }, options: { activate: true } },
+                { step: "runPHP", code: $store_setup },
+                { step: "unzip", zipFile: { resource: "url", url: $artifact, caption: "Downloading the build of this pull request" }, extractToPath: "/tmp/pr" },
+                { step: "installPlugin", pluginData: { resource: "vfs", path: "/tmp/pr/woocommerce-subscriptions-lite.zip" }, options: { activate: true } },
+                { step: "runPHP", code: "<?php require \"/wordpress/wp-load.php\"; require \"/tmp/pr/setup.php\";" }
+              ]
+            }' )
+
+          link() {
+            echo "https://playground.wordpress.net/#$( jq -rn --argjson blueprint "$BLUEPRINT" --arg landing "$1" '$blueprint + { landingPage: $landing } | tojson | @uri' )"
+          }
+
+          {
+            echo "admin_url=$( link "/wp-admin/admin.php?page=wc-subscriptions-lite" )"
+            echo "product_url=$( link "/product/coffee-beans/" )"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Write the comment
+        env:
+          PLAYGROUND_ADMIN_URL: ${{ steps.playground.outputs.admin_url }}
+          PLAYGROUND_PRODUCT_URL: ${{ steps.playground.outputs.product_url }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          cat > comment.md <<EOF
+          ### Test the build
+
+          #### WordPress Playground - runs in your browser
+
+          - :clipboard: [Open the subscriptions list](${PLAYGROUND_ADMIN_URL}): WooCommerce > Subscriptions in wp-admin, with one sample subscription.
+          - :shopping_cart: [Open the sample product](${PLAYGROUND_PRODUCT_URL}): the storefront page with the plan picker. Choose a plan, add it to the cart and pay with "Cash on delivery" to create a subscription.
+
+          :information_source: Both open the same store, logged in as the admin: two plans (WooCommerce > Settings > Subscriptions), one product that sells on them and one subscription, also under My account > Subscriptions. Nothing renews by itself, because Playground does not run scheduled actions: use "Renew now" on a subscription. Renewal orders wait for payment, because no payment gateway in the preview can be charged automatically. No email is sent. The build bundles the subscriptions engine from WooCommerce \`trunk\` as it was at build time. The site lives in your browser tab, and the links stop working 14 days after the last build.
+
+          ---
+
+          Build info:
+
+          - Latest commit: ${PR_HEAD_SHA}
+          - Build time: $( date -u "+%Y-%m-%d %H:%M:%S UTC" )
+
+          _Note: the build is updated when a new commit is pushed to this PR._
+          EOF
+
+          cat comment.md >> "$GITHUB_STEP_SUMMARY"
+
+      # A pull request from a fork gets a read-only token, so its comment text stays
+      # in the run summary written above.
+      - name: Add or update the comment in the pull request
+        if: github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.number }}
+        run: |
+          COMMENT_ID=$( gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" --paginate \
+            --jq '.[] | select( .user.login == "github-actions[bot]" and ( .body | startswith( "### Test the build" ) ) ) | .id' | head -n 1 )
+
+          if [ -n "$COMMENT_ID" ]; then
+            gh api --method PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$COMMENT_ID" -F body=@comment.md --silent
+            echo "Updated comment $COMMENT_ID."
+          else
+            gh api --method POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -F body=@comment.md --silent
+            echo "Created the comment."
+          fi
