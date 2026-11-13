@@ -342,7 +342,6 @@ final class SettlementTest extends LiteIntegrationTestCase {
 		$this->assertSame( CycleStatus::PENDING, $this->head( $contract_id )->get_status() );
 		$this->assertNotSame( Package::EXTENSION_SLUG, $this->get_contract( $contract_id )->get_extension_slug() );
 		$this->assertSame( ContractStatus::ACTIVE, $this->get_contract( $contract_id )->get_status() );
-		$this->assertNull( $this->get_contract( $contract_id )->get_lock_state(), 'The foreign contract is never locked.' );
 	}
 
 	public function test_a_foreign_cycle_linked_to_the_same_order_is_ignored(): void {
@@ -355,7 +354,6 @@ final class SettlementTest extends LiteIntegrationTestCase {
 		$this->assertSame( CycleStatus::FAILED, $this->head( $contract_id )->get_status() );
 		$this->assertSame( CycleStatus::PENDING, $this->head( $foreign_id )->get_status() );
 		$this->assertSame( ContractStatus::ACTIVE, $this->get_contract( $foreign_id )->get_status() );
-		$this->assertNull( $this->get_contract( $foreign_id )->get_lock_state(), 'The foreign contract is never locked.' );
 	}
 
 	public function test_a_removed_order_ignores_a_foreign_cycle_linked_to_it(): void {

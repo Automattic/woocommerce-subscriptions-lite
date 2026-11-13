@@ -115,11 +115,8 @@ final class HoldTest extends LiteIntegrationTestCase {
 		Contracts::update(
 			$contract_id,
 			[
-
 				'extension_slug' => Package::EXTENSION_SLUG,
-
 				'end_gmt'        => '2099-12-31 00:00:00',
-
 			]
 		);
 
@@ -230,7 +227,7 @@ final class HoldTest extends LiteIntegrationTestCase {
 		$this->assertNull( ( new Hold() )->hold( $contract_id ) );
 		$contract = $this->get_contract( $contract_id );
 		$this->assertSame( ContractStatus::ACTIVE, $contract->get_status() );
-		$this->assertNull( $contract->get_lock_state(), 'The foreign contract is never locked.' );
+		$this->assertNull( $contract->get_lock_state(), 'The lock taken to read it is released.' );
 	}
 
 	public function test_hold_leaves_the_contract_unlocked(): void {

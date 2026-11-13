@@ -97,7 +97,8 @@ final class HeldLocks {
 	/**
 	 * Acquire the contract's lock for `$operation` and register it as held; release it with
 	 * {@see self::release()}. Null when another operation holds it, the contract is missing, or
-	 * it is not Lite's: {@see self::get_conflict()} tells them apart.
+	 * it is not Lite's: {@see self::get_conflict()} returns the conflict when another operation
+	 * holds it, null otherwise.
 	 *
 	 * @param int    $contract_id Contract id.
 	 * @param string $operation   Operation label.

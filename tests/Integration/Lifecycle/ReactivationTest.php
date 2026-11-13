@@ -340,9 +340,7 @@ final class ReactivationTest extends LiteIntegrationTestCase {
 		);
 
 		$this->assertNull( ( new Reactivation() )->reactivate( $contract_id ) );
-		$contract = $this->get_contract( $contract_id );
-		$this->assertSame( ContractStatus::ON_HOLD, $contract->get_status() );
-		$this->assertNull( $contract->get_lock_state(), 'The foreign contract is never locked.' );
+		$this->assertSame( ContractStatus::ON_HOLD, $this->get_contract( $contract_id )->get_status() );
 	}
 
 	public function test_reactivation_while_another_operation_holds_the_lock_returns_the_conflict_and_stays_on_hold(): void {

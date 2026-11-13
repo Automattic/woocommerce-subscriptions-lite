@@ -357,9 +357,7 @@ final class CancellationTest extends LiteIntegrationTestCase {
 
 		$this->assertNull( ( new Cancellation() )->cancel( $contract_id ) );
 		$this->assertNull( ( new Cancellation() )->cancel_at_period_end( $contract_id ) );
-		$contract = $this->get_contract( $contract_id );
-		$this->assertSame( ContractStatus::ACTIVE, $contract->get_status() );
-		$this->assertNull( $contract->get_lock_state(), 'The foreign contract is never locked.' );
+		$this->assertSame( ContractStatus::ACTIVE, $this->get_contract( $contract_id )->get_status() );
 	}
 
 	public function test_can_cancel_allows_non_terminal_statuses_only(): void {

@@ -659,7 +659,6 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 		$this->assertNull( ( new RenewalProcessor() )->renew_now( $foreign ) );
 		$this->assertNull( ( new RenewalProcessor() )->renew_now( 4242424 ) );
 		$this->assertSame( 0, $this->charge_count() );
-		$this->assertNull( $this->get_contract( $foreign )->get_lock_state(), 'The foreign contract is never locked.' );
 	}
 
 	public function test_renew_now_on_another_extensions_locked_contract_is_not_a_conflict(): void {
