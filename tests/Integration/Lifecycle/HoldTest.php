@@ -227,7 +227,7 @@ final class HoldTest extends LiteIntegrationTestCase {
 		$this->assertNull( ( new Hold() )->hold( $contract_id ) );
 		$contract = $this->get_contract( $contract_id );
 		$this->assertSame( ContractStatus::ACTIVE, $contract->get_status() );
-		$this->assertNull( $contract->get_lock_state(), 'The lock taken to read it is released.' );
+		$this->assertNull( $contract->get_lock_state(), 'The foreign contract is left unlocked.' );
 	}
 
 	public function test_hold_leaves_the_contract_unlocked(): void {
