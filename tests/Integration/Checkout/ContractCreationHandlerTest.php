@@ -775,7 +775,14 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 			[ 'operation' => ContractCreationHandler::OPERATION ]
 		);
 		$draft_id = $created['contract']->get_id();
-		Contracts::update( $draft_id, [ 'status' => ContractStatus::CANCELLED ], $created['lock'] );
+		Contracts::update(
+			$draft_id,
+			[
+				'extension_slug' => Package::EXTENSION_SLUG,
+				'status'         => ContractStatus::CANCELLED,
+			],
+			$created['lock']
+		);
 		$created['lock']->release();
 
 		$order->update_status( OrderStatus::PROCESSING );

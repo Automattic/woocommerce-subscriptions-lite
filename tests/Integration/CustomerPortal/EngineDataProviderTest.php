@@ -202,7 +202,14 @@ final class EngineDataProviderTest extends LiteIntegrationTestCase {
 		$customer_id = $this->create_customer();
 		$contract_id = $this->create_contract( $customer_id );
 		$foreign     = $this->make_plan( 'week', 2, null, [ 'extension_slug' => 'other-extension' ] );
-		$this->assertNotNull( Contracts::update( $contract_id, [ 'selling_plan_id' => $foreign->get_id() ] ) );
+		$updated     = Contracts::update(
+			$contract_id,
+			[
+				'extension_slug'  => Package::EXTENSION_SLUG,
+				'selling_plan_id' => $foreign->get_id(),
+			]
+		);
+		$this->assertNotNull( $updated );
 
 		$detail = $this->provider->get_contract( $contract_id, $customer_id );
 		$rows   = $this->provider->get_contracts_for_customer( $customer_id );

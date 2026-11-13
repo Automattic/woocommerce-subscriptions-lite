@@ -12,6 +12,7 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Orders;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\CycleStatus;
 use Automattic\WooCommerce\SubscriptionsLite\Orders\RelatedOrders;
+use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
 use WC_Order;
 
@@ -131,7 +132,13 @@ final class RelatedOrdersTest extends LiteIntegrationTestCase {
 	public function test_the_origin_closes_the_list_when_cycle_one_carries_no_order(): void {
 		$contract_id = $this->seed_contract();
 		$origin      = $this->create_subscription_order( $this->create_customer() );
-		Contracts::update( $contract_id, [ 'origin_order_id' => $origin->get_id() ] );
+		Contracts::update(
+			$contract_id,
+			[
+				'extension_slug'  => Package::EXTENSION_SLUG,
+				'origin_order_id' => $origin->get_id(),
+			]
+		);
 		$renewal = $this->create_renewal_order( $contract_id, 1 );
 
 		$contract = $this->get_contract( $contract_id );
@@ -144,7 +151,13 @@ final class RelatedOrdersTest extends LiteIntegrationTestCase {
 	public function test_a_contract_without_cycles_lists_its_origin(): void {
 		$contract_id = $this->seed_contract();
 		$origin      = $this->create_subscription_order( $this->create_customer() );
-		Contracts::update( $contract_id, [ 'origin_order_id' => $origin->get_id() ] );
+		Contracts::update(
+			$contract_id,
+			[
+				'extension_slug'  => Package::EXTENSION_SLUG,
+				'origin_order_id' => $origin->get_id(),
+			]
+		);
 
 		$this->assertSame( [ $origin->get_id() ], $this->ids( RelatedOrders::for_contract( $this->get_contract( $contract_id ), 10 ) ) );
 	}

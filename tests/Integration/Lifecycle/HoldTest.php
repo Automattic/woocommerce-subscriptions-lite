@@ -10,6 +10,7 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Lifecycle;
 
+use InvalidArgumentException;
 use RuntimeException;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
@@ -19,6 +20,7 @@ use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\HeldLocks;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Hold;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\HoldAnchor;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\LifecycleNotAllowedException;
+use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
 
 /**
@@ -58,7 +60,13 @@ final class HoldTest extends LiteIntegrationTestCase {
 
 	public function test_hold_without_a_next_payment_anchors_on_the_newest_period_end(): void {
 		$contract_id = $this->create_contract( $this->create_customer() );
-		Contracts::update( $contract_id, [ 'next_payment_gmt' => null ] );
+		Contracts::update(
+			$contract_id,
+			[
+				'extension_slug'   => Package::EXTENSION_SLUG,
+				'next_payment_gmt' => null,
+			]
+		);
 		$period_end = Contracts::get_cycles( $contract_id, 1 )[0]->get_ends_at_gmt();
 
 		( new Hold() )->hold( $contract_id );
@@ -104,7 +112,16 @@ final class HoldTest extends LiteIntegrationTestCase {
 		$contract_id = $this->seed_contract();
 		( new Hold() )->hold( $contract_id );
 
-		Contracts::update( $contract_id, [ 'end_gmt' => '2099-12-31 00:00:00' ] );
+		Contracts::update(
+			$contract_id,
+			[
+
+				'extension_slug' => Package::EXTENSION_SLUG,
+
+				'end_gmt'        => '2099-12-31 00:00:00',
+
+			]
+		);
 
 		$this->assertSame( '2099-01-01 00:00:00', HoldAnchor::read( $contract_id ) );
 	}
@@ -213,7 +230,7 @@ final class HoldTest extends LiteIntegrationTestCase {
 		$this->assertNull( ( new Hold() )->hold( $contract_id ) );
 		$contract = $this->get_contract( $contract_id );
 		$this->assertSame( ContractStatus::ACTIVE, $contract->get_status() );
-		$this->assertNull( $contract->get_lock_state(), 'The lock taken to read it is released.' );
+		$this->assertNull( $contract->get_lock_state(), 'The foreign contract is never locked.' );
 	}
 
 	public function test_hold_leaves_the_contract_unlocked(): void {
@@ -261,7 +278,7 @@ final class HoldTest extends LiteIntegrationTestCase {
 		add_action(
 			'woocommerce_subscriptions_lite_contract_held',
 			static function ( ContractView $contract ): void {
-				Contracts::update_meta( $contract->get_id(), '_listener_note', 'held', null, HeldLocks::get( $contract->get_id() ) );
+				Contracts::update_meta( $contract->get_id(), $contract->get_extension_slug(), '_listener_note', 'held', null, HeldLocks::get( $contract->get_id() ) );
 			}
 		);
 
@@ -270,5 +287,26 @@ final class HoldTest extends LiteIntegrationTestCase {
 		$this->assertSame( ContractStatus::ON_HOLD, $held->get_status() );
 		$this->assertSame( 'held', Contracts::get_meta( $contract_id, '_listener_note', true ) );
 		$this->assertNull( $this->get_contract( $contract_id )->get_lock_state() );
+	}
+
+	public function test_a_held_action_listener_naming_another_owner_is_refused(): void {
+		$contract_id = $this->seed_contract();
+		$refused     = new \ArrayObject();
+		add_action(
+			'woocommerce_subscriptions_lite_contract_held',
+			static function ( ContractView $contract ) use ( $refused ): void {
+				try {
+					Contracts::update_meta( $contract->get_id(), 'another-extension', '_listener_note', 'held', null, HeldLocks::get( $contract->get_id() ) );
+				} catch ( InvalidArgumentException $e ) {
+					$refused[] = $e;
+				}
+			}
+		);
+
+		( new Hold() )->hold( $contract_id );
+
+		$this->assertCount( 1, $refused, 'A slug other than the lock\'s owner throws.' );
+		$this->assertSame( '', Contracts::get_meta( $contract_id, '_listener_note', true ), 'Nothing is written.' );
+		$this->assert_lock_released( $contract_id );
 	}
 }

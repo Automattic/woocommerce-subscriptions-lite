@@ -535,6 +535,7 @@ final class ContractCreationHandler {
 		Contracts::add_cycle(
 			$contract_id,
 			[
+				'extension_slug' => Package::EXTENSION_SLUG,
 				'status'         => CycleStatus::BILLED,
 				'count'          => 1,
 				'order_id'       => $order->get_id(),
@@ -549,6 +550,7 @@ final class ContractCreationHandler {
 		return Contracts::update(
 			$contract_id,
 			[
+				'extension_slug'   => Package::EXTENSION_SLUG,
 				'status'           => ContractStatus::ACTIVE,
 				'next_payment_gmt' => $next,
 			],

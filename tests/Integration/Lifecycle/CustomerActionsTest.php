@@ -14,9 +14,11 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Lifecycle;
 
 use WP_REST_Request;
 use WP_REST_Response;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\CycleStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\SchemaInstaller;
+use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\HoldAnchor;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
 
@@ -153,6 +155,20 @@ final class CustomerActionsTest extends LiteIntegrationTestCase {
 			$this->get_response_data( $response )
 		);
 		$this->assertSame( ContractStatus::ON_HOLD, $this->get_contract( $contract_id )->get_status() );
+	}
+
+	public function test_an_action_through_the_endpoint_writes_the_contract_and_its_meta(): void {
+		wp_set_current_user( $this->owner_id );
+		$contract_id = $this->seed_owned_contract();
+
+		$response = $this->post_action( $contract_id, 'hold', [] );
+
+		$this->assertSame( 200, $response->get_status() );
+		$stored = $this->get_contract( $contract_id );
+		$this->assertSame( ContractStatus::ON_HOLD, $stored->get_status() );
+		$this->assertNull( $stored->get_next_payment_gmt() );
+		$this->assertSame( '2099-02-01 00:00:00', Contracts::get_meta( $contract_id, HoldAnchor::META_KEY, true ), 'The hold anchor is written.' );
+		$this->assert_lock_released( $contract_id );
 	}
 
 	public function test_the_owner_reactivates(): void {

@@ -73,7 +73,14 @@ final class RenewalProcessor {
 		$head        = Contracts::get_cycles( $contract_id, 1 )[0] ?? null;
 		if ( null === $terms || null === $head ) {
 			$this->log( 'warning', sprintf( 'contract %d cannot be renewed: it has no plan with valid billing terms, or no billing chain; its next payment date is cleared.', $contract_id ), $contract_id );
-			Contracts::update( $contract_id, [ 'next_payment_gmt' => null ], $lock );
+			Contracts::update(
+				$contract_id,
+				[
+					'extension_slug'   => Package::EXTENSION_SLUG,
+					'next_payment_gmt' => null,
+				],
+				$lock
+			);
 			return null;
 		}
 
@@ -180,8 +187,9 @@ final class RenewalProcessor {
 				$retried = Contracts::transition_cycle(
 					$head->get_id(),
 					[
-						'from_status' => CycleStatus::FAILED,
-						'to_status'   => CycleStatus::PENDING,
+						'extension_slug' => Package::EXTENSION_SLUG,
+						'from_status'    => CycleStatus::FAILED,
+						'to_status'      => CycleStatus::PENDING,
 					],
 					$lock
 				);
@@ -204,6 +212,7 @@ final class RenewalProcessor {
 		return Contracts::add_cycle(
 			$contract->get_id(),
 			[
+				'extension_slug' => Package::EXTENSION_SLUG,
 				'status'         => CycleStatus::PENDING,
 				'count'          => (int) $head->get_count() + 1,
 				'starts_at_gmt'  => $starts_at,
@@ -229,7 +238,10 @@ final class RenewalProcessor {
 		$this->log( 'warning', sprintf( 'contract %d is due for a period its newest cycle already billed; its next due moment is re-applied.', $contract->get_id() ), $contract->get_id() );
 		Contracts::update(
 			$contract->get_id(),
-			[ 'next_payment_gmt' => $terms->get_next_due_after( new DateTimeImmutable( $head->get_ends_at_gmt(), new DateTimeZone( 'UTC' ) ), $now ) ],
+			[
+				'extension_slug'   => Package::EXTENSION_SLUG,
+				'next_payment_gmt' => $terms->get_next_due_after( new DateTimeImmutable( $head->get_ends_at_gmt(), new DateTimeZone( 'UTC' ) ), $now ),
+			],
 			$lock
 		);
 	}
@@ -271,9 +283,10 @@ final class RenewalProcessor {
 			$failed = Contracts::transition_cycle(
 				$cycle->get_id(),
 				[
-					'from_status' => CycleStatus::PENDING,
-					'to_status'   => CycleStatus::FAILED,
-					'reason'      => self::REASON_ORDER_BUILD_FAILED,
+					'extension_slug' => Package::EXTENSION_SLUG,
+					'from_status'    => CycleStatus::PENDING,
+					'to_status'      => CycleStatus::FAILED,
+					'reason'         => self::REASON_ORDER_BUILD_FAILED,
 				],
 				$lock
 			);
@@ -286,9 +299,10 @@ final class RenewalProcessor {
 		$linked = Contracts::transition_cycle(
 			$cycle->get_id(),
 			[
-				'from_status' => CycleStatus::PENDING,
-				'to_status'   => CycleStatus::PENDING,
-				'order_id'    => $order->get_id(),
+				'extension_slug' => Package::EXTENSION_SLUG,
+				'from_status'    => CycleStatus::PENDING,
+				'to_status'      => CycleStatus::PENDING,
+				'order_id'       => $order->get_id(),
 			],
 			$lock
 		);
@@ -384,9 +398,10 @@ final class RenewalProcessor {
 		$pending = Contracts::transition_cycle(
 			$cycle->get_id(),
 			[
-				'from_status' => CycleStatus::PENDING,
-				'to_status'   => CycleStatus::PENDING,
-				'order_id'    => $order->get_id(),
+				'extension_slug' => Package::EXTENSION_SLUG,
+				'from_status'    => CycleStatus::PENDING,
+				'to_status'      => CycleStatus::PENDING,
+				'order_id'       => $order->get_id(),
 			],
 			$lock
 		);

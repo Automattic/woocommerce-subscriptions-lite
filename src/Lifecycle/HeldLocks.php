@@ -43,7 +43,8 @@ final class HeldLocks {
 
 	/**
 	 * The lock held on the contract in this request, or null. A listener of a Lite lifecycle
-	 * action writes the contract with this lock: an unlocked write is refused while it is held.
+	 * action writes the contract with this lock (an unlocked write is refused while it is held)
+	 * and passes `$contract->get_extension_slug()` as the owner; a non-owner slug throws.
 	 *
 	 * @param int $contract_id Contract id.
 	 */
@@ -95,14 +96,14 @@ final class HeldLocks {
 
 	/**
 	 * Acquire the contract's lock for `$operation` and register it as held; release it with
-	 * {@see self::release()}. Null when another operation holds it or the contract is missing:
-	 * {@see self::get_conflict()} tells the two apart.
+	 * {@see self::release()}. Null when another operation holds it, the contract is missing, or
+	 * it is not Lite's: {@see self::get_conflict()} tells them apart.
 	 *
 	 * @param int    $contract_id Contract id.
 	 * @param string $operation   Operation label.
 	 */
 	public static function acquire( int $contract_id, string $operation ): ?ContractLock {
-		$lock = Contracts::lock( $contract_id, $operation );
+		$lock = Contracts::lock( $contract_id, Package::EXTENSION_SLUG, $operation );
 		if ( null !== $lock ) {
 			self::register( $lock );
 		}

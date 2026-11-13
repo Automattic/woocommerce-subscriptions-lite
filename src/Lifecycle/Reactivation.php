@@ -80,6 +80,7 @@ final class Reactivation {
 			$reactivated_contract = Contracts::update(
 				$contract_id,
 				[
+					'extension_slug'   => Package::EXTENSION_SLUG,
 					'status'           => ContractStatus::ACTIVE,
 					'next_payment_gmt' => $next_payment,
 				],
@@ -94,7 +95,8 @@ final class Reactivation {
 			/**
 			 * Fires after a held contract is reactivated (re-armed, or unscheduled when it had no
 			 * anchor). Runs under the contract lock: a callback writes the contract with
-			 * `HeldLocks::get( $id )`, since an unlocked write is refused.
+			 * `HeldLocks::get( $id )`, since an unlocked write is refused, and passes
+			 * `$contract->get_extension_slug()` as the owner; a non-owner slug throws.
 			 *
 			 * @param ContractView $reactivated_contract The reactivated contract.
 			 */

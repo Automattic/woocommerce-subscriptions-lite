@@ -22,6 +22,7 @@ use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Hold;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\HoldAnchor;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\LifecycleNotAllowedException;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Reactivation;
+use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
 
 /**
@@ -51,7 +52,7 @@ final class ReactivationTest extends LiteIntegrationTestCase {
 			]
 		);
 		if ( null !== $anchor ) {
-			Contracts::update_meta( $contract_id, HoldAnchor::META_KEY, $anchor );
+			Contracts::update_meta( $contract_id, Package::EXTENSION_SLUG, HoldAnchor::META_KEY, $anchor );
 		}
 
 		return $contract_id;
@@ -339,7 +340,9 @@ final class ReactivationTest extends LiteIntegrationTestCase {
 		);
 
 		$this->assertNull( ( new Reactivation() )->reactivate( $contract_id ) );
-		$this->assertSame( ContractStatus::ON_HOLD, $this->get_contract( $contract_id )->get_status() );
+		$contract = $this->get_contract( $contract_id );
+		$this->assertSame( ContractStatus::ON_HOLD, $contract->get_status() );
+		$this->assertNull( $contract->get_lock_state(), 'The foreign contract is never locked.' );
 	}
 
 	public function test_reactivation_while_another_operation_holds_the_lock_returns_the_conflict_and_stays_on_hold(): void {
@@ -366,6 +369,7 @@ final class ReactivationTest extends LiteIntegrationTestCase {
 		Contracts::update(
 			$contract_id,
 			[
+				'extension_slug'   => Package::EXTENSION_SLUG,
 				'status'           => ContractStatus::CANCELLED,
 				'next_payment_gmt' => null,
 			],

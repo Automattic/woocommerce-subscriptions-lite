@@ -24,6 +24,7 @@ use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\LifecycleNotAllowedExcept
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Reactivation;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\RenewalOrderBuilder;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\UnpaidRenewal;
+use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
 use DateTimeImmutable;
 use DateTimeZone;
@@ -348,7 +349,13 @@ final class RenewalScenariosTest extends LiteIntegrationTestCase {
 		$this->support_engine_charges( 'cod' );
 		$contract_id = $this->make_contract_paid( self::PAID_A_PERIOD_AGO );
 		$this->assertSame( 1, $this->run_due_dispatch( $this->now() ) );
-		Contracts::update( $contract_id, [ 'next_payment_gmt' => '2099-01-01 00:00:00' ] );
+		Contracts::update(
+			$contract_id,
+			[
+				'extension_slug'   => Package::EXTENSION_SLUG,
+				'next_payment_gmt' => '2099-01-01 00:00:00',
+			]
+		);
 
 		$this->renewal_orders()[0]->update_status( 'completed' );
 
