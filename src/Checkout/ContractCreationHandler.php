@@ -323,7 +323,7 @@ final class ContractCreationHandler {
 
 		try {
 			$draft = Contracts::get( $contract_id );
-			if ( null === $draft || Package::EXTENSION_SLUG !== $draft->get_extension_slug() || ContractStatus::DRAFT !== $draft->get_status() ) {
+			if ( null === $draft || ContractStatus::DRAFT !== $draft->get_status() ) {
 				return true;
 			}
 

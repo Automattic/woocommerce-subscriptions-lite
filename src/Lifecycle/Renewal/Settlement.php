@@ -721,7 +721,7 @@ final class Settlement {
 
 		try {
 			$contract = Contracts::get( $contract_id );
-			if ( null === $contract || Package::EXTENSION_SLUG !== $contract->get_extension_slug() ) {
+			if ( null === $contract ) {
 				return null;
 			}
 
