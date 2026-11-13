@@ -6,8 +6,6 @@
  */
 
 import { config } from './config';
-import { normalizeDefinitions } from './definitions';
-import { formatFrequency } from './format';
 
 /**
  * Build the default form data by merging each descriptor's defaults.
@@ -51,24 +49,11 @@ export function formDataToPayload( registry, formData, plan = null ) {
 		base.status = config.defaultStatus;
 	}
 
-	const payload = registry.reduce(
+	return registry.reduce(
 		( acc, field ) =>
 			field.toPayload ? field.toPayload( formData, acc, plan ) : acc,
 		base
 	);
-
-	// There is no name input: the name is derived from the billing frequency
-	// with the same formatter as the Frequency list column, so REST keeps
-	// receiving a non-empty name. A registry field that sets a name (e.g. an
-	// injected extension field) wins over derivation.
-	if ( typeof payload.name !== 'string' || ! payload.name.trim() ) {
-		payload.name = formatFrequency(
-			payload,
-			normalizeDefinitions( config.definitions )
-		);
-	}
-
-	return payload;
 }
 
 /**
