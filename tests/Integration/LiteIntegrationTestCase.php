@@ -647,7 +647,8 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 	}
 
 	/**
-	 * Run the admin Renew now action on the contract as an administrator.
+	 * Run the admin Renew now action on the contract as an administrator, who stays the
+	 * current user for the rest of the test.
 	 *
 	 * @param int $contract_id Contract id.
 	 */

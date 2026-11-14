@@ -265,22 +265,23 @@ final class RowActionControllerTest extends LiteIntegrationTestCase {
 
 	public function test_cancel_logs_the_exception_and_surfaces_a_generic_message(): void {
 		$contract_id = $this->seed_contract();
-		// A cancelled-action callback that throws, on the real cancel path.
+		// A cancelled-action callback that throws on the real cancel path, after the cancel is stored.
 		add_action(
 			'woocommerce_subscriptions_lite_contract_cancelled',
 			static function (): void {
-				throw new RuntimeException( 'storage offline' );
+				throw new RuntimeException( 'cancelled listener failed' );
 			}
 		);
 
 		$result = ( new RowActionController() )->handle_cancel( [ 'contract_id' => $contract_id ] );
 
 		$this->assertSame( RowActionResult::ERROR, $result->type() );
-		$this->assertStringNotContainsString( 'storage offline', $result->message(), 'The internal error detail is not leaked to the merchant.' );
+		$this->assertStringNotContainsString( 'cancelled listener failed', $result->message(), 'The internal error detail is not leaked to the merchant.' );
 		$this->assertStringContainsString( 'logs', $result->message(), 'The merchant is pointed at the logs.' );
 		$logs = $this->get_failure_logs();
 		$this->assertCount( 1, $logs, 'The failure is logged once.' );
-		$this->assertSame( sprintf( 'Admin subscription cancel failed for #%d: storage offline', $contract_id ), $logs[0], 'The full exception detail is logged.' );
+		$this->assertSame( sprintf( 'Admin subscription cancel failed for #%d: cancelled listener failed', $contract_id ), $logs[0], 'The full exception detail is logged.' );
+		$this->assertSame( ContractStatus::CANCELLED, $this->get_contract( $contract_id )->get_status(), 'The listener runs after the cancel is stored.' );
 		$this->assert_lock_released( $contract_id );
 	}
 
