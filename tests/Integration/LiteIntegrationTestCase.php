@@ -33,6 +33,8 @@ use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\CycleStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Dispatch\DueDispatcher;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\SchemaInstaller;
+use Automattic\WooCommerce\SubscriptionsLite\Admin\RowActionController;
+use Automattic\WooCommerce\SubscriptionsLite\Admin\RowActionResult;
 use Automattic\WooCommerce\SubscriptionsLite\Cart\CartPlanHooks;
 use Automattic\WooCommerce\SubscriptionsLite\Checkout\ContractCreationHandler;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Cancellation;
@@ -642,6 +644,17 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 		$this->expire_held_locks();
 
 		return $this->run_due_dispatch( $now->modify( sprintf( '+%d seconds', ContractLock::TTL_SECONDS + 60 ) ) );
+	}
+
+	/**
+	 * Run the admin Renew now action on the contract as an administrator.
+	 *
+	 * @param int $contract_id Contract id.
+	 */
+	protected function renew_now_as_admin( int $contract_id ): RowActionResult {
+		wp_set_current_user( self::factory()->user->create( [ 'role' => 'administrator' ] ) );
+
+		return ( new RowActionController() )->handle_renew_now( [ 'contract_id' => $contract_id ] );
 	}
 
 	/**

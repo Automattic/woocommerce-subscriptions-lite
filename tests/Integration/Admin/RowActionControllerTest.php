@@ -4,11 +4,11 @@
  *
  * The handlers back the Renew now / Cancel actions on the admin subscriptions
  * screens: the decision method verifies the capability, then runs the renewal or
- * cancel, returning a {@see RowActionResult}. Renew now runs Lite's real renewal over
- * real contracts; the cancel branches are driven through the controller's constructor
- * seams (its public API); the hook
- * registration is asserted against the real hook table. The nonce is a
- * request-boundary concern (check_admin_referer), out of scope here.
+ * cancel, returning a {@see RowActionResult}. Every branch runs the real path: the
+ * current user's capability, Lite's renewal and cancel over real contracts, and the
+ * WooCommerce logger (captured through its message filter). Failures are reproduced
+ * through WordPress hooks. The hook registration is asserted against the real hook
+ * table. The nonce is a request-boundary concern (check_admin_referer), out of scope here.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Tests
  */
@@ -35,39 +35,64 @@ use WC_Order;
 final class RowActionControllerTest extends LiteIntegrationTestCase {
 
 	/**
-	 * Captured log messages from the injected logger seam.
+	 * Lite cancelled actions fired since {@see self::count_cancelled_actions()}.
 	 *
-	 * @var array<int, string>
+	 * @var int
 	 */
-	private $logged = [];
+	private $cancelled_actions = 0;
+
+	/**
+	 * Error messages logged under Lite's source since {@see self::set_up()}, per log handler.
+	 *
+	 * @var array<string, array<int, string>>
+	 */
+	private $error_logs = [];
 
 	public function set_up(): void {
 		parent::set_up();
-		$this->logged = [];
+		wp_set_current_user( self::factory()->user->create( [ 'role' => 'administrator' ] ) );
+		$this->error_logs = [];
+		add_filter(
+			'woocommerce_logger_log_message',
+			function ( $message, $level, $context, $handler ) {
+				if ( 'error' === $level && Package::EXTENSION_SLUG === ( $context['source'] ?? null ) ) {
+					$this->error_logs[ spl_object_hash( $handler ) ][] = (string) $message;
+				}
+				return $message;
+			},
+			10,
+			4
+		);
 	}
 
 	/**
-	 * A controller whose seams all pass, with spies on the cancel + logger seams.
+	 * The row-action failures the controller logged, as one log handler received them
+	 * (the logger filters each message once per handler).
 	 *
-	 * @param array<string, mixed> $overrides Seam overrides: can, cancel_return, cancel_calls.
+	 * @return array<int, string>
 	 */
-	private function make_controller( array $overrides = [] ): RowActionController {
-		$can           = $overrides['can'] ?? true;
-		$cancel_return = $overrides['cancel_return'] ?? true;
+	private function get_failure_logs(): array {
+		$logs = reset( $this->error_logs );
 
-		return new RowActionController(
-			function ( int $id ) use ( $cancel_return, &$overrides ): bool {
-				if ( isset( $overrides['cancel_calls'] ) ) {
-					$overrides['cancel_calls'][] = $id;
+		return array_values(
+			array_filter(
+				false === $logs ? [] : $logs,
+				static function ( string $message ): bool {
+					return false !== strpos( $message, 'Admin subscription ' );
 				}
-				if ( $cancel_return instanceof \Throwable ) {
-					throw $cancel_return;
-				}
-				return (bool) $cancel_return;
-			},
-			static fn (): bool => (bool) $can,
-			function ( string $message, array $context ): void {
-				$this->logged[] = $message;
+			)
+		);
+	}
+
+	/**
+	 * Count the Lite cancelled actions fired from now on into {@see self::$cancelled_actions}.
+	 */
+	private function count_cancelled_actions(): void {
+		$this->cancelled_actions = 0;
+		add_action(
+			'woocommerce_subscriptions_lite_contract_cancelled',
+			function (): void {
+				++$this->cancelled_actions;
 			}
 		);
 	}
@@ -76,7 +101,7 @@ final class RowActionControllerTest extends LiteIntegrationTestCase {
 		$this->support_engine_charges( 'cod' );
 		$contract_id = $this->create_contract( $this->create_customer(), [ 'payment_method' => 'cod' ] );
 
-		$result = $this->make_controller()->handle_renew_now( [ 'contract_id' => $contract_id ] );
+		$result = ( new RowActionController() )->handle_renew_now( [ 'contract_id' => $contract_id ] );
 
 		$this->assertTrue( $result->is_success() );
 		$this->assertSame( 1, $this->charge_count() );
@@ -96,7 +121,7 @@ final class RowActionControllerTest extends LiteIntegrationTestCase {
 			]
 		);
 
-		$result = $this->make_controller()->handle_renew_now( [ 'contract_id' => $contract_id ] );
+		$result = ( new RowActionController() )->handle_renew_now( [ 'contract_id' => $contract_id ] );
 
 		$this->assertSame( RowActionResult::INFO, $result->type(), 'A skipped renewal is informational, not an error.' );
 		$this->assertSame( 0, $this->charge_count() );
@@ -105,11 +130,11 @@ final class RowActionControllerTest extends LiteIntegrationTestCase {
 	public function test_renew_now_retries_a_failed_renewal_on_hold(): void {
 		$this->support_engine_charges( 'cod', 'failed' );
 		$contract_id = $this->create_contract( $this->create_customer(), [ 'payment_method' => 'cod' ] );
-		$this->make_controller()->handle_renew_now( [ 'contract_id' => $contract_id ] );
+		( new RowActionController() )->handle_renew_now( [ 'contract_id' => $contract_id ] );
 		$this->assertSame( ContractStatus::ON_HOLD, $this->get_contract( $contract_id )->get_status() );
 		$this->support_engine_charges( 'cod', 'paid' );
 
-		$result = $this->make_controller()->handle_renew_now( [ 'contract_id' => $contract_id ] );
+		$result = ( new RowActionController() )->handle_renew_now( [ 'contract_id' => $contract_id ] );
 
 		$this->assertTrue( $result->is_success() );
 		$this->assertSame( 2, $this->charge_count() );
@@ -121,7 +146,7 @@ final class RowActionControllerTest extends LiteIntegrationTestCase {
 		$this->support_engine_charges( 'cod', 'failed' );
 		$contract_id = $this->create_contract( $this->create_customer(), [ 'payment_method' => 'cod' ] );
 
-		$result = $this->make_controller()->handle_renew_now( [ 'contract_id' => $contract_id ] );
+		$result = ( new RowActionController() )->handle_renew_now( [ 'contract_id' => $contract_id ] );
 
 		$this->assertSame( RowActionResult::ERROR, $result->type() );
 		$this->assertSame( 1, $this->charge_count() );
@@ -130,7 +155,7 @@ final class RowActionControllerTest extends LiteIntegrationTestCase {
 	public function test_renew_now_reports_a_manual_renewal_order_as_awaiting_payment(): void {
 		$contract_id = $this->create_contract( $this->create_customer(), [ 'payment_method' => 'bacs' ] );
 
-		$result = $this->make_controller()->handle_renew_now( [ 'contract_id' => $contract_id ] );
+		$result = ( new RowActionController() )->handle_renew_now( [ 'contract_id' => $contract_id ] );
 
 		$this->assertSame( RowActionResult::INFO, $result->type() );
 		$this->assertSame( ContractStatus::ON_HOLD, $this->get_contract( $contract_id )->get_status() );
@@ -139,10 +164,12 @@ final class RowActionControllerTest extends LiteIntegrationTestCase {
 	public function test_renew_now_is_forbidden_without_the_capability(): void {
 		$this->support_engine_charges( 'cod' );
 		$contract_id = $this->create_contract( $this->create_customer(), [ 'payment_method' => 'cod' ] );
+		wp_set_current_user( $this->create_customer() );
 
-		$result = $this->make_controller( [ 'can' => false ] )->handle_renew_now( [ 'contract_id' => $contract_id ] );
+		$result = ( new RowActionController() )->handle_renew_now( [ 'contract_id' => $contract_id ] );
 
 		$this->assertTrue( $result->is_forbidden() );
+		$this->assertSame( 'You do not have permission to manage subscriptions.', $result->message() );
 		$this->assertSame( 0, $this->charge_count(), 'An unauthorised request never renews.' );
 		$this->assertCount( 1, Contracts::get_cycles( $contract_id ) );
 	}
@@ -159,28 +186,14 @@ final class RowActionControllerTest extends LiteIntegrationTestCase {
 			20
 		);
 
-		$result = $this->make_controller()->handle_renew_now( [ 'contract_id' => $contract_id ] );
+		$result = ( new RowActionController() )->handle_renew_now( [ 'contract_id' => $contract_id ] );
 
 		$this->assertSame( RowActionResult::ERROR, $result->type() );
 		$this->assertStringNotContainsString( 'gateway lookup failed', $result->message(), 'The internal error detail is not leaked to the merchant.' );
 		$this->assertStringContainsString( 'logs', $result->message(), 'The merchant is pointed at the logs.' );
-		$this->assertCount( 1, $this->logged, 'The failure is logged once.' );
-		$this->assertStringContainsString( 'gateway lookup failed', $this->logged[0], 'The full exception detail is logged.' );
-	}
-
-	public function test_cancel_runs_the_canceller_for_an_authorised_request(): void {
-		$cancel_calls = [];
-		$controller   = $this->make_controller(
-			[
-				'cancel_return' => true,
-				'cancel_calls'  => &$cancel_calls,
-			]
-		);
-
-		$result = $controller->handle_cancel( [ 'contract_id' => 100 ] );
-
-		$this->assertTrue( $result->is_success() );
-		$this->assertSame( [ 100 ], $cancel_calls, 'The canceller runs for the authorised contract.' );
+		$logs = $this->get_failure_logs();
+		$this->assertCount( 1, $logs, 'The failure is logged once.' );
+		$this->assertSame( sprintf( 'Admin subscription renew failed for #%d: gateway lookup failed', $contract_id ), $logs[0], 'The full exception detail is logged.' );
 	}
 
 	public function test_a_draft_offers_cancel_and_the_real_cancel_resolves_it(): void {
@@ -193,9 +206,7 @@ final class RowActionControllerTest extends LiteIntegrationTestCase {
 		$this->assertStringContainsString( PageController::ACTION_CANCEL, $html, 'The detail screen offers Cancel for a draft.' );
 		$this->assertStringNotContainsString( PageController::ACTION_RENEW_NOW, $html, 'Renew now stays hidden for a draft.' );
 
-		// Default canceller: Lite's cancel flow.
-		$controller = new RowActionController( null, static fn (): bool => true );
-		$result     = $controller->handle_cancel( [ 'contract_id' => $id ] );
+		$result = ( new RowActionController() )->handle_cancel( [ 'contract_id' => $id ] );
 
 		$this->assertTrue( $result->is_success() );
 		$stored = Contracts::get( $id );
@@ -203,99 +214,89 @@ final class RowActionControllerTest extends LiteIntegrationTestCase {
 		$this->assertSame( ContractStatus::CANCELLED, $stored->get_status() );
 	}
 
-	public function test_the_real_cancel_runs_lite_s_cancel_flow(): void {
+	public function test_cancel_runs_lite_s_cancel_flow_for_an_authorised_request(): void {
 		$contract_id = $this->seed_contract();
-		$fired       = 0;
-		add_action(
-			'woocommerce_subscriptions_lite_contract_cancelled',
-			static function () use ( &$fired ): void {
-				++$fired;
-			}
-		);
+		$this->count_cancelled_actions();
 
-		$result = ( new RowActionController( null, static fn (): bool => true ) )
-			->handle_cancel( [ 'contract_id' => $contract_id ] );
+		$result = ( new RowActionController() )->handle_cancel( [ 'contract_id' => $contract_id ] );
 
 		$this->assertTrue( $result->is_success() );
-		$this->assertSame( 1, $fired, 'The Lite cancelled action fires.' );
+		$this->assertSame( sprintf( 'Subscription #%d cancelled.', $contract_id ), $result->message() );
+		$this->assertSame( 1, $this->cancelled_actions, 'The Lite cancelled action fires.' );
+		$this->assertSame( ContractStatus::CANCELLED, $this->get_contract( $contract_id )->get_status() );
 		$this->assertNull( $this->get_contract( $contract_id )->get_next_payment_gmt() );
 		$this->assert_lock_released( $contract_id );
 	}
 
-	public function test_the_real_cancel_reports_a_missing_contract_as_not_found(): void {
-		$result = ( new RowActionController( null, static fn (): bool => true ) )
-			->handle_cancel( [ 'contract_id' => 4242424 ] );
+	public function test_cancel_reports_a_missing_contract_as_not_found(): void {
+		$this->count_cancelled_actions();
+
+		$result = ( new RowActionController() )->handle_cancel( [ 'contract_id' => 4242424 ] );
 
 		$this->assertSame( RowActionResult::ERROR, $result->type() );
 		$this->assertSame( 'Subscription not found.', $result->message() );
+		$this->assertSame( 0, $this->cancelled_actions );
+		$this->assertSame( [], $this->get_failure_logs(), 'A plain not-found is not logged as a failure.' );
 	}
 
-	public function test_the_real_cancel_reports_a_status_it_cannot_cancel_as_a_failure(): void {
+	public function test_cancel_reports_a_status_it_cannot_cancel_as_a_failure(): void {
 		$contract_id = $this->seed_contract( [ 'status' => ContractStatus::EXPIRED ] );
 
-		$controller = new RowActionController(
-			null,
-			static fn (): bool => true,
-			function ( string $message ): void {
-				$this->logged[] = $message;
-			}
-		);
-
-		$result = $controller->handle_cancel( [ 'contract_id' => $contract_id ] );
+		$result = ( new RowActionController() )->handle_cancel( [ 'contract_id' => $contract_id ] );
 
 		$this->assertSame( RowActionResult::ERROR, $result->type() );
-		$this->assertCount( 1, $this->logged, 'The refused cancel is logged.' );
+		$this->assertSame( 'The subscription could not be cancelled. Check the WooCommerce logs for details.', $result->message() );
+		$this->assertCount( 1, $this->get_failure_logs(), 'The refused cancel is logged.' );
 		$this->assertSame( ContractStatus::EXPIRED, $this->get_contract( $contract_id )->get_status() );
 	}
 
-	public function test_cancel_reports_a_missing_contract_as_an_error(): void {
-		// A false canceller return means no such contract.
-		$result = $this->make_controller( [ 'cancel_return' => false ] )
-			->handle_cancel( [ 'contract_id' => 999 ] );
-
-		$this->assertSame( RowActionResult::ERROR, $result->type() );
-		$this->assertFalse( $result->is_success() );
-		$this->assertCount( 0, $this->logged, 'A plain not-found is not logged as a failure.' );
-	}
-
 	public function test_cancel_is_forbidden_without_the_capability(): void {
-		$cancel_calls = [];
-		$controller   = $this->make_controller(
-			[
-				'can'          => false,
-				'cancel_calls' => &$cancel_calls,
-			]
-		);
+		$contract_id = $this->seed_contract();
+		$this->count_cancelled_actions();
+		wp_set_current_user( $this->create_customer() );
 
-		$result = $controller->handle_cancel( [ 'contract_id' => 100 ] );
+		$result = ( new RowActionController() )->handle_cancel( [ 'contract_id' => $contract_id ] );
 
 		$this->assertTrue( $result->is_forbidden() );
-		$this->assertSame( [], $cancel_calls, 'An unauthorised request never reaches the canceller.' );
+		$this->assertSame( 'You do not have permission to manage subscriptions.', $result->message() );
+		$this->assertSame( 0, $this->cancelled_actions, 'An unauthorised request never reaches the cancel.' );
+		$this->assertSame( ContractStatus::ACTIVE, $this->get_contract( $contract_id )->get_status() );
 	}
 
 	public function test_cancel_logs_the_exception_and_surfaces_a_generic_message(): void {
-		$result = $this->make_controller( [ 'cancel_return' => new RuntimeException( 'storage offline' ) ] )
-			->handle_cancel( [ 'contract_id' => 100 ] );
+		$contract_id = $this->seed_contract();
+		// A cancelled-action callback that throws, on the real cancel path.
+		add_action(
+			'woocommerce_subscriptions_lite_contract_cancelled',
+			static function (): void {
+				throw new RuntimeException( 'storage offline' );
+			}
+		);
+
+		$result = ( new RowActionController() )->handle_cancel( [ 'contract_id' => $contract_id ] );
 
 		$this->assertSame( RowActionResult::ERROR, $result->type() );
 		$this->assertStringNotContainsString( 'storage offline', $result->message(), 'The internal error detail is not leaked to the merchant.' );
 		$this->assertStringContainsString( 'logs', $result->message(), 'The merchant is pointed at the logs.' );
-		$this->assertCount( 1, $this->logged, 'The failure is logged once.' );
-		$this->assertStringContainsString( 'storage offline', $this->logged[0], 'The full exception detail is logged.' );
+		$logs = $this->get_failure_logs();
+		$this->assertCount( 1, $logs, 'The failure is logged once.' );
+		$this->assertSame( sprintf( 'Admin subscription cancel failed for #%d: storage offline', $contract_id ), $logs[0], 'The full exception detail is logged.' );
+		$this->assert_lock_released( $contract_id );
 	}
 
-	public function test_cancel_rejects_a_missing_contract_id_before_the_canceller(): void {
-		$cancel_calls = [];
-		$controller   = $this->make_controller( [ 'cancel_calls' => &$cancel_calls ] );
+	public function test_cancel_rejects_a_missing_contract_id_before_the_cancel(): void {
+		$this->count_cancelled_actions();
 
-		$result = $controller->handle_cancel( [] );
+		$result = ( new RowActionController() )->handle_cancel( [] );
 
 		$this->assertSame( RowActionResult::ERROR, $result->type(), 'No contract id resolves to not found.' );
-		$this->assertSame( [], $cancel_calls, 'A missing contract id never reaches the canceller.' );
+		$this->assertSame( 'Subscription not found.', $result->message() );
+		$this->assertSame( 0, $this->cancelled_actions, 'A missing contract id never reaches the cancel.' );
+		$this->assertSame( [], $this->get_failure_logs() );
 	}
 
 	public function test_redirect_target_returns_the_origin_page_and_falls_back_to_the_list(): void {
-		$controller = $this->make_controller();
+		$controller = new RowActionController();
 		$call       = function ( $referer ) {
 			return $this->redirect_target( $referer );
 		};
@@ -320,39 +321,25 @@ final class RowActionControllerTest extends LiteIntegrationTestCase {
 		$this->support_engine_charges( 'cod' );
 		$contract_id = $this->create_contract( $this->create_customer(), [ 'payment_method' => 'cod' ] );
 		$this->hold_lock( $contract_id, 'engine_due_dispatch' );
-		$controller = new RowActionController(
-			null,
-			static fn (): bool => true,
-			function ( string $message ): void {
-				$this->logged[] = $message;
-			}
-		);
 
-		$result = $controller->handle_renew_now( [ 'contract_id' => $contract_id ] );
+		$result = ( new RowActionController() )->handle_renew_now( [ 'contract_id' => $contract_id ] );
 
 		$this->assertSame( RowActionResult::INFO, $result->type() );
 		$this->assertSame( sprintf( 'Another change to subscription #%d is in progress (renewal). Try again shortly.', $contract_id ), $result->message() );
-		$this->assertSame( [], $this->logged, 'A conflict is not an error.' );
+		$this->assertSame( [], $this->get_failure_logs(), 'A conflict is not an error.' );
 		$this->assertSame( 0, $this->charge_count() );
 		$this->assertCount( 1, Contracts::get_cycles( $contract_id ), 'Nothing renewed.' );
 	}
 
-	public function test_the_real_cancel_under_another_operations_lock_reports_the_operation_in_progress(): void {
+	public function test_cancel_under_another_operations_lock_reports_the_operation_in_progress(): void {
 		$contract_id = $this->seed_contract();
 		$this->hold_lock( $contract_id, 'renewal' );
-		$controller = new RowActionController(
-			null,
-			static fn (): bool => true,
-			function ( string $message ): void {
-				$this->logged[] = $message;
-			}
-		);
 
-		$result = $controller->handle_cancel( [ 'contract_id' => $contract_id ] );
+		$result = ( new RowActionController() )->handle_cancel( [ 'contract_id' => $contract_id ] );
 
 		$this->assertSame( RowActionResult::INFO, $result->type() );
 		$this->assertSame( sprintf( 'Another change to subscription #%d is in progress (renewal). Try again shortly.', $contract_id ), $result->message() );
-		$this->assertSame( [], $this->logged );
+		$this->assertSame( [], $this->get_failure_logs() );
 		$this->assertSame( ContractStatus::ACTIVE, $this->get_contract( $contract_id )->get_status() );
 	}
 }

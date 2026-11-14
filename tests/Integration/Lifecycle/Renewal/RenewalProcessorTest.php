@@ -17,7 +17,6 @@ use Automattic\WooCommerce\SubscriptionsEngine\Api\View\CycleView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\CycleStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\SchemaInstaller;
-use Automattic\WooCommerce\SubscriptionsLite\Admin\RowActionController;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\RowActionResult;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\HeldLocks;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\RenewalOrderBuilder;
@@ -260,7 +259,7 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 		$this->assertSame( ContractStatus::ON_HOLD, $this->get_contract( $contract_id )->get_status() );
 
 		set_post_type( $product_id, 'product' );
-		$result = ( new RowActionController( null, static fn (): bool => true ) )->handle_renew_now( [ 'contract_id' => $contract_id ] );
+		$result = $this->renew_now_as_admin( $contract_id );
 
 		$this->assertTrue( $result->is_success() );
 		$head = $this->head( $contract_id );
@@ -494,7 +493,7 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 		$this->assertNull( $head->get_order_id() );
 		$this->assertTrue( RenewalProcessor::can_renew_now( $contract ), 'Renew now is offered to recover it.' );
 
-		$result = ( new RowActionController( null, static fn (): bool => true ) )->handle_renew_now( [ 'contract_id' => $contract_id ] );
+		$result = $this->renew_now_as_admin( $contract_id );
 
 		$this->assertSame( RowActionResult::ERROR, $result->type(), 'Renew now reports the build failure, not "not renewable".' );
 		$this->assertSame( CycleStatus::FAILED, $this->head( $contract_id )->get_status() );
