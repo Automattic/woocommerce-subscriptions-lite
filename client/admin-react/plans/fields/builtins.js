@@ -20,9 +20,25 @@
  * same shape, positioning themselves by where they insert in the filtered
  * array, so injected fields render and round-trip without any change to
  * Lite core.
+ *
+ * `toPayload` runs in registry order, each step receiving the previous
+ * payload. It must be pure and must not throw on partial input: the form
+ * also calls it while rendering an unnamed new plan, on unvalidated data, to
+ * suggest the name.
+ *
+ * Pricing: the discount field creates `pricing_policy` and owns
+ * `policies[0]`. On edit it passes on the stored entries after the first, so
+ * another pricing field registers AFTER discount and replaces its own entry
+ * by key. Registering a pricing field before discount is unsupported. After
+ * the discount is cleared, `policies` is empty.
+ *
+ * Known limitation: the discount entry is found by position. When a plan has
+ * no discount, an injected field's entry can sit at `policies[0]`, and the
+ * form then treats it as the discount.
  */
 
 import { __ } from '@wordpress/i18n';
+import { NameEdit } from '../components/fields/name-field';
 import { FrequencyEdit } from '../components/fields/frequency-field';
 import { ExpirationEdit } from '../components/fields/expiration-field';
 import { DiscountEdit } from '../components/fields/discount-field';
@@ -35,6 +51,29 @@ import { formatFrequency, formatDiscount, formatExpiration } from '../format';
  */
 export function builtInFields() {
 	return [
+		{
+			id: 'name',
+			// `null` until the merchant types a name; the form shows and saves
+			// a suggested name meanwhile. A stored plan loads its own name.
+			default: { name: null },
+			Edit: NameEdit,
+			fromPlan: ( plan ) => ( { name: plan.name ?? '' } ),
+			toPayload: ( formData, payload ) =>
+				typeof formData.name === 'string'
+					? { ...payload, name: formData.name.trim() }
+					: payload,
+			// Required, as the engine requires it; an emptied name is never
+			// replaced with the suggested one.
+			validate: ( formData ) =>
+				typeof formData.name === 'string' && ! formData.name.trim()
+					? {
+							name: __(
+								'Name is required.',
+								'woocommerce-subscriptions-lite'
+							),
+					  }
+					: null,
+		},
 		{
 			id: 'frequency',
 			default: { interval: 1, period: 'month' },
@@ -102,9 +141,16 @@ export function builtInFields() {
 				};
 			},
 			toPayload: ( formData, payload, plan ) => {
-				// Seed from the stored payload, so top-level keys this field does
-				// not own survive the whole-payload write.
+				// A PATCH replaces the whole pricing_policy, so an edit starts
+				// from the stored payload: top-level keys, the keys of the first
+				// entry this field does not edit (e.g. starting_cycle), and the
+				// entries after the first, which this field does not show.
 				const existing = plan?.pricing_policy || {};
+				const [ storedEntry = {}, ...otherEntries ] = Array.isArray(
+					existing.policies
+				)
+					? existing.policies
+					: [];
 				const pricing = payload.pricing_policy || {
 					...existing,
 					policies: [],
@@ -115,28 +161,37 @@ export function builtInFields() {
 
 				// BOGO is a value-less policy, so it is written even though the
 				// value field is empty; every other type needs a value to apply.
+				// Clearing the discount removes every entry, hidden ones too:
+				// the plan then has no discount at all.
 				const isBogo = formData.pricingType === 'bogo';
-				if ( ! isBogo && formData.pricingValue === '' ) {
-					return { ...payload, pricing_policy: pricing };
-				}
-
-				const entry = isBogo
-					? { type: 'bogo' }
-					: {
-							type: formData.pricingType,
-							value: Number( formData.pricingValue ),
-					  };
-				if ( formData.pricingScope === 'first' ) {
-					entry.duration_cycles = 1;
-				} else if ( formData.pricingScope === 'n_cycles' ) {
-					entry.duration_cycles = Number( formData.durationCycles );
+				const entries = [];
+				if ( isBogo || formData.pricingValue !== '' ) {
+					const entry = {
+						...storedEntry,
+						type: formData.pricingType,
+					};
+					if ( isBogo ) {
+						delete entry.value;
+					} else {
+						entry.value = Number( formData.pricingValue );
+					}
+					if ( formData.pricingScope === 'first' ) {
+						entry.duration_cycles = 1;
+					} else if ( formData.pricingScope === 'n_cycles' ) {
+						entry.duration_cycles = Number(
+							formData.durationCycles
+						);
+					} else {
+						delete entry.duration_cycles;
+					}
+					entries.push( entry, ...otherEntries );
 				}
 
 				return {
 					...payload,
 					pricing_policy: {
 						...pricing,
-						policies: [ ...pricing.policies, entry ],
+						policies: [ ...pricing.policies, ...entries ],
 					},
 				};
 			},

@@ -4,11 +4,16 @@
  * Iterates the field registry in order; each field renders via its own Edit
  * component (built-in or injected). Field errors surface on blur, clear as
  * the value changes, and the whole form re-validates on submit.
+ *
+ * A new plan the merchant has not named yet (`name: null`) is named after the
+ * billing frequency of the payload it would save, so the suggestion follows
+ * whichever fields build the billing policy.
  */
 
 import { useMemo, useRef, useState } from '@wordpress/element';
 import { Button } from '@wordpress/components';
 import { __ } from '@wordpress/i18n';
+import { formatFrequency } from '../format';
 import {
 	formDataToPayload,
 	makeDefaultFormData,
@@ -55,6 +60,22 @@ export function PlanForm( {
 		[ errorsByField ]
 	);
 	const hasErrors = Object.keys( errors ).length > 0;
+
+	// The data the fields show and the form saves: an unnamed new plan carries
+	// its suggested name.
+	const shownData = useMemo(
+		() =>
+			formData.name === null
+				? {
+						...formData,
+						name: formatFrequency(
+							formDataToPayload( registry, formData, plan ),
+							definitions
+						),
+				  }
+				: formData,
+		[ formData, registry, plan, definitions ]
+	);
 
 	const handleChange = ( patch ) => {
 		setFormData( ( current ) => {
@@ -109,7 +130,7 @@ export function PlanForm( {
 		if ( failing ) {
 			return;
 		}
-		onSave( formDataToPayload( registry, formData, plan ), formData );
+		onSave( formDataToPayload( registry, shownData, plan ), shownData );
 	};
 
 	return (
@@ -125,7 +146,7 @@ export function PlanForm( {
 				return (
 					<Edit
 						key={ field.id }
-						data={ formData }
+						data={ shownData }
 						onChange={ handleChange }
 						onBlur={ () => validateField( field ) }
 						errors={ errors }

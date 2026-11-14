@@ -1,13 +1,14 @@
 /**
  * Registry-driven transforms between the flat form model and the engine plan
  * shape. Every function loops the field registry so injected fields round-trip
- * without any change here; engine data no field owns (e.g. one_time_fees) is
- * preserved on edit by seeding the payload from the existing plan.
+ * without any change here. Stored data the form does not edit is kept on edit
+ * by the descriptors themselves: the frequency and expiration fields seed
+ * billing_policy from the plan, and the discount field seeds pricing_policy
+ * (e.g. one_time_fees and the entries after the first). See the descriptor
+ * contract in ./fields/builtins.js.
  */
 
 import { config } from './config';
-import { normalizeDefinitions } from './definitions';
-import { formatFrequency } from './format';
 
 /**
  * Build the default form data by merging each descriptor's defaults.
@@ -51,24 +52,11 @@ export function formDataToPayload( registry, formData, plan = null ) {
 		base.status = config.defaultStatus;
 	}
 
-	const payload = registry.reduce(
+	return registry.reduce(
 		( acc, field ) =>
 			field.toPayload ? field.toPayload( formData, acc, plan ) : acc,
 		base
 	);
-
-	// There is no name input: the name is derived from the billing frequency
-	// with the same formatter as the Frequency list column, so REST keeps
-	// receiving a non-empty name. A registry field that sets a name (e.g. an
-	// injected extension field) wins over derivation.
-	if ( typeof payload.name !== 'string' || ! payload.name.trim() ) {
-		payload.name = formatFrequency(
-			payload,
-			normalizeDefinitions( config.definitions )
-		);
-	}
-
-	return payload;
 }
 
 /**

@@ -37,8 +37,8 @@ describe( 'registry transforms', () => {
 			pricingType: 'percentage',
 			pricingScope: 'all',
 		} );
-		// There are no name/description fields; the name is derived at save.
-		expect( defaults ).not.toHaveProperty( 'name' );
+		// A new plan has no name yet: the form suggests one from the frequency.
+		expect( defaults.name ).toBeNull();
 		expect( defaults ).not.toHaveProperty( 'description' );
 	} );
 
@@ -46,6 +46,7 @@ describe( 'registry transforms', () => {
 		const registry = buildFieldRegistry();
 		const formData = planToFormData( registry, samplePlan );
 		expect( formData ).toMatchObject( {
+			name: 'Monthly',
 			interval: 2,
 			period: 'month',
 			expires: true,
@@ -62,9 +63,8 @@ describe( 'registry transforms', () => {
 		const formData = planToFormData( registry, samplePlan );
 		const payload = formDataToPayload( registry, formData, samplePlan );
 
-		// The name is derived from the billing frequency (same formatter as
-		// the Frequency list column); there is no description field.
-		expect( payload.name ).toBe( '2 months' );
+		// The stored name is sent back as is, never a derived label.
+		expect( payload.name ).toBe( 'Monthly' );
 		expect( payload ).not.toHaveProperty( 'description' );
 		expect( payload.billing_policy ).toMatchObject( {
 			period: 'month',
@@ -178,18 +178,196 @@ describe( 'registry transforms', () => {
 		} );
 		expect( errors.interval ).toBeTruthy();
 		expect( errors.pricingValue ).toBeTruthy();
-		// No name field, so nothing can report a name error.
 		expect( errors.name ).toBeUndefined();
 	} );
 
-	it( 'derives the name from the billing frequency when creating', () => {
-		const registry = buildFieldRegistry();
-		const payload = formDataToPayload(
-			registry,
-			makeDefaultFormData( registry ),
-			null
+	describe( 'plan name', () => {
+		it( 'leaves an unnamed new plan for the form to name', () => {
+			// The form fills in the suggested name (see plan-form-name.test.js);
+			// the descriptor reads only its own key.
+			const registry = buildFieldRegistry();
+			const payload = formDataToPayload(
+				registry,
+				makeDefaultFormData( registry ),
+				null
+			);
+			expect( payload ).not.toHaveProperty( 'name' );
+		} );
+
+		it( 'keeps the stored name when the cadence changes', () => {
+			const registry = buildFieldRegistry();
+			const formData = {
+				...planToFormData( registry, samplePlan ),
+				interval: 1,
+				period: 'year',
+			};
+			const payload = formDataToPayload( registry, formData, samplePlan );
+			expect( payload.name ).toBe( 'Monthly' );
+		} );
+
+		it( 'sends a renamed plan with surrounding whitespace trimmed', () => {
+			const registry = buildFieldRegistry();
+			const formData = {
+				...planToFormData( registry, samplePlan ),
+				name: '  Coffee refill  ',
+			};
+			const payload = formDataToPayload( registry, formData, samplePlan );
+			expect( payload.name ).toBe( 'Coffee refill' );
+		} );
+
+		it.each( [
+			[ 'an empty string', '' ],
+			[ 'whitespace only', '   ' ],
+		] )(
+			'requires a name when it is %s, without falling back',
+			( _description, name ) => {
+				const registry = buildFieldRegistry();
+				const formData = {
+					...planToFormData( registry, samplePlan ),
+					name,
+				};
+				expect( formErrors( registry, formData ).name ).toBe(
+					'Name is required.'
+				);
+			}
 		);
-		expect( payload.name ).toBe( '1 month' );
+	} );
+
+	describe( 'pricing entry keys the form does not edit', () => {
+		const planWithEntry = ( entry, ...others ) => ( {
+			...samplePlan,
+			pricing_policy: {
+				...samplePlan.pricing_policy,
+				policies: [ entry, ...others ],
+			},
+		} );
+
+		const payloadFor = ( plan, patch = {} ) => {
+			const registry = buildFieldRegistry();
+			const formData = {
+				...planToFormData( registry, plan ),
+				...patch,
+			};
+			return formDataToPayload( registry, formData, plan ).pricing_policy
+				.policies;
+		};
+
+		it( 'keeps starting_cycle and unknown keys through an edit', () => {
+			const plan = planWithEntry( {
+				type: 'percentage',
+				value: 10,
+				starting_cycle: 3,
+				duration_cycles: 3,
+				custom_key: 'kept',
+			} );
+
+			expect(
+				payloadFor( plan, { pricingValue: 15, interval: 1 } )
+			).toEqual( [
+				{
+					type: 'percentage',
+					value: 15,
+					starting_cycle: 3,
+					duration_cycles: 3,
+					custom_key: 'kept',
+				},
+			] );
+		} );
+
+		it( 'keeps starting_cycle when the scope drops duration_cycles', () => {
+			const plan = planWithEntry( {
+				type: 'percentage',
+				value: 10,
+				starting_cycle: 2,
+				duration_cycles: 3,
+			} );
+
+			expect( payloadFor( plan, { pricingScope: 'all' } ) ).toEqual( [
+				{ type: 'percentage', value: 10, starting_cycle: 2 },
+			] );
+		} );
+
+		it( 'keeps starting_cycle and drops the value when switching to BOGO', () => {
+			const plan = planWithEntry( {
+				type: 'fixed_amount',
+				value: 5,
+				starting_cycle: 2,
+			} );
+
+			expect(
+				payloadFor( plan, { pricingType: 'bogo', pricingValue: '' } )
+			).toEqual( [ { type: 'bogo', starting_cycle: 2 } ] );
+		} );
+
+		it( 'keeps the entries after the first, which the form does not show', () => {
+			const second = {
+				type: 'fixed_amount',
+				value: 2,
+				starting_cycle: 6,
+			};
+			const plan = planWithEntry(
+				{ type: 'percentage', value: 10, duration_cycles: 3 },
+				second
+			);
+
+			expect( payloadFor( plan, { pricingValue: 20 } ) ).toEqual( [
+				{ type: 'percentage', value: 20, duration_cycles: 3 },
+				second,
+			] );
+		} );
+
+		it( 'removes every entry when the discount is cleared, and reloads with none', () => {
+			const registry = buildFieldRegistry();
+			const plan = planWithEntry(
+				{ type: 'percentage', value: 10, starting_cycle: 2 },
+				{ type: 'fixed_amount', value: 2, starting_cycle: 6 }
+			);
+			const formData = {
+				...planToFormData( registry, plan ),
+				pricingValue: '',
+			};
+			const saved = {
+				...plan,
+				...formDataToPayload( registry, formData, plan ),
+			};
+
+			expect( saved.pricing_policy.policies ).toEqual( [] );
+			expect( saved.pricing_policy.one_time_fees ).toEqual(
+				samplePlan.pricing_policy.one_time_fees
+			);
+			expect( planToFormData( registry, saved ).pricingValue ).toBe( '' );
+		} );
+
+		it( 'keeps the hidden entries across a save and reload', () => {
+			const registry = buildFieldRegistry();
+			const second = {
+				type: 'fixed_amount',
+				value: 2,
+				starting_cycle: 6,
+			};
+			const plan = planWithEntry(
+				{ type: 'percentage', value: 10, starting_cycle: 2 },
+				second
+			);
+			const saved = {
+				...plan,
+				...formDataToPayload(
+					registry,
+					{ ...planToFormData( registry, plan ), pricingValue: 20 },
+					plan
+				),
+			};
+			const resaved = formDataToPayload(
+				registry,
+				planToFormData( registry, saved ),
+				saved
+			);
+
+			expect( resaved.pricing_policy.policies ).toEqual( [
+				{ type: 'percentage', value: 20, starting_cycle: 2 },
+				second,
+			] );
+		} );
 	} );
 
 	describe( 'BOGO pricing', () => {
@@ -294,49 +472,119 @@ describe( 'registry transforms', () => {
 		} );
 	} );
 
+	describe( 'injected pricing field', () => {
+		const NAMESPACE = 'test/loyalty-entry';
+		const isLoyalty = ( entry ) => entry.source === 'loyalty';
+		const loyaltyEntry = {
+			type: 'percentage',
+			value: 5,
+			source: 'loyalty',
+		};
+		let seen;
+
+		beforeEach( () => {
+			seen = [];
+			// Registered after discount, as the contract requires. Updates its
+			// entry in place (appending only when absent), so a duplicate the
+			// discount field passed on would stay visible rather than be
+			// filtered away.
+			addFilter( PLAN_FIELDS_FILTER, NAMESPACE, ( fields ) => [
+				...fields,
+				{
+					id: 'loyalty',
+					toPayload: ( formData, payload ) => {
+						const policies = payload.pricing_policy.policies;
+						seen.push( policies );
+						return {
+							...payload,
+							pricing_policy: {
+								...payload.pricing_policy,
+								policies: policies.some( isLoyalty )
+									? policies.map( ( entry ) =>
+											isLoyalty( entry )
+												? loyaltyEntry
+												: entry
+									  )
+									: [ ...policies, loyaltyEntry ],
+							},
+						};
+					},
+				},
+			] );
+		} );
+
+		afterEach( () => {
+			removeFilter( PLAN_FIELDS_FILTER, NAMESPACE );
+		} );
+
+		it( 'sees its stored entry once, with the hidden entries, across two saves', () => {
+			const registry = buildFieldRegistry();
+			const discount = {
+				type: 'percentage',
+				value: 10,
+				duration_cycles: 3,
+			};
+			const hidden = {
+				type: 'fixed_amount',
+				value: 2,
+				starting_cycle: 6,
+			};
+			const plan = {
+				...samplePlan,
+				pricing_policy: {
+					...samplePlan.pricing_policy,
+					policies: [
+						discount,
+						hidden,
+						{ ...loyaltyEntry, value: 4 },
+					],
+				},
+			};
+			const save = ( stored ) => ( {
+				...stored,
+				...formDataToPayload(
+					registry,
+					planToFormData( registry, stored ),
+					stored
+				),
+			} );
+			const once = save( plan );
+			const twice = save( once );
+
+			const expected = [ discount, hidden, loyaltyEntry ];
+			expect( once.pricing_policy.policies ).toEqual( expected );
+			expect( twice.pricing_policy.policies ).toEqual( expected );
+			seen.forEach( ( policies ) =>
+				expect( policies.filter( isLoyalty ) ).toHaveLength( 1 )
+			);
+		} );
+	} );
+
 	describe( 'injected name field', () => {
 		const NAMESPACE = 'test/custom-name';
 
-		const injectName = ( name ) => {
+		afterEach( () => {
+			removeFilter( PLAN_FIELDS_FILTER, NAMESPACE );
+		} );
+
+		it( 'wins over the built-in name when registered after it', () => {
 			addFilter( PLAN_FIELDS_FILTER, NAMESPACE, ( fields ) => [
 				...fields,
 				{
 					id: 'customName',
 					toPayload: ( formData, payload ) => ( {
 						...payload,
-						name,
+						name: 'Custom name',
 					} ),
 				},
 			] );
-		};
-
-		const buildPayload = () => {
 			const registry = buildFieldRegistry();
-			return formDataToPayload(
+			const payload = formDataToPayload(
 				registry,
-				makeDefaultFormData( registry ),
-				null
+				planToFormData( registry, samplePlan ),
+				samplePlan
 			);
-		};
-
-		afterEach( () => {
-			removeFilter( PLAN_FIELDS_FILTER, NAMESPACE );
+			expect( payload.name ).toBe( 'Custom name' );
 		} );
-
-		it( 'wins over the derived frequency name', () => {
-			injectName( 'Custom name' );
-			expect( buildPayload().name ).toBe( 'Custom name' );
-		} );
-
-		it.each( [
-			[ 'an empty string', '' ],
-			[ 'whitespace only', '   ' ],
-		] )(
-			'falls back to the derived name when the injected name is %s',
-			( _description, name ) => {
-				injectName( name );
-				expect( buildPayload().name ).toBe( '1 month' );
-			}
-		);
 	} );
 } );
