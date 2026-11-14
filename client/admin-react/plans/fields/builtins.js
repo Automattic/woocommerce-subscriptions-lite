@@ -22,9 +22,19 @@
  * Lite core.
  *
  * `toPayload` runs in registry order, each step receiving the previous
- * payload. On edit, `payload.pricing_policy.policies` already carries the
- * stored entries the discount field does not edit, so a later field replaces
- * its own entry by key and never appends.
+ * payload. It must be pure and must not throw on partial input: the form
+ * also calls it while rendering an unnamed new plan, on unvalidated data, to
+ * suggest the name.
+ *
+ * Pricing: the discount field creates `pricing_policy` and owns
+ * `policies[0]`. On edit it passes on the stored entries after the first, so
+ * another pricing field registers AFTER discount and replaces its own entry
+ * by key. Registering a pricing field before discount is unsupported. After
+ * the discount is cleared, `policies` is empty.
+ *
+ * Known limitation: the discount entry is found by position. When a plan has
+ * no discount, an injected field's entry can sit at `policies[0]`, and the
+ * form then treats it as the discount.
  */
 
 import { __ } from '@wordpress/i18n';

@@ -474,30 +474,41 @@ describe( 'registry transforms', () => {
 
 	describe( 'injected pricing field', () => {
 		const NAMESPACE = 'test/loyalty-entry';
+		const isLoyalty = ( entry ) => entry.source === 'loyalty';
 		const loyaltyEntry = {
 			type: 'percentage',
 			value: 5,
 			source: 'loyalty',
 		};
+		let seen;
 
 		beforeEach( () => {
-			// Follows the descriptor contract: replaces its own entry by key.
+			seen = [];
+			// Registered after discount, as the contract requires. Updates its
+			// entry in place (appending only when absent), so a duplicate the
+			// discount field passed on would stay visible rather than be
+			// filtered away.
 			addFilter( PLAN_FIELDS_FILTER, NAMESPACE, ( fields ) => [
 				...fields,
 				{
 					id: 'loyalty',
-					toPayload: ( formData, payload ) => ( {
-						...payload,
-						pricing_policy: {
-							...payload.pricing_policy,
-							policies: [
-								...payload.pricing_policy.policies.filter(
-									( entry ) => entry.source !== 'loyalty'
-								),
-								loyaltyEntry,
-							],
-						},
-					} ),
+					toPayload: ( formData, payload ) => {
+						const policies = payload.pricing_policy.policies;
+						seen.push( policies );
+						return {
+							...payload,
+							pricing_policy: {
+								...payload.pricing_policy,
+								policies: policies.some( isLoyalty )
+									? policies.map( ( entry ) =>
+											isLoyalty( entry )
+												? loyaltyEntry
+												: entry
+									  )
+									: [ ...policies, loyaltyEntry ],
+							},
+						};
+					},
 				},
 			] );
 		} );
@@ -506,25 +517,46 @@ describe( 'registry transforms', () => {
 			removeFilter( PLAN_FIELDS_FILTER, NAMESPACE );
 		} );
 
-		it( 'is not duplicated across two saves', () => {
+		it( 'sees its stored entry once, with the hidden entries, across two saves', () => {
 			const registry = buildFieldRegistry();
-			const save = ( plan ) => ( {
-				...plan,
+			const discount = {
+				type: 'percentage',
+				value: 10,
+				duration_cycles: 3,
+			};
+			const hidden = {
+				type: 'fixed_amount',
+				value: 2,
+				starting_cycle: 6,
+			};
+			const plan = {
+				...samplePlan,
+				pricing_policy: {
+					...samplePlan.pricing_policy,
+					policies: [
+						discount,
+						hidden,
+						{ ...loyaltyEntry, value: 4 },
+					],
+				},
+			};
+			const save = ( stored ) => ( {
+				...stored,
 				...formDataToPayload(
 					registry,
-					planToFormData( registry, plan ),
-					plan
+					planToFormData( registry, stored ),
+					stored
 				),
 			} );
-			const once = save( samplePlan );
+			const once = save( plan );
 			const twice = save( once );
 
-			const expected = [
-				{ type: 'percentage', value: 10, duration_cycles: 3 },
-				loyaltyEntry,
-			];
+			const expected = [ discount, hidden, loyaltyEntry ];
 			expect( once.pricing_policy.policies ).toEqual( expected );
 			expect( twice.pricing_policy.policies ).toEqual( expected );
+			seen.forEach( ( policies ) =>
+				expect( policies.filter( isLoyalty ) ).toHaveLength( 1 )
+			);
 		} );
 	} );
 

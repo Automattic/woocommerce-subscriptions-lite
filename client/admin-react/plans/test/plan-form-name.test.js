@@ -64,12 +64,12 @@ describe( 'PlanForm name field', () => {
 		container.remove();
 	} );
 
-	const renderForm = ( plan = null ) => {
+	const renderForm = ( plan = null, fields = registry ) => {
 		act( () => {
 			root = createRoot( container );
 			root.render(
 				<PlanForm
-					registry={ registry }
+					registry={ fields }
 					definitions={ definitions }
 					plan={ plan }
 					onCancel={ () => {} }
@@ -163,6 +163,49 @@ describe( 'PlanForm name field', () => {
 
 		submit();
 		expect( onSave.mock.calls[ 0 ][ 0 ].name ).toBe( 'Bi-monthly box' );
+	} );
+
+	it( 'suggests from the saved billing policy, not the frequency form keys', () => {
+		// A frequency field with its own form keys that writes the same
+		// billing_policy shape.
+		const customFrequency = {
+			id: 'frequency',
+			default: { every: 2, unit: 'week' },
+			Edit: ( { data, onChange } ) => (
+				<>
+					<label htmlFor="custom-every">Every</label>
+					<input
+						id="custom-every"
+						type="number"
+						value={ data.every }
+						onChange={ ( event ) =>
+							onChange( { every: Number( event.target.value ) } )
+						}
+					/>
+				</>
+			),
+			toPayload: ( formData, payload ) => ( {
+				...payload,
+				billing_policy: {
+					...( payload.billing_policy || {} ),
+					interval: formData.every,
+					period: formData.unit,
+				},
+			} ),
+		};
+		renderForm(
+			null,
+			registry.map( ( field ) =>
+				field.id === 'frequency' ? customFrequency : field
+			)
+		);
+		expect( nameInput().value ).toBe( '2 weeks' );
+
+		change( inputByLabel( 'Every' ), '5' );
+		expect( nameInput().value ).toBe( '5 weeks' );
+
+		submit();
+		expect( onSave.mock.calls[ 0 ][ 0 ].name ).toBe( '5 weeks' );
 	} );
 
 	it( 'marks the name as required for assistive technology', () => {

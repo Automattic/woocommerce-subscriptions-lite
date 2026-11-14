@@ -1,8 +1,11 @@
 /**
  * Registry-driven transforms between the flat form model and the engine plan
  * shape. Every function loops the field registry so injected fields round-trip
- * without any change here; engine data no field owns (e.g. one_time_fees) is
- * preserved on edit by seeding the payload from the existing plan.
+ * without any change here. Stored data the form does not edit is kept on edit
+ * by the descriptors themselves: the frequency and expiration fields seed
+ * billing_policy from the plan, and the discount field seeds pricing_policy
+ * (e.g. one_time_fees and the entries after the first). See the descriptor
+ * contract in ./fields/builtins.js.
  */
 
 import { config } from './config';
