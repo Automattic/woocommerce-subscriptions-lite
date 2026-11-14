@@ -20,6 +20,7 @@ use RuntimeException;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\ContractLock;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\ContractLockedException;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
+use Automattic\WooCommerce\SubscriptionsLite\Package;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -47,9 +48,9 @@ final class HoldAnchor {
 		$contract_id = $lock->get_contract_id();
 		try {
 			if ( null === $next_payment_gmt ) {
-				Contracts::delete_meta( $contract_id, self::META_KEY, null, $lock );
+				Contracts::delete_meta( $contract_id, Package::EXTENSION_SLUG, self::META_KEY, null, $lock );
 			} else {
-				Contracts::update_meta( $contract_id, self::META_KEY, $next_payment_gmt, null, $lock );
+				Contracts::update_meta( $contract_id, Package::EXTENSION_SLUG, self::META_KEY, $next_payment_gmt, null, $lock );
 			}
 		} catch ( ContractLockedException $e ) {
 			throw $e;
@@ -100,7 +101,7 @@ final class HoldAnchor {
 	public static function clear( ContractLock $lock ): void {
 		$contract_id = $lock->get_contract_id();
 		try {
-			Contracts::delete_meta( $contract_id, self::META_KEY, null, $lock );
+			Contracts::delete_meta( $contract_id, Package::EXTENSION_SLUG, self::META_KEY, null, $lock );
 		} catch ( RuntimeException $e ) {
 			wc_get_logger()->warning(
 				sprintf( 'HoldAnchor: the hold anchor of contract %d could not be cleared: %s', $contract_id, $e->getMessage() ),

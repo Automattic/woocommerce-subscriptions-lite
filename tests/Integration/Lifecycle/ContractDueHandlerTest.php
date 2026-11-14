@@ -16,6 +16,7 @@ use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\CycleStatus;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\ContractDueHandler;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\HeldLocks;
+use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
 use DateTimeImmutable;
 use DateTimeZone;
@@ -98,7 +99,13 @@ final class ContractDueHandlerTest extends LiteIntegrationTestCase {
 			'woocommerce_subscriptions_lite_renewal_paid',
 			static function ( ContractView $contract ) use ( &$refused ): void {
 				try {
-					Contracts::update( $contract->get_id(), [ 'end_gmt' => '2099-12-31 00:00:00' ] );
+					Contracts::update(
+						$contract->get_id(),
+						[
+							'extension_slug' => Package::EXTENSION_SLUG,
+							'end_gmt'        => '2099-12-31 00:00:00',
+						]
+					);
 				} catch ( ContractLockedException $e ) {
 					$refused[] = $e->get_operation();
 				}

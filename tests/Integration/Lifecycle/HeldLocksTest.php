@@ -12,6 +12,7 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Lifecycle;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\ContractLockedException;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\HeldLocks;
+use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
 
 /**
@@ -94,7 +95,13 @@ final class HeldLocksTest extends LiteIntegrationTestCase {
 		$this->capture_log();
 
 		try {
-			Contracts::update( $contract_id, [ 'next_payment_gmt' => '2099-03-01 00:00:00' ] );
+			Contracts::update(
+				$contract_id,
+				[
+					'extension_slug'   => Package::EXTENSION_SLUG,
+					'next_payment_gmt' => '2099-03-01 00:00:00',
+				]
+			);
 			$this->fail( 'Expected the unlocked write to be refused.' );
 		} catch ( ContractLockedException $e ) {
 			$this->assert_lock_conflict( HeldLocks::get_refused_conflict( $e ), $contract_id, 'cancel' );
@@ -105,9 +112,18 @@ final class HeldLocksTest extends LiteIntegrationTestCase {
 		$this->assertTrue( $this->has_logged( sprintf( 'a write to contract %d was refused mid-flow; another operation (cancel)', $contract_id ) ) );
 	}
 
+	public function test_acquire_leaves_a_contract_of_another_extension_unlocked(): void {
+		$foreign_id = $this->seed_contract( [ 'extension_slug' => 'another-extension' ] );
+
+		$this->assertNull( HeldLocks::acquire( $foreign_id, 'hold' ) );
+		$this->assertNull( HeldLocks::get( $foreign_id ) );
+		$this->assertNull( $this->get_contract( $foreign_id )->get_lock_state(), 'The foreign contract is never locked.' );
+		$this->assertNull( HeldLocks::get_conflict( $foreign_id ) );
+	}
+
 	public function test_a_missing_or_foreign_contract_is_no_conflict(): void {
 		$foreign_id = $this->seed_contract( [ 'extension_slug' => 'another-extension' ] );
-		$lock       = $this->hold_lock( $foreign_id, 'other' );
+		$lock       = $this->hold_lock( $foreign_id, 'other', 'another-extension' );
 
 		$this->assertNull( HeldLocks::get_conflict( 999999 ) );
 		$this->assertNull( HeldLocks::get_conflict( $foreign_id ) );
@@ -119,12 +135,25 @@ final class HeldLocksTest extends LiteIntegrationTestCase {
 		$lock        = $this->hold_lock( $contract_id, 'hold' );
 
 		try {
-			$updated = Contracts::update( $contract_id, [ 'next_payment_gmt' => '2099-02-01 00:00:00' ], $lock );
+			$updated = Contracts::update(
+				$contract_id,
+				[
+					'extension_slug'   => Package::EXTENSION_SLUG,
+					'next_payment_gmt' => '2099-02-01 00:00:00',
+				],
+				$lock
+			);
 			$this->assertSame( '2099-02-01 00:00:00', $updated->get_next_payment_gmt() );
 			$this->assertSame( '2099-02-01 00:00:00', $this->get_contract( $contract_id )->get_next_payment_gmt(), 'The locked write landed.' );
 
 			$this->expectException( ContractLockedException::class );
-			Contracts::update( $contract_id, [ 'next_payment_gmt' => '2099-03-01 00:00:00' ] );
+			Contracts::update(
+				$contract_id,
+				[
+					'extension_slug'   => Package::EXTENSION_SLUG,
+					'next_payment_gmt' => '2099-03-01 00:00:00',
+				]
+			);
 		} finally {
 			$lock->release();
 		}

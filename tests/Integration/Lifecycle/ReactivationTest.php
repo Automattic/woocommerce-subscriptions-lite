@@ -22,6 +22,7 @@ use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Hold;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\HoldAnchor;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\LifecycleNotAllowedException;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Reactivation;
+use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
 
 /**
@@ -51,7 +52,7 @@ final class ReactivationTest extends LiteIntegrationTestCase {
 			]
 		);
 		if ( null !== $anchor ) {
-			Contracts::update_meta( $contract_id, HoldAnchor::META_KEY, $anchor );
+			Contracts::update_meta( $contract_id, Package::EXTENSION_SLUG, HoldAnchor::META_KEY, $anchor );
 		}
 
 		return $contract_id;
@@ -366,6 +367,7 @@ final class ReactivationTest extends LiteIntegrationTestCase {
 		Contracts::update(
 			$contract_id,
 			[
+				'extension_slug'   => Package::EXTENSION_SLUG,
 				'status'           => ContractStatus::CANCELLED,
 				'next_payment_gmt' => null,
 			],

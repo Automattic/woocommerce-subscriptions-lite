@@ -66,7 +66,7 @@ final class Cancellation {
 
 		try {
 			$contract = Contracts::get( $contract_id );
-			if ( null === $contract || Package::EXTENSION_SLUG !== $contract->get_extension_slug() ) {
+			if ( null === $contract ) {
 				return null;
 			}
 
@@ -80,6 +80,7 @@ final class Cancellation {
 				$cancelled_contract = Contracts::update(
 					$contract_id,
 					[
+						'extension_slug'   => Package::EXTENSION_SLUG,
 						'status'           => ContractStatus::CANCELLED,
 						'next_payment_gmt' => null,
 					],
@@ -95,7 +96,8 @@ final class Cancellation {
 			/**
 			 * Fires after a contract is cancelled, also for a repeated cancel. Runs under the
 			 * contract lock: a callback writes the contract with `HeldLocks::get( $id )`, since
-			 * an unlocked write is refused.
+			 * an unlocked write is refused, and passes `$contract->get_extension_slug()` as the
+			 * owner; a non-owner slug throws.
 			 *
 			 * @param ContractView $cancelled_contract The cancelled contract.
 			 */
@@ -132,7 +134,7 @@ final class Cancellation {
 
 		try {
 			$contract = Contracts::get( $contract_id );
-			if ( null === $contract || Package::EXTENSION_SLUG !== $contract->get_extension_slug() ) {
+			if ( null === $contract ) {
 				return null;
 			}
 
@@ -143,7 +145,7 @@ final class Cancellation {
 
 			$pending_contract = $contract;
 			if ( ContractStatus::PENDING_CANCELLATION !== $status ) {
-				$pending_contract = Contracts::update( $contract_id, $this->get_period_end_fields( $contract ), $lock );
+				$pending_contract = Contracts::update( $contract_id, [ 'extension_slug' => Package::EXTENSION_SLUG ] + $this->get_period_end_fields( $contract ), $lock );
 				if ( null === $pending_contract ) {
 					return null;
 				}
@@ -154,7 +156,8 @@ final class Cancellation {
 			/**
 			 * Fires after a contract is set to end with its current period, also for a repeat.
 			 * Runs under the contract lock: a callback writes the contract with
-			 * `HeldLocks::get( $id )`, since an unlocked write is refused.
+			 * `HeldLocks::get( $id )`, since an unlocked write is refused, and passes
+			 * `$contract->get_extension_slug()` as the owner; a non-owner slug throws.
 			 *
 			 * @param ContractView $pending_contract The pending-cancellation contract.
 			 */

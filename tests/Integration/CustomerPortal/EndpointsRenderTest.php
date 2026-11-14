@@ -75,7 +75,13 @@ final class EndpointsRenderTest extends LiteIntegrationTestCase {
 	 * @param string|null $next_payment_gmt GMT next payment date, or null to clear.
 	 */
 	private function set_next_payment( int $contract_id, ?string $next_payment_gmt ): void {
-		Contracts::update( $contract_id, [ 'next_payment_gmt' => $next_payment_gmt ] );
+		Contracts::update(
+			$contract_id,
+			[
+				'extension_slug'   => Package::EXTENSION_SLUG,
+				'next_payment_gmt' => $next_payment_gmt,
+			]
+		);
 	}
 
 	public function test_list_renders_every_status_with_badges(): void {

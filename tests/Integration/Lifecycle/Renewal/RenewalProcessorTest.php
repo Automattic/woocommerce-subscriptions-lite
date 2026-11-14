@@ -23,6 +23,7 @@ use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\HeldLocks;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\RenewalOrderBuilder;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\RenewalProcessor;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\Settlement;
+use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
 use DateTimeImmutable;
 use DateTimeZone;
@@ -298,8 +299,9 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 					Contracts::transition_cycle(
 						$head->get_id(),
 						[
-							'from_status' => CycleStatus::PENDING,
-							'to_status'   => CycleStatus::CANCELLED,
+							'extension_slug' => Package::EXTENSION_SLUG,
+							'from_status'    => CycleStatus::PENDING,
+							'to_status'      => CycleStatus::CANCELLED,
 						],
 						HeldLocks::get( $contract_id )
 					);
@@ -333,6 +335,7 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 					Contracts::add_cycle(
 						$contract_id,
 						[
+							'extension_slug' => Package::EXTENSION_SLUG,
 							'status'         => CycleStatus::PENDING,
 							'count'          => 2,
 							'starts_at_gmt'  => $this->due_at,
@@ -459,7 +462,13 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 		$contract_id = $this->make_contract();
 		$this->capture_log();
 		// WooCommerce does not know the contract's currency, so setting it on the order throws.
-		Contracts::update( $contract_id, [ 'currency' => 'ZZZ' ] );
+		Contracts::update(
+			$contract_id,
+			[
+				'extension_slug' => Package::EXTENSION_SLUG,
+				'currency'       => 'ZZZ',
+			]
+		);
 		$draft_id = 0;
 		add_action(
 			'woocommerce_after_order_object_save',
@@ -495,7 +504,13 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 	public function test_a_contract_without_a_plan_is_parked(): void {
 		$this->support_engine_charges( 'cod' );
 		$contract_id = $this->make_contract();
-		Contracts::update( $contract_id, [ 'selling_plan_id' => 999999 ] );
+		Contracts::update(
+			$contract_id,
+			[
+				'extension_slug'  => Package::EXTENSION_SLUG,
+				'selling_plan_id' => 999999,
+			]
+		);
 		$this->capture_log();
 
 		$this->assertNull( $this->renew( $contract_id ) );
@@ -532,7 +547,13 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 	public function test_a_free_renewal_is_completed_without_a_charge(): void {
 		$this->support_engine_charges( 'cod' );
 		$contract_id = $this->make_contract();
-		Contracts::update( $contract_id, [ 'billing_total' => '0' ] );
+		Contracts::update(
+			$contract_id,
+			[
+				'extension_slug' => Package::EXTENSION_SLUG,
+				'billing_total'  => '0',
+			]
+		);
 
 		$order = $this->renew( $contract_id );
 
@@ -642,7 +663,7 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 
 	public function test_renew_now_on_another_extensions_locked_contract_is_not_a_conflict(): void {
 		$foreign = $this->seed_contract( [ 'extension_slug' => 'another-extension' ] );
-		$lock    = $this->hold_lock( $foreign, 'foreign' );
+		$lock    = $this->hold_lock( $foreign, 'foreign', 'another-extension' );
 
 		$this->assertNull( ( new RenewalProcessor() )->renew_now( $foreign ), 'Not a lock conflict: not Lite\'s contract.' );
 		$this->assertSame( 'foreign', $this->get_contract( $foreign )->get_lock_state()['operation'] ?? null );
@@ -769,8 +790,9 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 					Contracts::transition_cycle(
 						$head->get_id(),
 						[
-							'from_status' => CycleStatus::PENDING,
-							'to_status'   => CycleStatus::CANCELLED,
+							'extension_slug' => Package::EXTENSION_SLUG,
+							'from_status'    => CycleStatus::PENDING,
+							'to_status'      => CycleStatus::CANCELLED,
 						],
 						HeldLocks::get( $contract_id )
 					);

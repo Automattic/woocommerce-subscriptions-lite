@@ -19,6 +19,7 @@ use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Cancellation;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Hold;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\HoldAnchor;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\LifecycleNotAllowedException;
+use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
 
 /**
@@ -118,7 +119,7 @@ final class CancellationTest extends LiteIntegrationTestCase {
 
 	public function test_cancel_at_period_end_ignores_a_malformed_hold_anchor(): void {
 		$contract_id = $this->seed_contract( [ 'status' => ContractStatus::ON_HOLD ] );
-		Contracts::update_meta( $contract_id, HoldAnchor::META_KEY, 'not-a-date' );
+		Contracts::update_meta( $contract_id, Package::EXTENSION_SLUG, HoldAnchor::META_KEY, 'not-a-date' );
 
 		( new Cancellation() )->cancel_at_period_end( $contract_id );
 
@@ -135,7 +136,7 @@ final class CancellationTest extends LiteIntegrationTestCase {
 				'next_payment_gmt' => null,
 			]
 		);
-		Contracts::update_meta( $contract_id, HoldAnchor::META_KEY, 'not-a-date' );
+		Contracts::update_meta( $contract_id, Package::EXTENSION_SLUG, HoldAnchor::META_KEY, 'not-a-date' );
 
 		( new Cancellation() )->cancel_at_period_end( $contract_id );
 

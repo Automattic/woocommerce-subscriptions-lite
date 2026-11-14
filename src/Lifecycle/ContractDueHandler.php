@@ -64,7 +64,14 @@ final class ContractDueHandler {
 					'contract_id' => $contract_id,
 				]
 			);
-			Contracts::update( $contract_id, [ 'next_payment_gmt' => null ], $lock );
+			Contracts::update(
+				$contract_id,
+				[
+					'extension_slug'   => Package::EXTENSION_SLUG,
+					'next_payment_gmt' => null,
+				],
+				$lock
+			);
 		} catch ( Throwable $e ) {
 			wc_get_logger()->error(
 				sprintf( 'ContractDueHandler: renewing contract %d failed: %s', $contract_id, $e->getMessage() ),

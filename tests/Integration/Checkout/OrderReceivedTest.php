@@ -17,6 +17,7 @@ use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\PlanStatus;
 use Automattic\WooCommerce\SubscriptionsLite\Checkout\ContractCreationHandler;
 use Automattic\WooCommerce\SubscriptionsLite\Checkout\OrderReceived;
+use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
 
 /**
@@ -63,7 +64,14 @@ final class OrderReceivedTest extends LiteIntegrationTestCase {
 	public function test_shows_no_cadence_for_a_plan_owned_by_another_extension(): void {
 		$contract_id = $this->create_contract( $this->create_customer() );
 		$foreign     = $this->make_plan( 'week', 1, null, [ 'extension_slug' => 'other-extension' ] );
-		$this->assertNotNull( Contracts::update( $contract_id, [ 'selling_plan_id' => $foreign->get_id() ] ) );
+		$updated     = Contracts::update(
+			$contract_id,
+			[
+				'extension_slug'  => Package::EXTENSION_SLUG,
+				'selling_plan_id' => $foreign->get_id(),
+			]
+		);
+		$this->assertNotNull( $updated );
 
 		$html = $this->render( (int) Contracts::get( $contract_id )->get_origin_order_id() );
 
@@ -95,7 +103,13 @@ final class OrderReceivedTest extends LiteIntegrationTestCase {
 	public function test_renders_nothing_for_a_contract_owned_by_another_customer(): void {
 		$contract_id = $this->create_contract( $this->create_customer() );
 		$order_id    = (int) Contracts::get( $contract_id )->get_origin_order_id();
-		Contracts::update( $contract_id, [ 'customer_id' => $this->create_customer() ] );
+		Contracts::update(
+			$contract_id,
+			[
+				'extension_slug' => Package::EXTENSION_SLUG,
+				'customer_id'    => $this->create_customer(),
+			]
+		);
 
 		$this->assertSame( '', trim( $this->render( $order_id ) ) );
 	}
@@ -103,7 +117,13 @@ final class OrderReceivedTest extends LiteIntegrationTestCase {
 	public function test_renders_nothing_for_a_draft(): void {
 		$contract_id = $this->create_contract( $this->create_customer() );
 		$order_id    = (int) Contracts::get( $contract_id )->get_origin_order_id();
-		Contracts::update( $contract_id, [ 'status' => 'draft' ] );
+		Contracts::update(
+			$contract_id,
+			[
+				'extension_slug' => Package::EXTENSION_SLUG,
+				'status'         => 'draft',
+			]
+		);
 
 		$this->assertSame( '', trim( $this->render( $order_id ) ) );
 	}

@@ -425,10 +425,11 @@ final class Settlement {
 			$billed = Contracts::transition_cycle(
 				$cycle->get_id(),
 				[
-					'from_status' => $cycle->get_status(),
-					'to_status'   => CycleStatus::BILLED,
-					'order_id'    => $order->get_id(),
-					'reason'      => null,
+					'extension_slug' => Package::EXTENSION_SLUG,
+					'from_status'    => $cycle->get_status(),
+					'to_status'      => CycleStatus::BILLED,
+					'order_id'       => $order->get_id(),
+					'reason'         => null,
 				],
 				$lock
 			);
@@ -447,8 +448,9 @@ final class Settlement {
 		/**
 		 * Fires after a Lite renewal order was paid and its cycle billed. Delivered at least
 		 * once: completing a cut-short settlement fires it again. Runs under the contract lock:
-		 * a callback writes the contract with `HeldLocks::get( $id )`, since an unlocked write
-		 * is refused.
+		 * a callback writes the contract or the cycle with `HeldLocks::get( $id )`, since an
+		 * unlocked write is refused, and passes `$contract->get_extension_slug()` as the owner;
+		 * a non-owner slug throws.
 		 *
 		 * @param ContractView $contract The contract after the payment was recorded.
 		 * @param CycleView    $cycle    The billed cycle.
@@ -475,7 +477,14 @@ final class Settlement {
 		$status       = $contract->get_status();
 
 		if ( ! in_array( $status, [ ContractStatus::ACTIVE, ContractStatus::ON_HOLD ], true ) ) {
-			Contracts::update( $contract_id, [ 'last_payment_gmt' => $last_payment ], $lock );
+			Contracts::update(
+				$contract_id,
+				[
+					'extension_slug'   => Package::EXTENSION_SLUG,
+					'last_payment_gmt' => $last_payment,
+				],
+				$lock
+			);
 			return;
 		}
 
@@ -489,13 +498,21 @@ final class Settlement {
 			if ( null !== $next ) {
 				HoldAnchor::store( $lock, $next->format( 'Y-m-d H:i:s' ) );
 			}
-			Contracts::update( $contract_id, [ 'last_payment_gmt' => $last_payment ], $lock );
+			Contracts::update(
+				$contract_id,
+				[
+					'extension_slug'   => Package::EXTENSION_SLUG,
+					'last_payment_gmt' => $last_payment,
+				],
+				$lock
+			);
 			return;
 		}
 
 		Contracts::update(
 			$contract_id,
 			[
+				'extension_slug'   => Package::EXTENSION_SLUG,
 				'status'           => ContractStatus::ACTIVE,
 				'next_payment_gmt' => $next,
 				'last_payment_gmt' => $last_payment,
@@ -575,8 +592,9 @@ final class Settlement {
 
 		/**
 		 * Fires after a Lite renewal order failed and its cycle was marked failed. Runs under
-		 * the contract lock: a callback writes the contract with `HeldLocks::get( $id )`, since
-		 * an unlocked write is refused.
+		 * the contract lock: a callback writes the contract or the cycle with
+		 * `HeldLocks::get( $id )`, since an unlocked write is refused, and passes
+		 * `$contract->get_extension_slug()` as the owner; a non-owner slug throws.
 		 *
 		 * @param ContractView $contract The contract after the failure was recorded.
 		 * @param CycleView    $cycle    The failed cycle.
@@ -602,13 +620,21 @@ final class Settlement {
 		$processing = Contracts::transition_cycle(
 			$cycle->get_id(),
 			[
-				'from_status' => CycleStatus::PENDING,
-				'to_status'   => CycleStatus::PROCESSING,
+				'extension_slug' => Package::EXTENSION_SLUG,
+				'from_status'    => CycleStatus::PENDING,
+				'to_status'      => CycleStatus::PROCESSING,
 			],
 			$lock
 		);
 		if ( $processing ) {
-			Contracts::update( $contract->get_id(), [ 'next_payment_gmt' => null ], $lock );
+			Contracts::update(
+				$contract->get_id(),
+				[
+					'extension_slug'   => Package::EXTENSION_SLUG,
+					'next_payment_gmt' => null,
+				],
+				$lock
+			);
 		}
 	}
 
@@ -646,9 +672,10 @@ final class Settlement {
 		return Contracts::transition_cycle(
 			$cycle->get_id(),
 			[
-				'from_status' => $cycle->get_status(),
-				'to_status'   => CycleStatus::FAILED,
-				'reason'      => $reason,
+				'extension_slug' => Package::EXTENSION_SLUG,
+				'from_status'    => $cycle->get_status(),
+				'to_status'      => CycleStatus::FAILED,
+				'reason'         => $reason,
 			],
 			$lock
 		);
@@ -694,7 +721,7 @@ final class Settlement {
 
 		try {
 			$contract = Contracts::get( $contract_id );
-			if ( null === $contract || Package::EXTENSION_SLUG !== $contract->get_extension_slug() ) {
+			if ( null === $contract ) {
 				return null;
 			}
 
@@ -726,9 +753,10 @@ final class Settlement {
 				$relinked = Contracts::transition_cycle(
 					$cycle_id,
 					[
-						'from_status' => $cycle->get_status(),
-						'to_status'   => $cycle->get_status(),
-						'order_id'    => $order->get_id(),
+						'extension_slug' => Package::EXTENSION_SLUG,
+						'from_status'    => $cycle->get_status(),
+						'to_status'      => $cycle->get_status(),
+						'order_id'       => $order->get_id(),
 					],
 					$lock
 				);

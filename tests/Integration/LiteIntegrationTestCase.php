@@ -445,7 +445,13 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 	 * @param string $status      A registered contract status.
 	 */
 	protected function force_contract_status( int $contract_id, string $status ): void {
-		Contracts::update( $contract_id, [ 'status' => $status ] );
+		Contracts::update(
+			$contract_id,
+			[
+				'extension_slug' => Package::EXTENSION_SLUG,
+				'status'         => $status,
+			]
+		);
 	}
 
 	/**
@@ -641,11 +647,12 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 	/**
 	 * Acquire the contract's lock in the test, as a concurrent operation would hold it.
 	 *
-	 * @param int    $contract_id Contract id.
-	 * @param string $operation   Operation label.
+	 * @param int    $contract_id    Contract id.
+	 * @param string $operation      Operation label.
+	 * @param string $extension_slug The contract's owner.
 	 */
-	protected function hold_lock( int $contract_id, string $operation = 'test' ): ContractLock {
-		$lock = Contracts::lock( $contract_id, $operation );
+	protected function hold_lock( int $contract_id, string $operation = 'test', string $extension_slug = Package::EXTENSION_SLUG ): ContractLock {
+		$lock = Contracts::lock( $contract_id, $extension_slug, $operation );
 		$this->assertNotNull( $lock, 'The lock is free.' );
 
 		return $lock;
@@ -654,13 +661,14 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 	/**
 	 * Append a cycle under a test lock on the contract, released right after.
 	 *
-	 * @param int                  $contract_id Contract id.
-	 * @param array<string, mixed> $args        Cycle fields.
+	 * @param int                  $contract_id    Contract id.
+	 * @param array<string, mixed> $args           Cycle fields.
+	 * @param string               $extension_slug The contract's owner.
 	 */
-	protected function add_cycle_with_lock( int $contract_id, array $args ): ?CycleView {
-		$lock = $this->hold_lock( $contract_id );
+	protected function add_cycle_with_lock( int $contract_id, array $args, string $extension_slug = Package::EXTENSION_SLUG ): ?CycleView {
+		$lock = $this->hold_lock( $contract_id, 'test', $extension_slug );
 		try {
-			return Contracts::add_cycle( $contract_id, $args, $lock );
+			return Contracts::add_cycle( $contract_id, [ 'extension_slug' => $extension_slug ] + $args, $lock );
 		} finally {
 			$lock->release();
 		}
@@ -669,14 +677,15 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 	/**
 	 * Transition a cycle under a test lock on its contract, released right after.
 	 *
-	 * @param int                  $contract_id The cycle's contract id.
-	 * @param int                  $cycle_id    Cycle id.
-	 * @param array<string, mixed> $args        Transition arguments.
+	 * @param int                  $contract_id    The cycle's contract id.
+	 * @param int                  $cycle_id       Cycle id.
+	 * @param array<string, mixed> $args           Transition arguments.
+	 * @param string               $extension_slug The contract's owner.
 	 */
-	protected function transition_cycle_with_lock( int $contract_id, int $cycle_id, array $args ): bool {
-		$lock = $this->hold_lock( $contract_id );
+	protected function transition_cycle_with_lock( int $contract_id, int $cycle_id, array $args, string $extension_slug = Package::EXTENSION_SLUG ): bool {
+		$lock = $this->hold_lock( $contract_id, 'test', $extension_slug );
 		try {
-			return Contracts::transition_cycle( $cycle_id, $args, $lock );
+			return Contracts::transition_cycle( $cycle_id, [ 'extension_slug' => $extension_slug ] + $args, $lock );
 		} finally {
 			$lock->release();
 		}
@@ -755,11 +764,11 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 	 */
 	protected function store_hold_anchor( int $contract_id, ?string $anchor ): void {
 		if ( null === $anchor ) {
-			Contracts::delete_meta( $contract_id, HoldAnchor::META_KEY );
+			Contracts::delete_meta( $contract_id, Package::EXTENSION_SLUG, HoldAnchor::META_KEY );
 			return;
 		}
 
-		Contracts::update_meta( $contract_id, HoldAnchor::META_KEY, $anchor );
+		Contracts::update_meta( $contract_id, Package::EXTENSION_SLUG, HoldAnchor::META_KEY, $anchor );
 	}
 
 	/**

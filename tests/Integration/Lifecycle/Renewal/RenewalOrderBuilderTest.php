@@ -13,6 +13,7 @@ use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\CycleView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\CycleStatus;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\RenewalOrderBuilder;
+use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
 use WC_Order;
 use WC_Order_Item_Product;
@@ -117,7 +118,13 @@ final class RenewalOrderBuilderTest extends LiteIntegrationTestCase {
 		$origin->update_meta_data( '_subscription_renewal', '9' );
 		$origin->update_meta_data( '_wc_order_attribution_source_type', 'typein' );
 		$origin->save();
-		Contracts::update( $contract_id, [ 'payment_token_id' => $contract_token->get_id() ] );
+		Contracts::update(
+			$contract_id,
+			[
+				'extension_slug'   => Package::EXTENSION_SLUG,
+				'payment_token_id' => $contract_token->get_id(),
+			]
+		);
 
 		$order = ( new RenewalOrderBuilder() )->build( $this->get_contract( $contract_id ), $this->add_cycle_two( $contract_id ) );
 
@@ -139,7 +146,13 @@ final class RenewalOrderBuilderTest extends LiteIntegrationTestCase {
 		$origin      = wc_get_order( (int) $contract->get_origin_order_id() );
 		$this->assertInstanceOf( WC_Order::class, $origin );
 		$origin->add_payment_token( $token );
-		Contracts::update( $contract_id, [ 'payment_token_id' => $token->get_id() ] );
+		Contracts::update(
+			$contract_id,
+			[
+				'extension_slug'   => Package::EXTENSION_SLUG,
+				'payment_token_id' => $token->get_id(),
+			]
+		);
 
 		$order = ( new RenewalOrderBuilder() )->build( $this->get_contract( $contract_id ), $this->add_cycle_two( $contract_id ) );
 
