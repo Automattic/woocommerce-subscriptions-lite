@@ -79,10 +79,31 @@ describe( 'PlanForm name field', () => {
 		} );
 	};
 
-	const nameInput = () =>
-		container.querySelector( 'input.components-text-control__input' );
-	const intervalInput = () =>
-		container.querySelector( 'input[type="number"]' );
+	// Find an input through its visible label, and its error through the
+	// input's aria-describedby.
+	const inputByLabel = ( text ) => {
+		const label = [ ...container.querySelectorAll( 'label' ) ].find(
+			( element ) => element.textContent === text
+		);
+		return label ? document.getElementById( label.htmlFor ) : null;
+	};
+	const nameInput = () => inputByLabel( 'Name' );
+	const intervalInput = () => inputByLabel( 'Frequency' );
+	const errorFor = ( input ) => {
+		const id = input.getAttribute( 'aria-describedby' );
+		return id ? document.getElementById( id ) : null;
+	};
+	const saveButton = () =>
+		[ ...container.querySelectorAll( 'button' ) ].find(
+			( button ) => button.textContent === 'Save'
+		);
+	const blur = ( input ) => {
+		act( () => {
+			input.dispatchEvent(
+				new window.FocusEvent( 'focusout', { bubbles: true } )
+			);
+		} );
+	};
 
 	const change = ( input, value ) => {
 		const setter = Object.getOwnPropertyDescriptor(
@@ -144,6 +165,41 @@ describe( 'PlanForm name field', () => {
 		expect( onSave.mock.calls[ 0 ][ 0 ].name ).toBe( 'Bi-monthly box' );
 	} );
 
+	it( 'marks the name as required for assistive technology', () => {
+		renderForm();
+		expect( nameInput().getAttribute( 'aria-required' ) ).toBe( 'true' );
+		// Not native `required`: the field error, not the browser's, reports it.
+		expect( nameInput().required ).toBe( false );
+	} );
+
+	it( 'shows the error on blur and disables Save for an emptied name', () => {
+		renderForm( storedPlan );
+		change( nameInput(), '' );
+		blur( nameInput() );
+
+		const input = nameInput();
+		expect( input.getAttribute( 'aria-invalid' ) ).toBe( 'true' );
+		expect( errorFor( input ).textContent ).toBe( 'Name is required.' );
+		expect( saveButton().disabled ).toBe( true );
+
+		// Any edit clears the error until the next blur or submit.
+		change( nameInput(), 'C' );
+		expect( errorFor( nameInput() ) ).toBeNull();
+		expect( saveButton().disabled ).toBe( false );
+	} );
+
+	it( 'raises no error when an untouched new-plan name is blurred', () => {
+		renderForm();
+		blur( nameInput() );
+
+		expect( nameInput().getAttribute( 'aria-invalid' ) ).toBeNull();
+		expect( errorFor( nameInput() ) ).toBeNull();
+		expect( saveButton().disabled ).toBe( false );
+
+		submit();
+		expect( onSave.mock.calls[ 0 ][ 0 ].name ).toBe( '1 month' );
+	} );
+
 	it( 'requires a name and does not save an emptied one', () => {
 		renderForm( storedPlan );
 		change( nameInput(), '  ' );
@@ -151,11 +207,7 @@ describe( 'PlanForm name field', () => {
 
 		expect( onSave ).not.toHaveBeenCalled();
 		const input = nameInput();
-		const error = container.querySelector(
-			'.wc-subscriptions-lite-plans__error'
-		);
-		expect( error.textContent ).toBe( 'Name is required.' );
 		expect( input.getAttribute( 'aria-invalid' ) ).toBe( 'true' );
-		expect( input.getAttribute( 'aria-describedby' ) ).toBe( error.id );
+		expect( errorFor( input ).textContent ).toBe( 'Name is required.' );
 	} );
 } );

@@ -182,28 +182,16 @@ describe( 'registry transforms', () => {
 	} );
 
 	describe( 'plan name', () => {
-		it( 'suggests the frequency label for a new plan', () => {
+		it( 'leaves an unnamed new plan for the form to name', () => {
+			// The form fills in the suggested name (see plan-form-name.test.js);
+			// the descriptor reads only its own key.
 			const registry = buildFieldRegistry();
 			const payload = formDataToPayload(
 				registry,
 				makeDefaultFormData( registry ),
 				null
 			);
-			expect( payload.name ).toBe( '1 month' );
-		} );
-
-		it( 'follows the frequency until the merchant names a new plan', () => {
-			const registry = buildFieldRegistry();
-			const payload = formDataToPayload(
-				registry,
-				{
-					...makeDefaultFormData( registry ),
-					interval: 3,
-					period: 'week',
-				},
-				null
-			);
-			expect( payload.name ).toBe( '3 weeks' );
+			expect( payload ).not.toHaveProperty( 'name' );
 		} );
 
 		it( 'keeps the stored name when the cadence changes', () => {
@@ -326,8 +314,57 @@ describe( 'registry transforms', () => {
 				{ type: 'percentage', value: 20, duration_cycles: 3 },
 				second,
 			] );
-			// Clearing the edited discount removes only the first entry.
-			expect( payloadFor( plan, { pricingValue: '' } ) ).toEqual( [
+		} );
+
+		it( 'removes every entry when the discount is cleared, and reloads with none', () => {
+			const registry = buildFieldRegistry();
+			const plan = planWithEntry(
+				{ type: 'percentage', value: 10, starting_cycle: 2 },
+				{ type: 'fixed_amount', value: 2, starting_cycle: 6 }
+			);
+			const formData = {
+				...planToFormData( registry, plan ),
+				pricingValue: '',
+			};
+			const saved = {
+				...plan,
+				...formDataToPayload( registry, formData, plan ),
+			};
+
+			expect( saved.pricing_policy.policies ).toEqual( [] );
+			expect( saved.pricing_policy.one_time_fees ).toEqual(
+				samplePlan.pricing_policy.one_time_fees
+			);
+			expect( planToFormData( registry, saved ).pricingValue ).toBe( '' );
+		} );
+
+		it( 'keeps the hidden entries across a save and reload', () => {
+			const registry = buildFieldRegistry();
+			const second = {
+				type: 'fixed_amount',
+				value: 2,
+				starting_cycle: 6,
+			};
+			const plan = planWithEntry(
+				{ type: 'percentage', value: 10, starting_cycle: 2 },
+				second
+			);
+			const saved = {
+				...plan,
+				...formDataToPayload(
+					registry,
+					{ ...planToFormData( registry, plan ), pricingValue: 20 },
+					plan
+				),
+			};
+			const resaved = formDataToPayload(
+				registry,
+				planToFormData( registry, saved ),
+				saved
+			);
+
+			expect( resaved.pricing_policy.policies ).toEqual( [
+				{ type: 'percentage', value: 20, starting_cycle: 2 },
 				second,
 			] );
 		} );
@@ -432,6 +469,90 @@ describe( 'registry transforms', () => {
 
 			const payload = formDataToPayload( registry, formData, plan );
 			expect( payload.billing_policy.min_cycles ).toBe( 2 );
+		} );
+	} );
+
+	describe( 'injected pricing field', () => {
+		const NAMESPACE = 'test/loyalty-entry';
+		const loyaltyEntry = {
+			type: 'percentage',
+			value: 5,
+			source: 'loyalty',
+		};
+
+		beforeEach( () => {
+			// Follows the descriptor contract: replaces its own entry by key.
+			addFilter( PLAN_FIELDS_FILTER, NAMESPACE, ( fields ) => [
+				...fields,
+				{
+					id: 'loyalty',
+					toPayload: ( formData, payload ) => ( {
+						...payload,
+						pricing_policy: {
+							...payload.pricing_policy,
+							policies: [
+								...payload.pricing_policy.policies.filter(
+									( entry ) => entry.source !== 'loyalty'
+								),
+								loyaltyEntry,
+							],
+						},
+					} ),
+				},
+			] );
+		} );
+
+		afterEach( () => {
+			removeFilter( PLAN_FIELDS_FILTER, NAMESPACE );
+		} );
+
+		it( 'is not duplicated across two saves', () => {
+			const registry = buildFieldRegistry();
+			const save = ( plan ) => ( {
+				...plan,
+				...formDataToPayload(
+					registry,
+					planToFormData( registry, plan ),
+					plan
+				),
+			} );
+			const once = save( samplePlan );
+			const twice = save( once );
+
+			const expected = [
+				{ type: 'percentage', value: 10, duration_cycles: 3 },
+				loyaltyEntry,
+			];
+			expect( once.pricing_policy.policies ).toEqual( expected );
+			expect( twice.pricing_policy.policies ).toEqual( expected );
+		} );
+	} );
+
+	describe( 'injected name field', () => {
+		const NAMESPACE = 'test/custom-name';
+
+		afterEach( () => {
+			removeFilter( PLAN_FIELDS_FILTER, NAMESPACE );
+		} );
+
+		it( 'wins over the built-in name when registered after it', () => {
+			addFilter( PLAN_FIELDS_FILTER, NAMESPACE, ( fields ) => [
+				...fields,
+				{
+					id: 'customName',
+					toPayload: ( formData, payload ) => ( {
+						...payload,
+						name: 'Custom name',
+					} ),
+				},
+			] );
+			const registry = buildFieldRegistry();
+			const payload = formDataToPayload(
+				registry,
+				planToFormData( registry, samplePlan ),
+				samplePlan
+			);
+			expect( payload.name ).toBe( 'Custom name' );
 		} );
 	} );
 } );

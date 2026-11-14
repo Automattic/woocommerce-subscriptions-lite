@@ -20,12 +20,15 @@
  * same shape, positioning themselves by where they insert in the filtered
  * array, so injected fields render and round-trip without any change to
  * Lite core.
+ *
+ * `toPayload` runs in registry order, each step receiving the previous
+ * payload. On edit, `payload.pricing_policy.policies` already carries the
+ * stored entries the discount field does not edit, so a later field replaces
+ * its own entry by key and never appends.
  */
 
 import { __ } from '@wordpress/i18n';
-import { config } from '../config';
-import { normalizeDefinitions } from '../definitions';
-import { NameEdit, suggestedName } from '../components/fields/name-field';
+import { NameEdit } from '../components/fields/name-field';
 import { FrequencyEdit } from '../components/fields/frequency-field';
 import { ExpirationEdit } from '../components/fields/expiration-field';
 import { DiscountEdit } from '../components/fields/discount-field';
@@ -40,25 +43,19 @@ export function builtInFields() {
 	return [
 		{
 			id: 'name',
-			// `null` until the merchant types a name: a new plan suggests its
-			// frequency label, and a stored plan always loads its own name.
+			// `null` until the merchant types a name; the form shows and saves
+			// a suggested name meanwhile. A stored plan loads its own name.
 			default: { name: null },
 			Edit: NameEdit,
 			fromPlan: ( plan ) => ( { name: plan.name ?? '' } ),
-			toPayload: ( formData, payload ) => ( {
-				...payload,
-				name:
-					formData.name === null
-						? suggestedName(
-								formData,
-								normalizeDefinitions( config.definitions )
-						  )
-						: formData.name.trim(),
-			} ),
+			toPayload: ( formData, payload ) =>
+				typeof formData.name === 'string'
+					? { ...payload, name: formData.name.trim() }
+					: payload,
 			// Required, as the engine requires it; an emptied name is never
 			// replaced with the suggested one.
 			validate: ( formData ) =>
-				formData.name !== null && ! formData.name.trim()
+				typeof formData.name === 'string' && ! formData.name.trim()
 					? {
 							name: __(
 								'Name is required.',
@@ -154,40 +151,37 @@ export function builtInFields() {
 
 				// BOGO is a value-less policy, so it is written even though the
 				// value field is empty; every other type needs a value to apply.
+				// Clearing the discount removes every entry, hidden ones too:
+				// the plan then has no discount at all.
 				const isBogo = formData.pricingType === 'bogo';
-				if ( ! isBogo && formData.pricingValue === '' ) {
-					return {
-						...payload,
-						pricing_policy: {
-							...pricing,
-							policies: [ ...pricing.policies, ...otherEntries ],
-						},
+				const entries = [];
+				if ( isBogo || formData.pricingValue !== '' ) {
+					const entry = {
+						...storedEntry,
+						type: formData.pricingType,
 					};
-				}
-
-				const entry = { ...storedEntry, type: formData.pricingType };
-				if ( isBogo ) {
-					delete entry.value;
-				} else {
-					entry.value = Number( formData.pricingValue );
-				}
-				if ( formData.pricingScope === 'first' ) {
-					entry.duration_cycles = 1;
-				} else if ( formData.pricingScope === 'n_cycles' ) {
-					entry.duration_cycles = Number( formData.durationCycles );
-				} else {
-					delete entry.duration_cycles;
+					if ( isBogo ) {
+						delete entry.value;
+					} else {
+						entry.value = Number( formData.pricingValue );
+					}
+					if ( formData.pricingScope === 'first' ) {
+						entry.duration_cycles = 1;
+					} else if ( formData.pricingScope === 'n_cycles' ) {
+						entry.duration_cycles = Number(
+							formData.durationCycles
+						);
+					} else {
+						delete entry.duration_cycles;
+					}
+					entries.push( entry, ...otherEntries );
 				}
 
 				return {
 					...payload,
 					pricing_policy: {
 						...pricing,
-						policies: [
-							...pricing.policies,
-							entry,
-							...otherEntries,
-						],
+						policies: [ ...pricing.policies, ...entries ],
 					},
 				};
 			},
