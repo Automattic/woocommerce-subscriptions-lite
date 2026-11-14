@@ -16,11 +16,9 @@
  * {@see self::cancel_request()}) so its branches are testable without a request:
  * the `handle_*` methods take a plain params array and return a
  * {@see RowActionResult}; the `*_request` methods read `$_POST`,
- * verify the nonce, run the decision, flash, and redirect. Cancel's collaborators
- * can be injected; Renew now always runs Lite's renewal, so its branches need real
- * contracts and orders. The nonce is enforced at the request boundary (a hard
- * `check_admin_referer()` gate) rather than in the decision method, so it never
- * rides in a URL.
+ * verify the nonce, run the decision, flash, and redirect. The nonce is enforced at
+ * the request boundary (a hard `check_admin_referer()` gate) rather than in the
+ * decision method, so it never rides in a URL.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Admin
  */
@@ -45,60 +43,8 @@ defined( 'ABSPATH' ) || exit;
 
 /**
  * Admin-post handlers for the state-mutating subscription actions.
- *
- * Construct via the no-arg constructor in production (Lite's cancel, the capability
- * helper, and the WooCommerce logger); tests inject fake cancel / capability / logger
- * seams to drive the decision branches. Renew now always runs Lite's renewal.
  */
 final class RowActionController {
-
-	/**
-	 * Canceller; false when the contract does not exist, a `WP_Error` on a lock conflict.
-	 * Production: `Cancellation::cancel()`.
-	 *
-	 * @var callable(int): (bool|WP_Error)
-	 */
-	private $cancel;
-
-	/**
-	 * Capability check. Production: `current_user_can( PageController::CAPABILITY )`.
-	 *
-	 * @var callable(): bool
-	 */
-	private $can;
-
-	/**
-	 * Error logger. Production: `wc_get_logger()->error()`. Receives the message
-	 * and a context array.
-	 *
-	 * @var callable(string, array<string, mixed>): void
-	 */
-	private $log_error;
-
-	/**
-	 * Construct the controller.
-	 *
-	 * @param (callable(int): (bool|WP_Error))|null               $cancel    Canceller; defaults to `Cancellation::cancel()`.
-	 * @param (callable(): bool)|null                             $can       Capability check; defaults to `current_user_can()`.
-	 * @param (callable(string, array<string, mixed>): void)|null $log_error Error logger; defaults to `wc_get_logger()->error()`.
-	 */
-	public function __construct(
-		?callable $cancel = null,
-		?callable $can = null,
-		?callable $log_error = null
-	) {
-		$this->cancel    = $cancel ?? static function ( int $id ) {
-			$cancelled = ( new Cancellation() )->cancel( $id );
-
-			return $cancelled instanceof WP_Error ? $cancelled : null !== $cancelled;
-		};
-		$this->can       = $can ?? static function (): bool {
-			return current_user_can( PageController::CAPABILITY );
-		};
-		$this->log_error = $log_error ?? static function ( string $message, array $context ): void {
-			wc_get_logger()->error( $message, $context );
-		};
-	}
 
 	/**
 	 * Bind the admin-post handlers. Called once from the bootstrap in an admin
@@ -263,7 +209,7 @@ final class RowActionController {
 	/**
 	 * Decide and perform an immediate "Cancel".
 	 *
-	 * Guard order: capability, then a valid contract id, then the cancel. A false
+	 * Guard order: capability, then a valid contract id, then the cancel. A null
 	 * return means no such contract - surfaced as an error. A throwable (including a
 	 * status the cancel does not allow) is logged in full and surfaced as a generic
 	 * error outcome rather than a fatal or a leaked internal message.
@@ -280,7 +226,7 @@ final class RowActionController {
 		}
 
 		try {
-			$cancelled = ( $this->cancel )( $contract_id );
+			$cancelled = ( new Cancellation() )->cancel( $contract_id );
 		} catch ( ContractLockedException $e ) {
 			$cancelled = HeldLocks::get_refused_conflict( $e );
 		} catch ( Throwable $e ) {
@@ -294,7 +240,7 @@ final class RowActionController {
 			return self::get_lock_conflict_result( $cancelled );
 		}
 
-		if ( ! $cancelled ) {
+		if ( null === $cancelled ) {
 			return RowActionResult::failed( __( 'Subscription not found.', 'woocommerce-subscriptions-lite' ) );
 		}
 
@@ -326,7 +272,7 @@ final class RowActionController {
 	 * @return RowActionResult|null Denied outcome, or null to proceed.
 	 */
 	private function authorize( int $contract_id ): ?RowActionResult {
-		if ( ! ( $this->can )() ) {
+		if ( ! current_user_can( PageController::CAPABILITY ) ) {
 			return RowActionResult::forbidden( __( 'You do not have permission to manage subscriptions.', 'woocommerce-subscriptions-lite' ) );
 		}
 
@@ -345,7 +291,7 @@ final class RowActionController {
 	 * @param Throwable $e           The caught exception.
 	 */
 	private function log_failure( string $action, int $contract_id, Throwable $e ): void {
-		( $this->log_error )(
+		wc_get_logger()->error(
 			sprintf( 'Admin subscription %1$s failed for #%2$d: %3$s', $action, $contract_id, $e->getMessage() ),
 			[
 				'source'      => Package::EXTENSION_SLUG,

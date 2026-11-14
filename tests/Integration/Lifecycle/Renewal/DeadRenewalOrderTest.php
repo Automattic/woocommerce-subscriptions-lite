@@ -16,7 +16,6 @@ use Automattic\WooCommerce\SubscriptionsEngine\Api\View\CycleView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\CycleStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\SchemaInstaller;
-use Automattic\WooCommerce\SubscriptionsLite\Admin\RowActionController;
 use Automattic\WooCommerce\SubscriptionsLite\CustomerPortal\EngineDataProvider;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\HoldAnchor;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\LifecycleNotAllowedException;
@@ -96,7 +95,7 @@ final class DeadRenewalOrderTest extends LiteIntegrationTestCase {
 		}
 
 		$this->support_engine_charges( 'cod' );
-		$result = ( new RowActionController( null, static fn (): bool => true ) )->handle_renew_now( [ 'contract_id' => $contract_id ] );
+		$result = $this->renew_now_as_admin( $contract_id );
 
 		$this->assertTrue( $result->is_success() );
 		$this->assertSame( 1, $this->charge_count() );
@@ -118,7 +117,7 @@ final class DeadRenewalOrderTest extends LiteIntegrationTestCase {
 		[ $contract_id, , $order ] = $this->seed( ContractStatus::ON_HOLD, 'failed', CycleStatus::FAILED );
 		$order->update_status( 'cancelled' );
 		$this->support_engine_charges( 'cod', $outcome );
-		( new RowActionController( null, static fn (): bool => true ) )->handle_renew_now( [ 'contract_id' => $contract_id ] );
+		$this->renew_now_as_admin( $contract_id );
 		$replacement_id = (int) $this->head( $contract_id )->get_order_id();
 		$this->assertNotSame( $order->get_id(), $replacement_id );
 
