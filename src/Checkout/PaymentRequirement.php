@@ -7,8 +7,10 @@
  * should leave a method that can be charged next time). A free first order whose
  * subscription will charge later (a recurring total above 0) still needs payment, so the
  * gateway runs and saves the method for the renewals; a free subscription needs none.
- * A subscription checkout offers only gateways that can charge its renewals automatically:
- * Lite has no manual-renewal fallback to sell a subscription with any other method.
+ * A payment that starts a subscription (a plan cart, or order-pay for a first subscription
+ * order) offers only gateways that can charge its renewals automatically: Lite has no
+ * manual-renewal fallback to sell a subscription with any other method. Paying a renewal
+ * order by hand keeps every gateway.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Checkout
  */
@@ -23,6 +25,7 @@ use Automattic\WooCommerce\SubscriptionsLite\Payments\RenewalGateways;
 use WC_Cart;
 use WC_Order;
 use WC_Order_Item_Product;
+use WP_REST_Request;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -30,6 +33,14 @@ defined( 'ABSPATH' ) || exit;
  * Payment requirements for subscription checkouts.
  */
 final class PaymentRequirement {
+
+	/**
+	 * The order the Store API pay-for-order route (`checkout/{id}`) is paying in this request.
+	 * The gateway filter gets no request, so the route's order is noted before its callback runs.
+	 *
+	 * @var int|null
+	 */
+	private $store_api_order_id = null;
 
 	/**
 	 * Bind the saved-method query, the free-first-order payment filters and the gateway filter.
@@ -40,6 +51,38 @@ final class PaymentRequirement {
 		add_filter( 'woocommerce_cart_needs_payment', [ $instance, 'is_cart_payment_required' ], 10, 2 );
 		add_filter( 'woocommerce_order_needs_payment', [ $instance, 'is_order_payment_required' ], 10, 3 );
 		add_filter( 'woocommerce_available_payment_gateways', [ $instance, 'get_available_payment_gateways' ] );
+		add_filter( 'rest_request_before_callbacks', [ $instance, 'get_response_noting_store_api_order' ], 10, 3 );
+		add_filter( 'rest_request_after_callbacks', [ $instance, 'get_response_forgetting_store_api_order' ] );
+	}
+
+	/**
+	 * Pass the response through, noting the order when the request pays an existing order
+	 * through the Store API.
+	 *
+	 * @param mixed $response Response so far (null unless another callback short-circuited).
+	 * @param mixed $handler  Route handler.
+	 * @param mixed $request  The request.
+	 * @return mixed The response, unchanged.
+	 */
+	public function get_response_noting_store_api_order( $response, $handler, $request ) {
+		$this->store_api_order_id = null;
+		if ( $request instanceof WP_REST_Request && 'POST' === $request->get_method() && 1 === preg_match( '#^/wc/store(?:/v1)?/checkout/(\d+)$#', $request->get_route(), $matches ) ) {
+			$this->store_api_order_id = (int) $matches[1];
+		}
+
+		return $response;
+	}
+
+	/**
+	 * Pass the response through, forgetting the noted Store API order once its route has run.
+	 *
+	 * @param mixed $response The route's response.
+	 * @return mixed The response, unchanged.
+	 */
+	public function get_response_forgetting_store_api_order( $response ) {
+		$this->store_api_order_id = null;
+
+		return $response;
 	}
 
 	/**
@@ -50,7 +93,7 @@ final class PaymentRequirement {
 	 * @return mixed The gateways, filtered when the payment starts a subscription.
 	 */
 	public function get_available_payment_gateways( $gateways ) {
-		if ( ! is_array( $gateways ) || ! self::is_subscription_payment() ) {
+		if ( ! is_array( $gateways ) || ! $this->is_subscription_payment() ) {
 			return $gateways;
 		}
 
@@ -64,11 +107,37 @@ final class PaymentRequirement {
 	}
 
 	/**
-	 * Whether the payment in this request starts a Lite subscription: the current cart
-	 * holds a plan item. The cart is read only once the session has loaded.
+	 * Whether the payment in this request starts a Lite subscription. Paying an existing
+	 * order (order-pay, or the Store API pay-for-order route) does when the order has a plan
+	 * line and is not a Lite renewal order: paying it creates the contract. Otherwise the
+	 * current cart does when it holds a plan item; it is read only once the session has loaded.
 	 */
-	private static function is_subscription_payment(): bool {
+	private function is_subscription_payment(): bool {
+		$order_id = $this->get_paid_order_id();
+		if ( null !== $order_id ) {
+			$order = wc_get_order( $order_id );
+
+			return $order instanceof WC_Order && RenewalOrderBuilder::CREATED_VIA !== $order->get_created_via() && self::order_has_item_with_plan( $order );
+		}
+
 		return did_action( 'wp_loaded' ) > 0 && function_exists( 'WC' ) && WC()->cart instanceof WC_Cart && self::cart_has_item_with_plan( WC()->cart );
+	}
+
+	/**
+	 * The id of the existing order this request pays, or null when it pays the cart.
+	 */
+	private function get_paid_order_id(): ?int {
+		global $wp;
+
+		if ( null !== $this->store_api_order_id ) {
+			return $this->store_api_order_id;
+		}
+
+		if ( function_exists( 'is_wc_endpoint_url' ) && is_wc_endpoint_url( 'order-pay' ) ) {
+			return absint( $wp->query_vars['order-pay'] ?? 0 );
+		}
+
+		return null;
 	}
 
 	/**

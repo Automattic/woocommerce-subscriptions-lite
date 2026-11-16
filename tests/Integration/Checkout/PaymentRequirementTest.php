@@ -37,6 +37,7 @@ final class PaymentRequirementTest extends LiteIntegrationTestCase {
 	public function tear_down(): void {
 		WC()->cart->empty_cart();
 		unset( $_POST[ CartPlanHooks::SELLING_PLAN_ID_KEY ] );
+		unset( $GLOBALS['wp']->query_vars['order-pay'] );
 		foreach ( $this->gateways_enabled_before as $gateway_id => $enabled ) {
 			WC()->payment_gateways()->payment_gateways()[ $gateway_id ]->enabled = $enabled;
 		}
@@ -367,5 +368,121 @@ final class PaymentRequirementTest extends LiteIntegrationTestCase {
 		$this->add_virtual_to_cart( false );
 
 		$this->assertNotContains( 'payment', $this->get_classic_checkout_errors( 'bacs' )->get_error_codes() );
+	}
+
+	/**
+	 * A pending order owned by `$customer_id` with one line, stamped with a plan or not, and
+	 * optionally created as a Lite renewal order.
+	 *
+	 * @param int  $customer_id Owning customer.
+	 * @param bool $on_plan     Whether the line carries a plan.
+	 * @param bool $is_renewal  Whether Lite created it as a renewal order.
+	 */
+	private function make_order_to_pay( int $customer_id, bool $on_plan, bool $is_renewal ): WC_Order {
+		$order = $this->create_subscription_order( $customer_id );
+		if ( $on_plan ) {
+			$this->stamp_plan( $order, $this->make_plan() );
+		}
+		if ( $is_renewal ) {
+			$order->set_created_via( RenewalOrderBuilder::CREATED_VIA );
+		}
+		$order->set_date_paid( null );
+		$order->set_status( 'pending' );
+		$order->save();
+
+		return $order;
+	}
+
+	/**
+	 * Ids of the gateways WooCommerce offers on the classic order-pay page for `$order`. The
+	 * session cart holds an item too, which must not count there.
+	 *
+	 * @param WC_Order $order        The order being paid.
+	 * @param bool     $plan_in_cart Whether the cart item is on a plan.
+	 * @return string[]
+	 */
+	private function get_order_pay_gateway_ids( WC_Order $order, bool $plan_in_cart ): array {
+		$this->add_virtual_to_cart( $plan_in_cart );
+		$GLOBALS['wp']->query_vars['order-pay'] = (string) $order->get_id();
+
+		return $this->get_offered_gateway_ids();
+	}
+
+	public function test_order_pay_for_a_renewal_order_offers_every_gateway(): void {
+		$this->enable_gateways();
+
+		$order = $this->make_order_to_pay( $this->create_customer(), true, true );
+
+		$this->assertSame( [ 'bacs', 'cod' ], $this->get_order_pay_gateway_ids( $order, true ) );
+	}
+
+	public function test_order_pay_for_a_first_subscription_order_offers_only_gateways_that_can_charge_renewals(): void {
+		$this->enable_gateways();
+
+		$order = $this->make_order_to_pay( $this->create_customer(), true, false );
+
+		$this->assertSame( [ 'cod' ], $this->get_order_pay_gateway_ids( $order, false ) );
+	}
+
+	public function test_order_pay_for_a_plain_order_offers_every_gateway(): void {
+		$this->enable_gateways();
+
+		$order = $this->make_order_to_pay( $this->create_customer(), false, false );
+
+		$this->assertSame( [ 'bacs', 'cod' ], $this->get_order_pay_gateway_ids( $order, true ) );
+	}
+
+	/**
+	 * Pay `$order` through the Store API pay-for-order route, as its owner. The session cart
+	 * holds an item too, which must not count there.
+	 *
+	 * @param WC_Order $order          The order.
+	 * @param string   $payment_method Gateway id.
+	 * @param bool     $plan_in_cart   Whether the cart item is on a plan.
+	 */
+	private function pay_order_through_store_api( WC_Order $order, string $payment_method, bool $plan_in_cart ): \WP_REST_Response {
+		wp_set_current_user( $order->get_customer_id() );
+		$this->add_virtual_to_cart( $plan_in_cart );
+
+		return $this->dispatch_store_api(
+			'POST',
+			'/checkout/' . $order->get_id(),
+			[
+				'billing_address' => (object) ( self::BILLING_ADDRESS + [
+					'company'   => '',
+					'address_2' => '',
+					'state'     => '',
+				] ),
+				'payment_method'  => $payment_method,
+			]
+		);
+	}
+
+	public function test_the_store_api_pays_a_renewal_order_with_any_gateway(): void {
+		$this->enable_gateways();
+		$order = $this->make_order_to_pay( $this->create_customer(), true, true );
+
+		$response = $this->pay_order_through_store_api( $order, 'bacs', true );
+
+		$this->assertSame( 200, $response->get_status(), (string) wp_json_encode( $response->get_data() ) );
+		$this->assertSame( 'bacs', wc_get_order( $order->get_id() )->get_payment_method() );
+	}
+
+	public function test_the_store_api_refuses_a_first_subscription_order_paid_with_a_gateway_that_cannot_charge_renewals(): void {
+		$this->enable_gateways();
+		$order = $this->make_order_to_pay( $this->create_customer(), true, false );
+
+		$response = $this->pay_order_through_store_api( $order, 'bacs', false );
+
+		$this->assertSame( 400, $response->get_status() );
+		$this->assertSame( 'woocommerce_rest_checkout_payment_method_disabled', $response->get_data()['code'] );
+	}
+
+	public function test_the_store_api_forgets_the_paid_order_after_the_request(): void {
+		$this->enable_gateways();
+		$order = $this->make_order_to_pay( $this->create_customer(), true, true );
+		$this->pay_order_through_store_api( $order, 'bacs', true );
+
+		$this->assertSame( [ 'cod' ], $this->get_offered_gateway_ids(), 'The plan cart decides again once the route has run.' );
 	}
 }
