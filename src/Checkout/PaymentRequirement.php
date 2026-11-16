@@ -154,7 +154,7 @@ final class PaymentRequirement {
 		if ( current_user_can( self::CAPABILITY ) ) {
 			return sprintf(
 				/* translators: 1: opening link tag to the payments settings, 2: closing link tag. */
-				esc_html__( 'No enabled payment method can charge subscription renewals automatically. Enable one that supports subscriptions in %1$spayments settings%2$s.', 'woocommerce-subscriptions-lite' ),
+				esc_html__( 'No enabled payment method can charge subscription renewals automatically. Enable one that supports subscriptions in %1$sPayments settings%2$s.', 'woocommerce-subscriptions-lite' ),
 				'<a href="' . esc_url( admin_url( 'admin.php?page=wc-settings&tab=checkout' ) ) . '">',
 				'</a>'
 			);
