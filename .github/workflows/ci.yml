@@ -80,6 +80,29 @@ jobs:
       - name: JS unit tests
         run: npm run test:js
 
+  php74:
+    name: PHP 7.4 syntax
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The package floor is PHP 7.4, and the PHPCompatibility sniffs in
+      # `composer lint` do not know newer syntax, so every file is parsed by 7.4.
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '7.4'
+          coverage: none
+          tools: none
+
+      - name: Lint every PHP file on PHP 7.4
+        run: |
+          # `|| exit 1` keeps xargs going after a failure, so every error is listed.
+          # shellcheck disable=SC2016
+          find . -name '*.php' -not -path './vendor/*' -not -path './node_modules/*' -print0 \
+            | xargs -0 -n 1 -P 4 sh -c 'php -l "$0" || exit 1' > php-lint.log 2>&1 \
+            || { grep -v '^No syntax errors' php-lint.log; exit 1; }
+          echo "$( wc -l < php-lint.log ) files parse on PHP 7.4."
+
   test:
     name: Integration tests (wp-env)
     runs-on: ubuntu-latest

@@ -59,8 +59,13 @@
 	<!-- Minimum supported WordPress version. -->
 	<config name="minimum_wp_version" value="6.9"/>
 
-	<!-- Cross-version PHP compatibility (matches the package floor). -->
+	<!--
+		Cross-version PHP compatibility (matches the package floor). The
+		PHPCompatibility 9 sniffs know PHP up to 7.4, so they do not flag
+		newer syntax; CI also lints every file on PHP 7.4 for that.
+	-->
 	<config name="testVersion" value="7.4-"/>
+	<rule ref="PHPCompatibilityWP"/>
 
 	<!-- Text domain for i18n. -->
 	<rule ref="WordPress.WP.I18n">
