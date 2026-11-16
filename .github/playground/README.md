@@ -20,7 +20,9 @@ page they open.
 ## Limits
 
 - Playground does not run scheduled actions, so nothing renews by itself. "Renew now" on a subscription works.
-- No payment gateway in the preview can be charged automatically, so renewal orders wait for payment.
+- No payment gateway in the preview can be charged automatically, so renewal orders wait for payment, and a
+  subscription cannot be bought: a checkout with a plan offers only payment methods that can renew automatically.
+  "Cash on delivery" works for one-time purchases. Test buying a plan on a full site with such a gateway.
 - No email is sent.
 - The engine comes from the WooCommerce `trunk` at build time, or from the branch an `Engine-Ref:` line in the pull
   request description names, as in CI.
