@@ -439,14 +439,15 @@ final class PaymentRequirementTest extends LiteIntegrationTestCase {
 	 * @param WC_Order $order          The order.
 	 * @param string   $payment_method Gateway id.
 	 * @param bool     $plan_in_cart   Whether the cart item is on a plan.
+	 * @param string   $route          Route under `wc/store/v1`, before the order id.
 	 */
-	private function pay_order_through_store_api( WC_Order $order, string $payment_method, bool $plan_in_cart ): \WP_REST_Response {
+	private function pay_order_through_store_api( WC_Order $order, string $payment_method, bool $plan_in_cart, string $route = '/checkout/' ): \WP_REST_Response {
 		wp_set_current_user( $order->get_customer_id() );
 		$this->add_virtual_to_cart( $plan_in_cart );
 
 		return $this->dispatch_store_api(
 			'POST',
-			'/checkout/' . $order->get_id(),
+			$route . $order->get_id(),
 			[
 				'billing_address' => (object) ( self::BILLING_ADDRESS + [
 					'company'   => '',
@@ -476,6 +477,17 @@ final class PaymentRequirementTest extends LiteIntegrationTestCase {
 
 		$this->assertSame( 400, $response->get_status() );
 		$this->assertSame( 'woocommerce_rest_checkout_payment_method_disabled', $response->get_data()['code'] );
+	}
+
+	public function test_the_store_api_refuses_a_first_subscription_order_through_a_mixed_case_route(): void {
+		$this->enable_gateways();
+		$order = $this->make_order_to_pay( $this->create_customer(), true, false );
+
+		$response = $this->pay_order_through_store_api( $order, 'bacs', false, '/CHECKOUT/' );
+
+		$this->assertSame( 400, $response->get_status() );
+		$this->assertSame( 'woocommerce_rest_checkout_payment_method_disabled', $response->get_data()['code'] );
+		$this->assertNotSame( 'bacs', wc_get_order( $order->get_id() )->get_payment_method() );
 	}
 
 	public function test_the_store_api_forgets_the_paid_order_after_the_request(): void {

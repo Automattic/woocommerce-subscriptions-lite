@@ -19,6 +19,7 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Checkout;
 
+use Automattic\WooCommerce\StoreApi\Routes\V1\CheckoutOrder;
 use Automattic\WooCommerce\SubscriptionsLite\Cart\CartPlanHooks;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\RenewalOrderBuilder;
 use Automattic\WooCommerce\SubscriptionsLite\Payments\RenewalGateways;
@@ -72,11 +73,26 @@ final class PaymentRequirement {
 	 */
 	public function note_store_api_order( $response, $handler = null, $request = null ) {
 		$this->store_api_order_id = null;
-		if ( $request instanceof WP_REST_Request && 'POST' === $request->get_method() && 1 === preg_match( '#^/wc/store(?:/v1)?/checkout/(\d+)$#', $request->get_route(), $matches ) ) {
-			$this->store_api_order_id = (int) $matches[1];
+		if ( $request instanceof WP_REST_Request && 'POST' === $request->get_method() && self::is_store_api_order_route( $request->get_route() ) ) {
+			$this->store_api_order_id = absint( $request->get_url_params()['id'] ?? 0 );
 		}
 
 		return $response;
+	}
+
+	/**
+	 * Whether a REST route is the Store API pay-for-order route, under either Store API
+	 * namespace. Built from the route's own pattern and matched case-insensitively, as the
+	 * REST server matches routes.
+	 *
+	 * @param string $route Requested route.
+	 */
+	private static function is_store_api_order_route( string $route ): bool {
+		if ( ! class_exists( CheckoutOrder::class ) ) {
+			return false;
+		}
+
+		return 1 === preg_match( '@^/wc/store(?:/v1)?' . CheckoutOrder::get_path_regex() . '$@i', $route );
 	}
 
 	/**
