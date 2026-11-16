@@ -38,7 +38,7 @@ final class PaymentRequirement {
 	/**
 	 * Capability of a store manager who can enable payment gateways.
 	 */
-	private const MANAGE_PAYMENTS_CAPABILITY = 'manage_woocommerce';
+	private const CAPABILITY = 'manage_woocommerce';
 
 	/**
 	 * The order the Store API pay-for-order route (`checkout/{id}`) is paying in this request.
@@ -151,7 +151,7 @@ final class PaymentRequirement {
 			return $message;
 		}
 
-		if ( current_user_can( self::MANAGE_PAYMENTS_CAPABILITY ) ) {
+		if ( current_user_can( self::CAPABILITY ) ) {
 			return sprintf(
 				/* translators: 1: opening link tag to the payments settings, 2: closing link tag. */
 				esc_html__( 'No enabled payment method can charge subscription renewals automatically. Enable one that supports subscriptions in %1$spayments settings%2$s.', 'woocommerce-subscriptions-lite' ),
