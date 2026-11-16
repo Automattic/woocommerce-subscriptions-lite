@@ -167,7 +167,7 @@ final class PaymentRequirement {
 	 * Whether the payment in this request starts a Lite subscription. Paying an existing
 	 * order (order-pay, or the Store API pay-for-order route) does when the order has a plan
 	 * line and is not a Lite renewal order: paying it creates the contract. Otherwise the
-	 * current cart does when it holds a plan item; it is read only once the session has loaded.
+	 * current cart does when it holds a plan item.
 	 */
 	private function is_subscription_payment(): bool {
 		$order_id = $this->get_paid_order_id();
@@ -177,7 +177,7 @@ final class PaymentRequirement {
 			return $order instanceof WC_Order && RenewalOrderBuilder::CREATED_VIA !== $order->get_created_via() && self::order_has_item_with_plan( $order );
 		}
 
-		return did_action( 'wp_loaded' ) > 0 && function_exists( 'WC' ) && WC()->cart instanceof WC_Cart && self::cart_has_item_with_plan( WC()->cart );
+		return self::is_plan_in_current_cart();
 	}
 
 	/**
@@ -215,7 +215,7 @@ final class PaymentRequirement {
 			return self::order_has_item_with_plan( $order ) || RenewalOrderBuilder::CREATED_VIA === $order->get_created_via();
 		}
 
-		return null === $order && function_exists( 'WC' ) && WC()->cart instanceof WC_Cart && self::cart_has_item_with_plan( WC()->cart );
+		return null === $order && self::is_plan_in_current_cart();
 	}
 
 	/**
@@ -311,6 +311,14 @@ final class PaymentRequirement {
 		}
 
 		return false;
+	}
+
+	/**
+	 * Whether the current cart has an item carrying a Lite plan.
+	 */
+	private static function is_plan_in_current_cart(): bool {
+		// Before wp_loaded the session is not loaded, and reading the cart is a doing-it-wrong.
+		return did_action( 'wp_loaded' ) > 0 && function_exists( 'WC' ) && WC()->cart instanceof WC_Cart && self::cart_has_item_with_plan( WC()->cart );
 	}
 
 	/**
