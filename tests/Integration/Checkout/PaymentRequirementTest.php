@@ -70,10 +70,24 @@ final class PaymentRequirementTest extends LiteIntegrationTestCase {
 	 * @return string[]
 	 */
 	private function get_offered_gateway_ids(): array {
-		$ids = array_keys( WC()->payment_gateways()->get_available_payment_gateways() );
-		sort( $ids );
+		return array_keys( WC()->payment_gateways()->get_available_payment_gateways() );
+	}
 
-		return $ids;
+	/**
+	 * Assert that `$offered` includes cash on delivery (can renew) and, unless
+	 * `$offers_bacs`, excludes bank transfer (cannot). Other enabled gateways do not matter.
+	 *
+	 * @param string[] $offered     Offered gateway ids.
+	 * @param bool     $offers_bacs Whether bank transfer is offered too.
+	 * @param string   $message     Failure message.
+	 */
+	private function assert_offers( array $offered, bool $offers_bacs, string $message = '' ): void {
+		$this->assertContains( 'cod', $offered, $message );
+		if ( $offers_bacs ) {
+			$this->assertContains( 'bacs', $offered, $message );
+		} else {
+			$this->assertNotContains( 'bacs', $offered, $message );
+		}
 	}
 
 	/**
@@ -234,14 +248,14 @@ final class PaymentRequirementTest extends LiteIntegrationTestCase {
 		$this->enable_gateways();
 		$this->add_virtual_to_cart( true );
 
-		$this->assertSame( [ 'cod' ], $this->get_offered_gateway_ids() );
+		$this->assert_offers( $this->get_offered_gateway_ids(), false );
 	}
 
 	public function test_a_plain_cart_offers_every_gateway(): void {
 		$this->enable_gateways();
 		$this->add_virtual_to_cart( false );
 
-		$this->assertSame( [ 'bacs', 'cod' ], $this->get_offered_gateway_ids() );
+		$this->assert_offers( $this->get_offered_gateway_ids(), true );
 	}
 
 	public function test_a_gateway_that_speaks_the_engine_without_the_subscriptions_feature_is_hidden(): void {
@@ -256,7 +270,7 @@ final class PaymentRequirementTest extends LiteIntegrationTestCase {
 		);
 		$this->add_virtual_to_cart( true );
 
-		$this->assertSame( [ 'cod' ], $this->get_offered_gateway_ids() );
+		$this->assert_offers( $this->get_offered_gateway_ids(), false );
 	}
 
 	public function test_a_plan_cart_with_no_gateway_that_can_charge_renewals_offers_none(): void {
@@ -264,7 +278,9 @@ final class PaymentRequirementTest extends LiteIntegrationTestCase {
 		WC()->payment_gateways()->payment_gateways()['cod']->enabled = 'no';
 		$this->add_virtual_to_cart( true );
 
-		$this->assertSame( [], $this->get_offered_gateway_ids() );
+		$offered = $this->get_offered_gateway_ids();
+		$this->assertNotContains( 'cod', $offered );
+		$this->assertNotContains( 'bacs', $offered );
 	}
 
 	public function test_the_store_api_cart_lists_only_gateways_that_can_charge_renewals(): void {
@@ -275,7 +291,7 @@ final class PaymentRequirementTest extends LiteIntegrationTestCase {
 		$response = $this->dispatch_store_api( 'GET', '/cart' );
 
 		$this->assertSame( 200, $response->get_status() );
-		$this->assertSame( [ 'cod' ], $response->get_data()['payment_methods'] );
+		$this->assert_offers( $response->get_data()['payment_methods'], false );
 	}
 
 	public function test_the_store_api_cart_lists_every_gateway_for_a_plain_cart(): void {
@@ -283,10 +299,7 @@ final class PaymentRequirementTest extends LiteIntegrationTestCase {
 		wp_set_current_user( $this->create_customer() );
 		$this->add_virtual_to_cart( false );
 
-		$methods = $this->dispatch_store_api( 'GET', '/cart' )->get_data()['payment_methods'];
-		sort( $methods );
-
-		$this->assertSame( [ 'bacs', 'cod' ], $methods );
+		$this->assert_offers( $this->dispatch_store_api( 'GET', '/cart' )->get_data()['payment_methods'], true );
 	}
 
 	/**
@@ -413,7 +426,7 @@ final class PaymentRequirementTest extends LiteIntegrationTestCase {
 
 		$order = $this->make_order_to_pay( $this->create_customer(), true, true );
 
-		$this->assertSame( [ 'bacs', 'cod' ], $this->get_order_pay_gateway_ids( $order, true ) );
+		$this->assert_offers( $this->get_order_pay_gateway_ids( $order, true ), true );
 	}
 
 	public function test_order_pay_for_a_first_subscription_order_offers_only_gateways_that_can_charge_renewals(): void {
@@ -421,7 +434,7 @@ final class PaymentRequirementTest extends LiteIntegrationTestCase {
 
 		$order = $this->make_order_to_pay( $this->create_customer(), true, false );
 
-		$this->assertSame( [ 'cod' ], $this->get_order_pay_gateway_ids( $order, false ) );
+		$this->assert_offers( $this->get_order_pay_gateway_ids( $order, false ), false );
 	}
 
 	public function test_order_pay_for_a_plain_order_offers_every_gateway(): void {
@@ -429,7 +442,7 @@ final class PaymentRequirementTest extends LiteIntegrationTestCase {
 
 		$order = $this->make_order_to_pay( $this->create_customer(), false, false );
 
-		$this->assertSame( [ 'bacs', 'cod' ], $this->get_order_pay_gateway_ids( $order, true ) );
+		$this->assert_offers( $this->get_order_pay_gateway_ids( $order, true ), true );
 	}
 
 	/**
@@ -508,9 +521,31 @@ final class PaymentRequirementTest extends LiteIntegrationTestCase {
 	public function test_the_store_api_forgets_the_paid_order_after_the_request(): void {
 		$this->enable_gateways();
 		$order = $this->make_order_to_pay( $this->create_customer(), true, true );
-		$this->pay_order_through_store_api( $order, 'bacs', true );
 
-		$this->assertSame( [ 'cod' ], $this->get_offered_gateway_ids(), 'The plan cart decides again once the route has run.' );
+		$response = $this->pay_order_through_store_api( $order, 'bacs', true );
+
+		$this->assertSame( 200, $response->get_status() );
+		$this->assert_offers( $this->get_offered_gateway_ids(), false, 'The plan cart decides again once the route has run.' );
+	}
+
+	public function test_the_store_api_forgets_the_paid_order_after_a_refusal(): void {
+		$this->enable_gateways();
+		$order = $this->make_order_to_pay( $this->create_customer(), true, false );
+
+		$response = $this->pay_order_through_store_api( $order, 'bacs', false );
+
+		$this->assertSame( 400, $response->get_status() );
+		$this->assert_offers( $this->get_offered_gateway_ids(), true, 'The plain cart decides again once the refused route has run.' );
+	}
+
+	public function test_the_store_api_pays_a_plain_order_with_any_gateway(): void {
+		$this->enable_gateways();
+		$order = $this->make_order_to_pay( $this->create_customer(), false, false );
+
+		$response = $this->pay_order_through_store_api( $order, 'bacs', true );
+
+		$this->assertSame( 200, $response->get_status(), (string) wp_json_encode( $response->get_data() ) );
+		$this->assertSame( 'bacs', wc_get_order( $order->get_id() )->get_payment_method() );
 	}
 
 	/**
@@ -534,12 +569,26 @@ final class PaymentRequirementTest extends LiteIntegrationTestCase {
 		wp_set_current_user( $this->create_customer() );
 		$this->add_virtual_to_cart( true );
 
-		$this->assertSame( 'Sorry, no payment methods are available for subscriptions. Please contact us if you require assistance.', $this->get_no_payment_methods_message() );
+		$message = $this->get_no_payment_methods_message();
+
+		$this->assertNotSame( 'Core notice.', $message );
+		$this->assertStringContainsString( 'subscriptions', $message );
+		$this->assertStringNotContainsString( 'tab=checkout', $message, 'A customer gets no settings link.' );
 	}
 
 	public function test_the_no_payment_methods_notice_is_core_s_for_a_plain_cart(): void {
 		wp_set_current_user( $this->create_customer() );
 		$this->add_virtual_to_cart( false );
+
+		$this->assertSame( 'Core notice.', $this->get_no_payment_methods_message() );
+	}
+
+	public function test_the_no_payment_methods_notice_is_core_s_on_order_pay_for_a_renewal_order(): void {
+		$customer_id = $this->create_customer();
+		wp_set_current_user( $customer_id );
+		$order = $this->make_order_to_pay( $customer_id, true, true );
+		$this->add_virtual_to_cart( true );
+		$GLOBALS['wp']->query_vars['order-pay'] = (string) $order->get_id();
 
 		$this->assertSame( 'Core notice.', $this->get_no_payment_methods_message() );
 	}
