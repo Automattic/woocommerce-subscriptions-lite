@@ -4,6 +4,15 @@ on:
   push:
     branches: [ trunk ]
   pull_request:
+    # `edited` re-runs the checks when the description changes, which is where the
+    # Engine-Ref line lives (see below).
+    types: [ opened, synchronize, reopened, edited ]
+  workflow_dispatch:
+    inputs:
+      engine_ref:
+        description: WooCommerce monorepo branch to take the engine package from.
+        required: false
+        default: trunk
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -11,10 +20,19 @@ concurrency:
 
 # The engine dependency is a composer path repository expecting the WooCommerce
 # monorepo as a sibling checkout (../woocommerce). Every job reconstructs that
-# layout with a blobless sparse clone of just the engine package. The clone
-# tracks the monorepo trunk, so engine changes surface here as they land; the
-# clone step becomes a Packagist dependency once the engine package is
-# published.
+# layout with a blobless sparse clone of just the engine package
+# (.github/actions/checkout-engine). The clone tracks the monorepo trunk, so
+# engine changes surface here as they land; the clone step becomes a Packagist
+# dependency once the engine package is published.
+#
+# A pull request that needs an engine change not yet on trunk names the engine
+# branch on a line of its own in the description:
+#
+#   Engine-Ref: some-engine-branch
+#
+# Remove the line once the engine change is merged. A manual run takes the
+# branch as its engine_ref input. Each job's summary shows the engine branch and
+# commit it used.
 jobs:
   lint:
     name: Lint (PHP + JS + CSS)
@@ -27,11 +45,11 @@ jobs:
         with:
           path: woocommerce-subscriptions-lite
 
-      - name: Check out the engine package (monorepo sparse clone)
-        working-directory: ${{ github.workspace }}
-        run: |
-          git clone --depth 1 --filter=blob:none --sparse https://github.com/woocommerce/woocommerce.git woocommerce
-          git -C woocommerce sparse-checkout set packages/php/woocommerce-subscriptions-engine
+      - name: Check out the engine package
+        uses: ./woocommerce-subscriptions-lite/.github/actions/checkout-engine
+        with:
+          engine-ref: ${{ inputs.engine_ref }}
+          pr-body: ${{ github.event.pull_request.body }}
 
       - uses: shivammathur/setup-php@v2
         with:
@@ -70,11 +88,11 @@ jobs:
         with:
           path: woocommerce-subscriptions-lite
 
-      - name: Check out the engine package (monorepo sparse clone)
-        working-directory: ${{ github.workspace }}
-        run: |
-          git clone --depth 1 --filter=blob:none --sparse https://github.com/woocommerce/woocommerce.git woocommerce
-          git -C woocommerce sparse-checkout set packages/php/woocommerce-subscriptions-engine
+      - name: Check out the engine package
+        uses: ./woocommerce-subscriptions-lite/.github/actions/checkout-engine
+        with:
+          engine-ref: ${{ inputs.engine_ref }}
+          pr-body: ${{ github.event.pull_request.body }}
 
       - uses: shivammathur/setup-php@v2
         with:

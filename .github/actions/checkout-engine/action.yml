@@ -1,0 +1,55 @@
+name: Check out the engine package
+description: >
+  Sparse-clones the subscriptions engine package from the WooCommerce monorepo into
+  ./woocommerce, the sibling directory Lite's composer path repository expects. The
+  branch is the engine_ref input, else an "Engine-Ref: <branch>" line in the pull
+  request description, else trunk. See resolve-engine-ref.sh.
+
+inputs:
+  engine-ref:
+    description: Monorepo branch from a workflow_dispatch input. Empty to use the pull request description or trunk.
+    required: false
+    default: ''
+  pr-body:
+    description: The pull request description, searched for an Engine-Ref line. Empty outside pull requests.
+    required: false
+    default: ''
+
+outputs:
+  ref:
+    description: The monorepo branch the engine was taken from.
+    value: ${{ steps.resolve.outputs.ref }}
+  sha:
+    description: The monorepo commit the engine was taken from.
+    value: ${{ steps.clone.outputs.sha }}
+
+runs:
+  using: composite
+  steps:
+    # Untrusted text (the pull request description) only reaches the script
+    # through the environment, never through an expression in the script.
+    - name: Pick the engine branch
+      id: resolve
+      shell: bash
+      env:
+        DISPATCH_REF: ${{ inputs.engine-ref }}
+        PR_BODY: ${{ inputs.pr-body }}
+      run: bash "$GITHUB_ACTION_PATH/resolve-engine-ref.sh"
+
+    - name: Clone the monorepo (engine package only)
+      id: clone
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      env:
+        ENGINE_REF: ${{ steps.resolve.outputs.ref }}
+        REF_SOURCE: ${{ steps.resolve.outputs.source }}
+      run: |
+        git clone --depth 1 --filter=blob:none --sparse --branch "$ENGINE_REF" https://github.com/woocommerce/woocommerce.git woocommerce
+        git -C woocommerce sparse-checkout set packages/php/woocommerce-subscriptions-engine
+        SHA=$( git -C woocommerce rev-parse HEAD )
+        echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+
+        echo "Engine: \`woocommerce/woocommerce\` branch \`$ENGINE_REF\` at [\`${SHA:0:7}\`](https://github.com/woocommerce/woocommerce/commit/$SHA), from $REF_SOURCE." >> "$GITHUB_STEP_SUMMARY"
+        if [ "$ENGINE_REF" != 'trunk' ]; then
+          echo "::notice title=Engine ref::This job uses the engine from branch $ENGINE_REF, not trunk."
+        fi

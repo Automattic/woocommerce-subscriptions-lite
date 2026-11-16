@@ -37,6 +37,18 @@ composer install
 npm install
 ```
 
+CI checks Lite against the engine on the monorepo `trunk`. A pull request that
+needs an engine change not merged yet names the monorepo branch on a line of its
+own in the pull request description, and CI and the Playground build use that
+branch instead (editing the description re-runs them):
+
+```
+Engine-Ref: some-engine-branch
+```
+
+Remove the line once the engine change is on `trunk`, so the pull request is
+checked against `trunk` before it merges.
+
 ## Testing
 
 Tests run against a real WordPress + WooCommerce inside
