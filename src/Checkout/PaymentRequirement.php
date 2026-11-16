@@ -70,7 +70,7 @@ final class PaymentRequirement {
 	 * @param mixed $request  The request.
 	 * @return mixed The response, unchanged.
 	 */
-	public function note_store_api_order( $response, $handler, $request ) {
+	public function note_store_api_order( $response, $handler = null, $request = null ) {
 		$this->store_api_order_id = null;
 		if ( $request instanceof WP_REST_Request && 'POST' === $request->get_method() && 1 === preg_match( '#^/wc/store(?:/v1)?/checkout/(\d+)$#', $request->get_route(), $matches ) ) {
 			$this->store_api_order_id = (int) $matches[1];
