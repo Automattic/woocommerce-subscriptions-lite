@@ -26,6 +26,7 @@ use Automattic\WooCommerce\SubscriptionsLite\Pricing\BillingTerms;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\HeldLocks;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Hold;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
+use Automattic\WooCommerce\SubscriptionsLite\Payments\RenewalGateways;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ContractPlans;
 use DateTimeImmutable;
 use DateTimeZone;
@@ -43,12 +44,6 @@ final class RenewalProcessor {
 	 * Operation label of a Renew now run's contract lock.
 	 */
 	public const OPERATION = 'renewal';
-
-	/**
-	 * The gateway feature, besides the engine's, that says a gateway can charge renewals
-	 * automatically: the WooCommerce feature gateways already declare for subscriptions.
-	 */
-	public const GATEWAY_RENEWAL_FEATURE = 'subscriptions';
 
 	/**
 	 * Failure reason recorded on a cycle whose renewal order could not be built.
@@ -349,7 +344,7 @@ final class RenewalProcessor {
 			return;
 		}
 
-		if ( ! Payments::gateway_supports( (string) $contract->get_payment_method(), self::GATEWAY_RENEWAL_FEATURE ) ) {
+		if ( ! RenewalGateways::can_charge_renewals( (string) $contract->get_payment_method() ) ) {
 			$this->leave_for_payment(
 				$contract,
 				$cycle,

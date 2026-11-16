@@ -42,8 +42,8 @@ use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\HeldLocks;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Hold;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\HoldAnchor;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
+use Automattic\WooCommerce\SubscriptionsLite\Payments\RenewalGateways;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\RenewalOrderBuilder;
-use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\RenewalProcessor;
 use DateTimeImmutable;
 use DateTimeZone;
 use RuntimeException;
@@ -521,7 +521,7 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 
 	/**
 	 * Make `$gateway` support engine charges and automatic renewal payments (the engine
-	 * feature and {@see RenewalProcessor::GATEWAY_RENEWAL_FEATURE}) and answer each charge
+	 * feature and {@see RenewalGateways::FEATURE}) and answer each charge
 	 * with `$outcome` (see {@see self::$charge_outcome}). Calling it again only changes the
 	 * outcome. The hooks are restored with the rest after the test.
 	 *
@@ -538,7 +538,7 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 		add_filter(
 			'woocommerce_payment_gateway_supports',
 			static function ( $supported, $feature, $payment_gateway ) use ( $gateway ) {
-				if ( in_array( $feature, [ Payments::GATEWAY_FEATURE, RenewalProcessor::GATEWAY_RENEWAL_FEATURE ], true ) && is_object( $payment_gateway ) && $gateway === $payment_gateway->id ) {
+				if ( in_array( $feature, [ Payments::GATEWAY_FEATURE, RenewalGateways::FEATURE ], true ) && is_object( $payment_gateway ) && $gateway === $payment_gateway->id ) {
 					return true;
 				}
 				return $supported;
