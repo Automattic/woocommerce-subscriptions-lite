@@ -56,21 +56,21 @@ final class PaymentRequirement {
 		add_filter( 'woocommerce_cart_needs_payment', [ $instance, 'is_cart_payment_required' ], 10, 2 );
 		add_filter( 'woocommerce_order_needs_payment', [ $instance, 'is_order_payment_required' ], 10, 3 );
 		add_filter( 'woocommerce_available_payment_gateways', [ $instance, 'get_available_payment_gateways' ] );
-		add_filter( 'rest_request_before_callbacks', [ $instance, 'get_response_noting_store_api_order' ], 10, 3 );
-		add_filter( 'rest_request_after_callbacks', [ $instance, 'get_response_forgetting_store_api_order' ] );
+		add_filter( 'rest_request_before_callbacks', [ $instance, 'note_store_api_order' ], 10, 3 );
+		add_filter( 'rest_request_after_callbacks', [ $instance, 'forget_store_api_order' ] );
 		add_filter( 'woocommerce_no_available_payment_methods_message', [ $instance, 'get_no_payment_methods_message' ] );
 	}
 
 	/**
-	 * Pass the response through, noting the order when the request pays an existing order
-	 * through the Store API.
+	 * Note the order when the request pays an existing order through the Store API. Hooked
+	 * on a filter, so it returns the response unchanged.
 	 *
 	 * @param mixed $response Response so far (null unless another callback short-circuited).
 	 * @param mixed $handler  Route handler.
 	 * @param mixed $request  The request.
 	 * @return mixed The response, unchanged.
 	 */
-	public function get_response_noting_store_api_order( $response, $handler, $request ) {
+	public function note_store_api_order( $response, $handler, $request ) {
 		$this->store_api_order_id = null;
 		if ( $request instanceof WP_REST_Request && 'POST' === $request->get_method() && 1 === preg_match( '#^/wc/store(?:/v1)?/checkout/(\d+)$#', $request->get_route(), $matches ) ) {
 			$this->store_api_order_id = (int) $matches[1];
@@ -80,12 +80,13 @@ final class PaymentRequirement {
 	}
 
 	/**
-	 * Pass the response through, forgetting the noted Store API order once its route has run.
+	 * Forget the noted Store API order once its route has run. Hooked on a filter, so it
+	 * returns the response unchanged.
 	 *
 	 * @param mixed $response The route's response.
 	 * @return mixed The response, unchanged.
 	 */
-	public function get_response_forgetting_store_api_order( $response ) {
+	public function forget_store_api_order( $response ) {
 		$this->store_api_order_id = null;
 
 		return $response;
