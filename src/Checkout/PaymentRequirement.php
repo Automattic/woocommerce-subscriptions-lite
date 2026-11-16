@@ -9,8 +9,8 @@
  * gateway runs and saves the method for the renewals; a free subscription needs none.
  * A payment that starts a subscription (a plan cart, or order-pay for a first subscription
  * order) offers only gateways that can charge its renewals automatically: Lite has no
- * manual-renewal fallback to sell a subscription with any other method. Paying a renewal
- * order by hand keeps every gateway.
+ * manual-renewal fallback to sell a subscription with any other method, and the classic
+ * notice says so when none qualifies. Paying a renewal order by hand keeps every gateway.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Checkout
  */
@@ -35,6 +35,11 @@ defined( 'ABSPATH' ) || exit;
 final class PaymentRequirement {
 
 	/**
+	 * Capability of a store manager who can enable payment gateways.
+	 */
+	private const MANAGE_PAYMENTS_CAPABILITY = 'manage_woocommerce';
+
+	/**
 	 * The order the Store API pay-for-order route (`checkout/{id}`) is paying in this request.
 	 * The gateway filter gets no request, so the route's order is noted before its callback runs.
 	 *
@@ -53,6 +58,7 @@ final class PaymentRequirement {
 		add_filter( 'woocommerce_available_payment_gateways', [ $instance, 'get_available_payment_gateways' ] );
 		add_filter( 'rest_request_before_callbacks', [ $instance, 'get_response_noting_store_api_order' ], 10, 3 );
 		add_filter( 'rest_request_after_callbacks', [ $instance, 'get_response_forgetting_store_api_order' ] );
+		add_filter( 'woocommerce_no_available_payment_methods_message', [ $instance, 'get_no_payment_methods_message' ] );
 	}
 
 	/**
@@ -104,6 +110,31 @@ final class PaymentRequirement {
 			},
 			ARRAY_FILTER_USE_KEY
 		);
+	}
+
+	/**
+	 * The notice the classic checkout and order-pay show when no gateway is offered: for a
+	 * payment that starts a subscription it names the cause, with a store-manager variant
+	 * pointing at the payments settings.
+	 *
+	 * @param mixed $message Core's notice.
+	 * @return mixed The notice.
+	 */
+	public function get_no_payment_methods_message( $message ) {
+		if ( ! $this->is_subscription_payment() ) {
+			return $message;
+		}
+
+		if ( current_user_can( self::MANAGE_PAYMENTS_CAPABILITY ) ) {
+			return sprintf(
+				/* translators: 1: opening link tag to the payments settings, 2: closing link tag. */
+				esc_html__( 'No enabled payment method can charge subscription renewals automatically. Enable one that supports subscriptions in %1$spayments settings%2$s.', 'woocommerce-subscriptions-lite' ),
+				'<a href="' . esc_url( admin_url( 'admin.php?page=wc-settings&tab=checkout' ) ) . '">',
+				'</a>'
+			);
+		}
+
+		return esc_html__( 'Sorry, no payment methods are available for subscriptions. Please contact us if you require assistance.', 'woocommerce-subscriptions-lite' );
 	}
 
 	/**

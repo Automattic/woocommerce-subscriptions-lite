@@ -485,4 +485,35 @@ final class PaymentRequirementTest extends LiteIntegrationTestCase {
 
 		$this->assertSame( [ 'cod' ], $this->get_offered_gateway_ids(), 'The plan cart decides again once the route has run.' );
 	}
+
+	/**
+	 * The classic checkout's notice when no gateway is offered.
+	 */
+	private function get_no_payment_methods_message(): string {
+		return (string) apply_filters( 'woocommerce_no_available_payment_methods_message', 'Core notice.' );
+	}
+
+	public function test_the_no_payment_methods_notice_points_a_store_manager_at_the_payments_settings(): void {
+		wp_set_current_user( self::factory()->user->create( [ 'role' => 'administrator' ] ) );
+		$this->add_virtual_to_cart( true );
+
+		$message = $this->get_no_payment_methods_message();
+
+		$this->assertStringContainsString( 'charge subscription renewals automatically', $message );
+		$this->assertStringContainsString( 'tab=checkout', $message );
+	}
+
+	public function test_the_no_payment_methods_notice_tells_a_customer_none_is_available_for_subscriptions(): void {
+		wp_set_current_user( $this->create_customer() );
+		$this->add_virtual_to_cart( true );
+
+		$this->assertSame( 'Sorry, no payment methods are available for subscriptions. Please contact us if you require assistance.', $this->get_no_payment_methods_message() );
+	}
+
+	public function test_the_no_payment_methods_notice_is_core_s_for_a_plain_cart(): void {
+		wp_set_current_user( $this->create_customer() );
+		$this->add_virtual_to_cart( false );
+
+		$this->assertSame( 'Core notice.', $this->get_no_payment_methods_message() );
+	}
 }
