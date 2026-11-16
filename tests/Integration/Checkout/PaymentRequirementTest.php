@@ -15,9 +15,11 @@ use Automattic\WooCommerce\SubscriptionsLite\Plans\ApplicabilityStore;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ProductApplicability;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\RenewalOrderBuilder;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
+use ReflectionMethod;
 use WC_Order;
 use WC_Order_Item_Fee;
 use WC_Product_Simple;
+use WP_Error;
 
 /**
  * @covers \Automattic\WooCommerce\SubscriptionsLite\Checkout\PaymentRequirement
@@ -35,7 +37,55 @@ final class PaymentRequirementTest extends LiteIntegrationTestCase {
 	public function tear_down(): void {
 		WC()->cart->empty_cart();
 		unset( $_POST[ CartPlanHooks::SELLING_PLAN_ID_KEY ] );
+		foreach ( $this->gateways_enabled_before as $gateway_id => $enabled ) {
+			WC()->payment_gateways()->payment_gateways()[ $gateway_id ]->enabled = $enabled;
+		}
 		parent::tear_down();
+	}
+
+	/**
+	 * The `enabled` value of each gateway {@see self::enable_gateways()} changed.
+	 *
+	 * @var array<string, string>
+	 */
+	private $gateways_enabled_before = [];
+
+	/**
+	 * Enable cash on delivery, which can charge renewals, and bank transfer, which cannot.
+	 */
+	private function enable_gateways(): void {
+		foreach ( [ 'cod', 'bacs' ] as $gateway_id ) {
+			$gateway = WC()->payment_gateways()->payment_gateways()[ $gateway_id ];
+
+			$this->gateways_enabled_before[ $gateway_id ] = $gateway->enabled;
+			$gateway->enabled                             = 'yes';
+		}
+		$this->support_engine_charges( 'cod' );
+	}
+
+	/**
+	 * Ids of the gateways WooCommerce offers now.
+	 *
+	 * @return string[]
+	 */
+	private function get_offered_gateway_ids(): array {
+		$ids = array_keys( WC()->payment_gateways()->get_available_payment_gateways() );
+		sort( $ids );
+
+		return $ids;
+	}
+
+	/**
+	 * Put a virtual product in the cart (no shipping needed), on a plan or one-time.
+	 *
+	 * @param bool $on_plan Whether to pick a monthly plan.
+	 */
+	private function add_virtual_to_cart( bool $on_plan ): void {
+		$product = new WC_Product_Simple();
+		$product->set_name( 'Coffee club' );
+		$product->set_regular_price( '20.00' );
+		$product->set_virtual( true );
+		$this->add_to_cart( (int) $product->save(), $on_plan );
 	}
 
 	/**
@@ -177,5 +227,145 @@ final class PaymentRequirementTest extends LiteIntegrationTestCase {
 		WC()->cart->empty_cart();
 		$this->add_to_cart( $this->make_product( '0' ), false );
 		$this->assertFalse( WC()->cart->needs_payment() );
+	}
+
+	public function test_a_plan_cart_offers_only_gateways_that_can_charge_renewals(): void {
+		$this->enable_gateways();
+		$this->add_virtual_to_cart( true );
+
+		$this->assertSame( [ 'cod' ], $this->get_offered_gateway_ids() );
+	}
+
+	public function test_a_plain_cart_offers_every_gateway(): void {
+		$this->enable_gateways();
+		$this->add_virtual_to_cart( false );
+
+		$this->assertSame( [ 'bacs', 'cod' ], $this->get_offered_gateway_ids() );
+	}
+
+	public function test_a_gateway_that_speaks_the_engine_without_the_subscriptions_feature_is_hidden(): void {
+		$this->enable_gateways();
+		add_filter(
+			'woocommerce_payment_gateway_supports',
+			static function ( $supported, $feature, $gateway ) {
+				return Payments::GATEWAY_FEATURE === $feature && is_object( $gateway ) && 'bacs' === $gateway->id ? true : $supported;
+			},
+			10,
+			3
+		);
+		$this->add_virtual_to_cart( true );
+
+		$this->assertSame( [ 'cod' ], $this->get_offered_gateway_ids() );
+	}
+
+	public function test_a_plan_cart_with_no_gateway_that_can_charge_renewals_offers_none(): void {
+		$this->enable_gateways();
+		WC()->payment_gateways()->payment_gateways()['cod']->enabled = 'no';
+		$this->add_virtual_to_cart( true );
+
+		$this->assertSame( [], $this->get_offered_gateway_ids() );
+	}
+
+	public function test_the_store_api_cart_lists_only_gateways_that_can_charge_renewals(): void {
+		$this->enable_gateways();
+		wp_set_current_user( $this->create_customer() );
+		$this->add_virtual_to_cart( true );
+
+		$response = $this->dispatch_store_api( 'GET', '/cart' );
+
+		$this->assertSame( 200, $response->get_status() );
+		$this->assertSame( [ 'cod' ], $response->get_data()['payment_methods'] );
+	}
+
+	public function test_the_store_api_cart_lists_every_gateway_for_a_plain_cart(): void {
+		$this->enable_gateways();
+		wp_set_current_user( $this->create_customer() );
+		$this->add_virtual_to_cart( false );
+
+		$methods = $this->dispatch_store_api( 'GET', '/cart' )->get_data()['payment_methods'];
+		sort( $methods );
+
+		$this->assertSame( [ 'bacs', 'cod' ], $methods );
+	}
+
+	/**
+	 * Place the current cart through the Store API checkout route.
+	 *
+	 * @param string $payment_method Gateway id.
+	 */
+	private function place_store_api_order( string $payment_method ): \WP_REST_Response {
+		$address = self::BILLING_ADDRESS + [
+			'company'   => '',
+			'address_2' => '',
+			'state'     => '',
+		];
+
+		return $this->dispatch_store_api(
+			'POST',
+			'/checkout',
+			[
+				'billing_address'  => (object) $address,
+				'shipping_address' => (object) array_diff_key( $address, [ 'email' => true ] ),
+				'payment_method'   => $payment_method,
+			]
+		);
+	}
+
+	public function test_the_store_api_checkout_refuses_a_gateway_that_cannot_charge_renewals(): void {
+		$this->enable_gateways();
+		wp_set_current_user( $this->create_customer() );
+		$this->add_virtual_to_cart( true );
+
+		$response = $this->place_store_api_order( 'bacs' );
+
+		$this->assertSame( 400, $response->get_status() );
+		$this->assertSame( 'woocommerce_rest_checkout_payment_method_disabled', $response->get_data()['code'] );
+	}
+
+	public function test_the_store_api_checkout_accepts_a_gateway_that_can_charge_renewals(): void {
+		$this->enable_gateways();
+		wp_set_current_user( $this->create_customer() );
+		$this->add_virtual_to_cart( true );
+
+		$response = $this->place_store_api_order( 'cod' );
+
+		$this->assertSame( 200, $response->get_status(), (string) wp_json_encode( $response->get_data() ) );
+		$this->assertSame( 'cod', wc_get_order( $response->get_data()['order_id'] )->get_payment_method() );
+	}
+
+	/**
+	 * The classic checkout's validation errors for the current cart paid with `$payment_method`
+	 * (core's own validation; other fields are left empty, so only the `payment` code matters).
+	 *
+	 * @param string $payment_method Gateway id.
+	 */
+	private function get_classic_checkout_errors( string $payment_method ): WP_Error {
+		$_POST['payment_method'] = $payment_method;
+		$data                    = WC()->checkout()->get_posted_data();
+		unset( $_POST['payment_method'] );
+
+		$errors   = new WP_Error();
+		$validate = new ReflectionMethod( WC()->checkout(), 'validate_checkout' );
+		$validate->setAccessible( true );
+		$validate->invokeArgs( WC()->checkout(), [ &$data, &$errors ] );
+
+		return $errors;
+	}
+
+	public function test_the_classic_checkout_refuses_a_gateway_that_cannot_charge_renewals(): void {
+		$this->enable_gateways();
+		wp_set_current_user( $this->create_customer() );
+		$this->add_virtual_to_cart( true );
+
+		$this->assertContains( 'payment', $this->get_classic_checkout_errors( 'bacs' )->get_error_codes() );
+		$this->assertNotContains( 'payment', $this->get_classic_checkout_errors( 'cod' )->get_error_codes() );
+	}
+
+	public function test_the_classic_checkout_accepts_any_gateway_for_a_plain_cart(): void {
+		$this->enable_gateways();
+		wp_set_current_user( $this->create_customer() );
+		$this->add_virtual_to_cart( false );
+
+		$this->assertNotContains( 'payment', $this->get_classic_checkout_errors( 'bacs' )->get_error_codes() );
 	}
 }

@@ -50,6 +50,8 @@ use RuntimeException;
 use WC_Order;
 use WC_Product_Simple;
 use WP_Error;
+use WP_REST_Request;
+use WP_REST_Response;
 use WP_UnitTestCase;
 
 /**
@@ -494,6 +496,24 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 		$this->add_cycle_with_lock( $contract_id, $cycle_args );
 
 		return $order;
+	}
+
+	/**
+	 * Dispatch a Store API request (`wc/store/v1`) for the current user and cart, with a
+	 * valid nonce, as the block checkout sends it.
+	 *
+	 * @param string               $method HTTP method.
+	 * @param string               $route  Route under `wc/store/v1`, such as `/cart`.
+	 * @param array<string, mixed> $body   Body parameters.
+	 */
+	protected function dispatch_store_api( string $method, string $route, array $body = [] ): WP_REST_Response {
+		$request = new WP_REST_Request( $method, '/wc/store/v1' . $route );
+		$request->set_header( 'Nonce', wp_create_nonce( 'wc_store_api' ) );
+		if ( [] !== $body ) {
+			$request->set_body_params( $body );
+		}
+
+		return rest_do_request( $request );
 	}
 
 	/**
