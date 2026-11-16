@@ -35,7 +35,7 @@ concurrency:
 # commit it used.
 jobs:
   lint:
-    name: Lint (PHP + JS + CSS)
+    name: Lint and JS unit tests
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -76,6 +76,9 @@ jobs:
 
       - name: CSS lint
         run: npm run lint:css
+
+      - name: JS unit tests
+        run: npm run test:js
 
   test:
     name: Integration tests (wp-env)

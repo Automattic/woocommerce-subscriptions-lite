@@ -60,6 +60,7 @@ composer test            # the integration suite inside the tests environment
 composer lint            # PHP coding standards
 npm run lint:js          # JS
 npm run lint:css         # SCSS
+npm run test:js          # JS unit tests (Jest)
 ```
 
 The suite bootstrap installs WooCommerce and the engine schema once, and
