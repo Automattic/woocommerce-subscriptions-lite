@@ -4,20 +4,72 @@ on:
   push:
     branches: [ trunk ]
   pull_request:
+    # `edited` re-runs the checks when the description changes, which is where the
+    # Engine-Ref line lives; the draft changes re-run the engine ref check (see below).
+    types: [ opened, synchronize, reopened, edited, ready_for_review, converted_to_draft ]
+  workflow_dispatch:
+    inputs:
+      engine_ref:
+        description: WooCommerce monorepo branch to take the engine package from.
+        required: false
+        default: trunk
 
+# The event name keeps a manual run on trunk and a push to trunk from cancelling
+# each other.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 # The engine dependency is a composer path repository expecting the WooCommerce
 # monorepo as a sibling checkout (../woocommerce). Every job reconstructs that
-# layout with a blobless sparse clone of just the engine package. The clone
-# tracks the monorepo trunk, so engine changes surface here as they land; the
-# clone step becomes a Packagist dependency once the engine package is
-# published.
+# layout with a blobless sparse clone of just the engine package
+# (.github/actions/checkout-engine). The clone tracks the monorepo trunk, so
+# engine changes surface here as they land; the clone step becomes a Packagist
+# dependency once the engine package is published.
+#
+# A pull request that needs an engine change not yet on trunk names the engine
+# branch on a line of its own in the description:
+#
+#   Engine-Ref: some-engine-branch
+#
+# Lint and tests then run against that branch, while the "Engine ref" check fails
+# unless the pull request is a draft: keep it a draft until the engine change is
+# merged, then remove the line. A manual run takes the branch as its engine_ref
+# input. Each job's summary shows the engine branch and commit it used.
 jobs:
+  engine-ref:
+    name: Engine ref
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github/actions/checkout-engine
+
+      - name: Pick the engine branch
+        id: resolve
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: bash .github/actions/checkout-engine/resolve-engine-ref.sh
+
+      # A pull request merged with an engine branch would leave Lite trunk, which
+      # always uses engine trunk, red until the engine change merges.
+      - name: Require trunk once the pull request is ready
+        env:
+          ENGINE_REF: ${{ steps.resolve.outputs.ref }}
+          IS_DRAFT: ${{ github.event.pull_request.draft }}
+        run: |
+          if [ "$ENGINE_REF" = 'trunk' ]; then
+            echo "Engine: trunk." >> "$GITHUB_STEP_SUMMARY"
+          elif [ "$IS_DRAFT" = 'true' ]; then
+            echo "Engine: branch \`$ENGINE_REF\`. Allowed while the pull request is a draft." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::error title=Engine ref::The description names engine branch $ENGINE_REF. Remove the Engine-Ref line once the engine PR has merged, or convert this pull request to a draft until then."
+            exit 1
+          fi
+
   lint:
-    name: Lint (PHP + JS + CSS)
+    name: Lint and JS unit tests
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -27,11 +79,11 @@ jobs:
         with:
           path: woocommerce-subscriptions-lite
 
-      - name: Check out the engine package (monorepo sparse clone)
-        working-directory: ${{ github.workspace }}
-        run: |
-          git clone --depth 1 --filter=blob:none --sparse https://github.com/woocommerce/woocommerce.git woocommerce
-          git -C woocommerce sparse-checkout set packages/php/woocommerce-subscriptions-engine
+      - name: Check out the engine package
+        uses: ./woocommerce-subscriptions-lite/.github/actions/checkout-engine
+        with:
+          engine-ref: ${{ inputs.engine_ref }}
+          pr-body: ${{ github.event.pull_request.body }}
 
       - uses: shivammathur/setup-php@v2
         with:
@@ -46,7 +98,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version-file: woocommerce-subscriptions-lite/package.json
           cache: npm
           cache-dependency-path: woocommerce-subscriptions-lite/package-lock.json
 
@@ -59,6 +111,32 @@ jobs:
       - name: CSS lint
         run: npm run lint:css
 
+      - name: JS unit tests
+        run: npm run test:js
+
+  php74:
+    name: PHP 7.4 syntax
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The package floor is PHP 7.4, and the PHPCompatibility sniffs in
+      # `composer lint` do not know newer syntax, so every file is parsed by 7.4.
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '7.4'
+          coverage: none
+          tools: none
+
+      - name: Lint every PHP file on PHP 7.4
+        run: |
+          # `|| exit 1` keeps xargs going after a failure, so every error is listed.
+          # shellcheck disable=SC2016
+          find . -name '*.php' -not -path './vendor/*' -not -path './node_modules/*' -print0 \
+            | xargs -0 -n 1 -P 4 sh -c 'php -l "$0" || exit 1' > php-lint.log 2>&1 \
+            || { grep -v '^No syntax errors' php-lint.log; exit 1; }
+          echo "$( wc -l < php-lint.log ) files parse on PHP 7.4."
+
   test:
     name: Integration tests (wp-env)
     runs-on: ubuntu-latest
@@ -70,11 +148,11 @@ jobs:
         with:
           path: woocommerce-subscriptions-lite
 
-      - name: Check out the engine package (monorepo sparse clone)
-        working-directory: ${{ github.workspace }}
-        run: |
-          git clone --depth 1 --filter=blob:none --sparse https://github.com/woocommerce/woocommerce.git woocommerce
-          git -C woocommerce sparse-checkout set packages/php/woocommerce-subscriptions-engine
+      - name: Check out the engine package
+        uses: ./woocommerce-subscriptions-lite/.github/actions/checkout-engine
+        with:
+          engine-ref: ${{ inputs.engine_ref }}
+          pr-body: ${{ github.event.pull_request.body }}
 
       - uses: shivammathur/setup-php@v2
         with:
@@ -86,7 +164,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version-file: woocommerce-subscriptions-lite/package.json
           cache: npm
           cache-dependency-path: woocommerce-subscriptions-lite/package-lock.json
 

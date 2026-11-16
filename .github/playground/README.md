@@ -22,7 +22,8 @@ page they open.
 - Playground does not run scheduled actions, so nothing renews by itself. "Renew now" on a subscription works.
 - No payment gateway in the preview can be charged automatically, so renewal orders wait for payment.
 - No email is sent.
-- The engine comes from the WooCommerce `trunk` at build time, as in CI.
+- The engine comes from the WooCommerce `trunk` at build time, or from the branch an `Engine-Ref:` line in the pull
+  request description names, as in CI.
 - The artifact proxy picks the newest build for the pull request's branch name. Never put a secret in the Blueprint
   or in `setup.php`.
 - `setup.php` calls plugin code. If a pull request changes that code, update `setup.php` in the same pull request;
