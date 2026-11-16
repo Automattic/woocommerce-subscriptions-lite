@@ -44,7 +44,8 @@ runs:
         ENGINE_REF: ${{ steps.resolve.outputs.ref }}
         REF_SOURCE: ${{ steps.resolve.outputs.source }}
       run: |
-        git clone --depth 1 --filter=blob:none --sparse --branch "$ENGINE_REF" https://github.com/woocommerce/woocommerce.git woocommerce
+        # ENGINE_REPO is a test seam shared with resolve-engine-ref.sh; CI leaves it unset.
+        git clone --depth 1 --filter=blob:none --sparse --branch "$ENGINE_REF" "${ENGINE_REPO:-https://github.com/woocommerce/woocommerce.git}" woocommerce
         git -C woocommerce sparse-checkout set packages/php/woocommerce-subscriptions-engine
         SHA=$( git -C woocommerce rev-parse HEAD )
         echo "sha=$SHA" >> "$GITHUB_OUTPUT"

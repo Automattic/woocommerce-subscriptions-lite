@@ -10,6 +10,8 @@
 
 set -euo pipefail
 
+# Test seam: point ENGINE_REPO at a local repository to try the script; CI leaves
+# it unset. The clone step in action.yml reads the same variable and default.
 ENGINE_REPO="${ENGINE_REPO:-https://github.com/woocommerce/woocommerce.git}"
 
 fail() {
@@ -55,7 +57,9 @@ fi
 if [ "$ref" != 'trunk' ]; then
 	status=0
 	git ls-remote --exit-code "$ENGINE_REPO" "refs/heads/$ref" > /dev/null || status=$?
-	if [ "$status" -eq 2 ]; then
+	if [ "$status" -eq 2 ] && [[ "$ref" =~ ^[0-9a-f]{7,40}$ || "$ref" == refs/* ]]; then
+		fail "The engine ref '$ref' (from $ref_source) is not a branch. Give a branch name, such as my-branch, not a commit or a refs/ path."
+	elif [ "$status" -eq 2 ]; then
 		fail "Branch '$ref' (from $ref_source) does not exist in woocommerce/woocommerce."
 	elif [ "$status" -ne 0 ]; then
 		fail "Could not look up branch '$ref' in woocommerce/woocommerce (git ls-remote exit $status)."

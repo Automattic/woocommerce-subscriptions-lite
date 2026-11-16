@@ -171,7 +171,8 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       # The engine ref and commit come from the build job, which runs pull request
-      # code, so they are checked again before they go into the comment.
+      # code, so they are checked again before they go into the comment, with the
+      # same rules as resolve-engine-ref.sh minus the git checks.
       - name: Write the comment
         env:
           PLAYGROUND_ADMIN_URL: ${{ steps.playground.outputs.admin_url }}
@@ -180,7 +181,7 @@ jobs:
           ENGINE_REF: ${{ needs.build.outputs.engine-ref }}
           ENGINE_SHA: ${{ needs.build.outputs.engine-sha }}
         run: |
-          if [[ "$ENGINE_REF" =~ ^[A-Za-z0-9._/-]+$ && "$ENGINE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+          if [[ ${#ENGINE_REF} -le 200 && "$ENGINE_REF" =~ ^[A-Za-z0-9._/-]+$ && "$ENGINE_REF" != -* && "$ENGINE_REF" != *..* && "$ENGINE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
             ENGINE="the subscriptions engine from WooCommerce \`${ENGINE_REF}\` at [\`${ENGINE_SHA:0:7}\`](https://github.com/woocommerce/woocommerce/commit/${ENGINE_SHA})"
           else
             ENGINE='the subscriptions engine from an unknown WooCommerce branch'
