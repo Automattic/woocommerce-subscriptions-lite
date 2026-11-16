@@ -49,6 +49,14 @@ final class PaymentRequirement {
 	private $store_api_order_id = null;
 
 	/**
+	 * The values {@see self::$store_api_order_id} had before each REST request still running,
+	 * so a request nested in the pay-for-order route gives the route's order back.
+	 *
+	 * @var array<int, int|null>
+	 */
+	private $outer_store_api_order_ids = [];
+
+	/**
 	 * Bind the saved-method query, the free-first-order payment filters and the gateway filter.
 	 */
 	public static function register(): void {
@@ -72,7 +80,8 @@ final class PaymentRequirement {
 	 * @return mixed The response, unchanged.
 	 */
 	public function note_store_api_order( $response, $handler = null, $request = null ) {
-		$this->store_api_order_id = null;
+		$this->outer_store_api_order_ids[] = $this->store_api_order_id;
+		$this->store_api_order_id          = null;
 		if ( $request instanceof WP_REST_Request && 'POST' === $request->get_method() && self::is_store_api_order_route( $request->get_route() ) ) {
 			$this->store_api_order_id = absint( $request->get_url_params()['id'] ?? 0 );
 		}
@@ -96,14 +105,14 @@ final class PaymentRequirement {
 	}
 
 	/**
-	 * Forget the noted Store API order once its route has run. Hooked on a filter, so it
-	 * returns the response unchanged.
+	 * Forget the noted Store API order once its route has run, restoring the order of an
+	 * outer request. Hooked on a filter, so it returns the response unchanged.
 	 *
 	 * @param mixed $response The route's response.
 	 * @return mixed The response, unchanged.
 	 */
 	public function forget_store_api_order( $response ) {
-		$this->store_api_order_id = null;
+		$this->store_api_order_id = array_pop( $this->outer_store_api_order_ids );
 
 		return $response;
 	}

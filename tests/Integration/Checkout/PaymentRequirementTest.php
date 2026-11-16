@@ -490,6 +490,21 @@ final class PaymentRequirementTest extends LiteIntegrationTestCase {
 		$this->assertNotSame( 'bacs', wc_get_order( $order->get_id() )->get_payment_method() );
 	}
 
+	public function test_a_rest_request_nested_in_the_pay_for_order_route_keeps_the_paid_order(): void {
+		$this->enable_gateways();
+		$order = $this->make_order_to_pay( $this->create_customer(), true, true );
+		add_action(
+			'woocommerce_store_api_checkout_order_processed',
+			function (): void {
+				$this->dispatch_store_api( 'GET', '/cart' );
+			}
+		);
+
+		$response = $this->pay_order_through_store_api( $order, 'bacs', true );
+
+		$this->assertSame( 200, $response->get_status(), 'The renewal order still decides after the nested request, not the plan cart.' );
+	}
+
 	public function test_the_store_api_forgets_the_paid_order_after_the_request(): void {
 		$this->enable_gateways();
 		$order = $this->make_order_to_pay( $this->create_customer(), true, true );
