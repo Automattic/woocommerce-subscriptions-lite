@@ -64,7 +64,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version-file: woocommerce-subscriptions-lite/package.json
           cache: npm
           cache-dependency-path: woocommerce-subscriptions-lite/package-lock.json
 
@@ -130,7 +130,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version-file: woocommerce-subscriptions-lite/package.json
           cache: npm
           cache-dependency-path: woocommerce-subscriptions-lite/package-lock.json
 
