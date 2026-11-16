@@ -46,8 +46,10 @@ branch instead (editing the description re-runs them):
 Engine-Ref: some-engine-branch
 ```
 
-Remove the line once the engine change is on `trunk`, so the pull request is
-checked against `trunk` before it merges.
+While the line names a branch other than `trunk`, CI's "Engine ref" check fails
+unless the pull request is a draft, so it cannot merge against an unmerged engine
+change. Keep the pull request a draft until the engine change is on `trunk`, then
+remove the line and mark it ready: CI then checks it against `trunk`.
 
 ## Testing
 

@@ -5,8 +5,8 @@ on:
     branches: [ trunk ]
   pull_request:
     # `edited` re-runs the checks when the description changes, which is where the
-    # Engine-Ref line lives (see below).
-    types: [ opened, synchronize, reopened, edited ]
+    # Engine-Ref line lives; the draft changes re-run the engine ref check (see below).
+    types: [ opened, synchronize, reopened, edited, ready_for_review, converted_to_draft ]
   workflow_dispatch:
     inputs:
       engine_ref:
@@ -30,10 +30,42 @@ concurrency:
 #
 #   Engine-Ref: some-engine-branch
 #
-# Remove the line once the engine change is merged. A manual run takes the
-# branch as its engine_ref input. Each job's summary shows the engine branch and
-# commit it used.
+# Lint and tests then run against that branch, while the "Engine ref" check fails
+# unless the pull request is a draft: keep it a draft until the engine change is
+# merged, then remove the line. A manual run takes the branch as its engine_ref
+# input. Each job's summary shows the engine branch and commit it used.
 jobs:
+  engine-ref:
+    name: Engine ref
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github/actions/checkout-engine
+
+      - name: Pick the engine branch
+        id: resolve
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: bash .github/actions/checkout-engine/resolve-engine-ref.sh
+
+      # A pull request merged with an engine branch would leave Lite trunk, which
+      # always uses engine trunk, red until the engine change merges.
+      - name: Require trunk once the pull request is ready
+        env:
+          ENGINE_REF: ${{ steps.resolve.outputs.ref }}
+          IS_DRAFT: ${{ github.event.pull_request.draft }}
+        run: |
+          if [ "$ENGINE_REF" = 'trunk' ]; then
+            echo "Engine: trunk." >> "$GITHUB_STEP_SUMMARY"
+          elif [ "$IS_DRAFT" = 'true' ]; then
+            echo "Engine: branch \`$ENGINE_REF\`. Allowed while the pull request is a draft." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::error title=Engine ref::The description names engine branch $ENGINE_REF. Remove the Engine-Ref line once the engine PR has merged, or convert this pull request to a draft until then."
+            exit 1
+          fi
+
   lint:
     name: Lint and JS unit tests
     runs-on: ubuntu-latest
