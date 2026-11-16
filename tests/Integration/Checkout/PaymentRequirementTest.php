@@ -516,6 +516,7 @@ final class PaymentRequirementTest extends LiteIntegrationTestCase {
 		$response = $this->pay_order_through_store_api( $order, 'bacs', true );
 
 		$this->assertSame( 200, $response->get_status(), 'The renewal order still decides after the nested request, not the plan cart.' );
+		$this->assert_offers( $this->get_offered_gateway_ids(), false, 'The plan cart decides again once the route has run.' );
 	}
 
 	public function test_the_store_api_forgets_the_paid_order_after_the_request(): void {

@@ -50,7 +50,9 @@ final class PaymentRequirement {
 
 	/**
 	 * The values {@see self::$store_api_order_id} had before each REST request still running,
-	 * so a request nested in the pay-for-order route gives the route's order back.
+	 * so a request nested in the pay-for-order route gives the route's order back. A Throwable
+	 * that escapes a request skips the after filter, so if a caller catches it the stale id stays
+	 * until the process ends (the Store API catches its own; core's dispatch stack leaks alike).
 	 *
 	 * @var array<int, int|null>
 	 */
