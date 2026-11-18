@@ -121,6 +121,9 @@ final class Bootstrap {
 			// Lite-owned plan applicability, validated against the engine's
 			// plans catalog.
 			Admin\ProductPlansPanel::register();
+
+			// Warning on WooCommerce screens when no enabled gateway can renew.
+			Admin\RenewalGatewayNotice::register();
 		}
 
 		// Email: contract and renewal notifications.
