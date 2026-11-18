@@ -835,9 +835,11 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 	public function tear_down(): void {
 		global $wpdb;
 
-		$gateways = WC()->payment_gateways()->payment_gateways();
-		foreach ( $this->gateways_enabled_before as $gateway_id => $enabled ) {
-			$gateways[ $gateway_id ]->enabled = $enabled;
+		if ( [] !== $this->gateways_enabled_before ) {
+			$gateways = WC()->payment_gateways()->payment_gateways();
+			foreach ( $this->gateways_enabled_before as $gateway_id => $enabled ) {
+				$gateways[ $gateway_id ]->enabled = $enabled;
+			}
 		}
 
 		$wpdb->query( 'SET timestamp = DEFAULT' ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching

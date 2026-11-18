@@ -14,9 +14,7 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Plans;
 
-use Automattic\WooCommerce\SubscriptionsEngine\Api\Plans;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\PlanStatus;
-use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ApplicabilityStore;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ProductApplicability;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
@@ -302,7 +300,7 @@ final class ApplicabilityStoreTest extends LiteIntegrationTestCase {
 	 *
 	 * @return array<string, array{0: string}>
 	 */
-	public function unpublished_status_provider(): array {
+	public function provide_unpublished_statuses(): array {
 		return [
 			'draft'   => [ 'draft' ],
 			'pending' => [ 'pending' ],
@@ -312,7 +310,7 @@ final class ApplicabilityStoreTest extends LiteIntegrationTestCase {
 	}
 
 	/**
-	 * @dataProvider unpublished_status_provider
+	 * @dataProvider provide_unpublished_statuses
 	 *
 	 * @param string $status Product post status.
 	 */
@@ -341,14 +339,7 @@ final class ApplicabilityStoreTest extends LiteIntegrationTestCase {
 		$store   = new ApplicabilityStore();
 		$plan_id = $this->plan_id();
 		$store->set( $this->simple_product_id(), new ProductApplicability( ProductApplicability::MODE_INHERIT_SELECT, [ $plan_id ] ) );
-		$archived = Plans::update(
-			$plan_id,
-			[
-				'extension_slug' => Package::EXTENSION_SLUG,
-				'status'         => PlanStatus::ARCHIVED,
-			]
-		);
-		$this->assertNotNull( $archived );
+		$this->set_plan_status( $plan_id, PlanStatus::ARCHIVED );
 
 		$this->assertTrue( $store->has_product_on_plans(), 'The mode decides; the warning may show early, never late.' );
 	}

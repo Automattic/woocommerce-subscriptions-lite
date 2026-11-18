@@ -18,7 +18,6 @@ use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTe
  */
 final class RenewalGatewaysTest extends LiteIntegrationTestCase {
 
-
 	/**
 	 * Make the `cod` gateway declare exactly `$features`.
 	 *
