@@ -264,4 +264,83 @@ final class ApplicabilityStoreTest extends LiteIntegrationTestCase {
 			$this->assertSame( [], get_post_meta( $product_id, ApplicabilityStore::META_PLAN_IDS, false ) );
 		}
 	}
+
+	public function test_a_product_without_applicability_is_not_on_plans(): void {
+		$this->simple_product_id();
+
+		$this->assertFalse( ( new ApplicabilityStore() )->has_product_on_plans() );
+	}
+
+	public function test_a_product_with_plans_disabled_is_not_on_plans(): void {
+		$store = new ApplicabilityStore();
+		$store->set( $this->simple_product_id(), new ProductApplicability( ProductApplicability::MODE_DISABLE ) );
+
+		$this->assertFalse( $store->has_product_on_plans() );
+	}
+
+	public function test_a_published_simple_product_in_inherit_all_is_on_plans(): void {
+		$store = new ApplicabilityStore();
+		$store->set( $this->simple_product_id(), new ProductApplicability( ProductApplicability::MODE_INHERIT_ALL ) );
+
+		$this->assertTrue( $store->has_product_on_plans() );
+	}
+
+	public function test_a_published_variable_parent_in_inherit_select_is_on_plans(): void {
+		$store   = new ApplicabilityStore();
+		$product = new WC_Product_Variable();
+		$product->set_name( 'Coffee box' );
+		$product_id = (int) $product->save();
+		$store->set( $product_id, new ProductApplicability( ProductApplicability::MODE_INHERIT_SELECT, [ $this->plan_id() ] ) );
+
+		$this->assertTrue( $store->has_product_on_plans() );
+	}
+
+	/**
+	 * Product statuses other than published.
+	 *
+	 * @return array<string, array{0: string}>
+	 */
+	public function provide_unpublished_statuses(): array {
+		return [
+			'draft'   => [ 'draft' ],
+			'pending' => [ 'pending' ],
+			'private' => [ 'private' ],
+			'trash'   => [ 'trash' ],
+		];
+	}
+
+	/**
+	 * @dataProvider provide_unpublished_statuses
+	 *
+	 * @param string $status Product post status.
+	 */
+	public function test_an_unpublished_product_on_plans_does_not_count( string $status ): void {
+		$store      = new ApplicabilityStore();
+		$product_id = $this->simple_product_id();
+		$store->set( $product_id, new ProductApplicability( ProductApplicability::MODE_INHERIT_ALL ) );
+		wp_update_post(
+			[
+				'ID'          => $product_id,
+				'post_status' => $status,
+			]
+		);
+
+		$this->assertFalse( $store->has_product_on_plans() );
+	}
+
+	public function test_inherit_select_with_no_plans_still_counts(): void {
+		$store = new ApplicabilityStore();
+		$store->set( $this->simple_product_id(), new ProductApplicability( ProductApplicability::MODE_INHERIT_SELECT, [] ) );
+
+		$this->assertTrue( $store->has_product_on_plans(), 'The mode decides; the warning may show early, never late.' );
+	}
+
+	public function test_inherit_select_with_only_archived_plans_still_counts(): void {
+		$store   = new ApplicabilityStore();
+		$plan_id = $this->plan_id();
+		$store->set( $this->simple_product_id(), new ProductApplicability( ProductApplicability::MODE_INHERIT_SELECT, [ $plan_id ] ) );
+		$this->set_plan_status( $plan_id, PlanStatus::ARCHIVED );
+
+		$this->assertTrue( $store->has_product_on_plans(), 'The mode decides; the warning may show early, never late.' );
+	}
 }

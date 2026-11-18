@@ -14,6 +14,7 @@ use Automattic\WooCommerce\SubscriptionsLite\Cart\CartPlanHooks;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ApplicabilityStore;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ProductApplicability;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\RenewalOrderBuilder;
+use Automattic\WooCommerce\SubscriptionsLite\Payments\RenewalGateways;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
 use ReflectionMethod;
 use WC_Order;
@@ -38,29 +39,14 @@ final class PaymentRequirementTest extends LiteIntegrationTestCase {
 		WC()->cart->empty_cart();
 		unset( $_POST[ CartPlanHooks::SELLING_PLAN_ID_KEY ] );
 		unset( $GLOBALS['wp']->query_vars['order-pay'] );
-		foreach ( $this->gateways_enabled_before as $gateway_id => $enabled ) {
-			WC()->payment_gateways()->payment_gateways()[ $gateway_id ]->enabled = $enabled;
-		}
 		parent::tear_down();
 	}
 
 	/**
-	 * The `enabled` value of each gateway {@see self::enable_gateways()} changed.
-	 *
-	 * @var array<string, string>
-	 */
-	private $gateways_enabled_before = [];
-
-	/**
-	 * Enable cash on delivery, which can charge renewals, and bank transfer, which cannot.
+	 * Enable only cash on delivery, which can charge renewals, and bank transfer, which cannot.
 	 */
 	private function enable_gateways(): void {
-		foreach ( [ 'cod', 'bacs' ] as $gateway_id ) {
-			$gateway = WC()->payment_gateways()->payment_gateways()[ $gateway_id ];
-
-			$this->gateways_enabled_before[ $gateway_id ] = $gateway->enabled;
-			$gateway->enabled                             = 'yes';
-		}
+		$this->enable_only_gateways( [ 'cod', 'bacs' ] );
 		$this->support_engine_charges( 'cod' );
 	}
 
@@ -562,8 +548,7 @@ final class PaymentRequirementTest extends LiteIntegrationTestCase {
 
 		$message = $this->get_no_payment_methods_message();
 
-		$this->assertStringContainsString( 'charge subscription renewals automatically', $message );
-		$this->assertStringContainsString( 'tab=checkout', $message );
+		$this->assertSame( RenewalGateways::get_setup_message(), $message );
 	}
 
 	public function test_the_no_payment_methods_notice_tells_a_customer_none_is_available_for_subscriptions(): void {

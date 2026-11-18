@@ -806,10 +806,41 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 	}
 
 	/**
-	 * Restore the database clock after a test that pinned it.
+	 * The `enabled` value of each registered gateway before {@see self::enable_only_gateways()}
+	 * first changed it in this test.
+	 *
+	 * @var array<string, string>
+	 */
+	private $gateways_enabled_before = [];
+
+	/**
+	 * Enable exactly `$gateway_ids` and disable every other registered gateway. The enabled
+	 * values are restored after the test.
+	 *
+	 * @param string[] $gateway_ids Gateway ids to enable.
+	 */
+	protected function enable_only_gateways( array $gateway_ids ): void {
+		foreach ( WC()->payment_gateways()->payment_gateways() as $gateway_id => $gateway ) {
+			if ( ! array_key_exists( $gateway_id, $this->gateways_enabled_before ) ) {
+				$this->gateways_enabled_before[ $gateway_id ] = $gateway->enabled;
+			}
+			$gateway->enabled = in_array( $gateway_id, $gateway_ids, true ) ? 'yes' : 'no';
+		}
+	}
+
+	/**
+	 * Restore the database clock after a test that pinned it, and the gateways'
+	 * enabled values after a test that changed them.
 	 */
 	public function tear_down(): void {
 		global $wpdb;
+
+		if ( [] !== $this->gateways_enabled_before ) {
+			$gateways = WC()->payment_gateways()->payment_gateways();
+			foreach ( $this->gateways_enabled_before as $gateway_id => $enabled ) {
+				$gateways[ $gateway_id ]->enabled = $enabled;
+			}
+		}
 
 		$wpdb->query( 'SET timestamp = DEFAULT' ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 		parent::tear_down();
