@@ -389,10 +389,9 @@ final class CustomerActionsTest extends LiteIntegrationTestCase {
 	public function test_drafts_are_hidden_from_customers_only_on_lite_contracts( string $capability ): void {
 		$lite_draft    = $this->get_contract( $this->seed_owned_contract( ContractStatus::DRAFT, null ) );
 		$foreign_draft = $this->get_contract(
-			$this->seed_contract(
+			$this->seed_foreign_contract(
+				$this->owner_id,
 				[
-					'extension_slug'   => 'another-extension',
-					'customer_id'      => $this->owner_id,
 					'status'           => ContractStatus::DRAFT,
 					'next_payment_gmt' => null,
 				]
