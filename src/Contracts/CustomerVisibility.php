@@ -2,8 +2,10 @@
 /**
  * CustomerVisibility - which contracts a customer sees.
  *
- * A draft is a contract still being built (or stuck mid-creation): the merchant sees it,
- * the customer does not. Every customer-facing read uses this one rule.
+ * A customer sees Lite's own contracts, drafts excepted; every customer-facing read uses
+ * this rule. A contract of another extension is not Lite's to show, and a draft is a
+ * contract still being built (or stuck mid-creation): the merchant sees it, the customer
+ * does not.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Contracts
  */
@@ -14,6 +16,7 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Contracts;
 
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
+use Automattic\WooCommerce\SubscriptionsLite\Package;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -28,15 +31,20 @@ final class CustomerVisibility {
 	 * @param ContractView $contract The contract.
 	 */
 	public static function is_visible( ContractView $contract ): bool {
-		return ContractStatus::DRAFT !== $contract->get_status();
+		return Package::EXTENSION_SLUG === $contract->get_extension_slug()
+			&& ContractStatus::DRAFT !== $contract->get_status();
 	}
 
 	/**
-	 * Every registered status a customer sees, for status-filtered list reads.
+	 * The `$args` of a customer list read that applies this rule in the query: Lite's
+	 * contracts in every registered status but draft.
 	 *
-	 * @return array<int, string>
+	 * @return array{status: array<int, string>, extension_slug: string}
 	 */
-	public static function visible_statuses(): array {
-		return array_values( array_diff( ContractStatus::get_all(), [ ContractStatus::DRAFT ] ) );
+	public static function get_list_args(): array {
+		return [
+			'status'         => array_values( array_diff( ContractStatus::get_all(), [ ContractStatus::DRAFT ] ) ),
+			'extension_slug' => Package::EXTENSION_SLUG,
+		];
 	}
 }
