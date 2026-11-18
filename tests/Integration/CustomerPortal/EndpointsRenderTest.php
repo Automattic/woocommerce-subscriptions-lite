@@ -233,7 +233,8 @@ final class EndpointsRenderTest extends LiteIntegrationTestCase {
 		$this->assertSame( '', $state['error'] );
 		$this->assertSame( '', $state['actionError'] );
 		$this->assertSame( rest_url( 'wc/v3/subscriptions-engine/contracts/' ), $state['restBase'], 'Actions post to the engine\'s contract routes.' );
-		$this->assertSame( Package::EXTENSION_SLUG, $state['extensionSlug'], 'Actions name Lite as the owning extension.' );
+		$this->assertSame( Contracts::get( $contract_id )->get_extension_slug(), $state['extensionSlug'], 'Actions name the contract\'s own owner.' );
+		$this->assertSame( Package::EXTENSION_SLUG, $state['extensionSlug'], 'Every rendered contract is Lite\'s.' );
 	}
 
 	public function test_on_hold_admin_path_shows_reactivate(): void {
@@ -365,24 +366,108 @@ final class EndpointsRenderTest extends LiteIntegrationTestCase {
 	}
 
 	public function test_unknown_and_foreign_contracts_render_not_found_identically(): void {
-		$stranger_contract = $this->create_contract( $this->create_customer() );
+		$stranger_contract  = $this->create_contract( $this->create_customer() );
+		$other_extension_id = $this->seed_foreign_contract();
 
 		$endpoints = new Endpoints();
 
-		$unknown = $this->capture(
+		$unknown         = $this->capture(
 			static function () use ( $endpoints ): void {
 				$endpoints->render_detail( 999999 );
 			}
 		);
-		$foreign = $this->capture(
+		$foreign         = $this->capture(
 			static function () use ( $endpoints, $stranger_contract ): void {
 				$endpoints->render_detail( $stranger_contract );
+			}
+		);
+		$other_extension = $this->capture(
+			static function () use ( $endpoints, $other_extension_id ): void {
+				$endpoints->render_detail( $other_extension_id );
 			}
 		);
 
 		$this->assertStringContainsString( 'Subscription not found.', $unknown );
 		$this->assertStringContainsString( 'Back to subscriptions', $unknown );
 		$this->assertSame( $unknown, $foreign, 'Unknown and foreign-owned render byte-identical not-found.' );
+		$this->assertSame( $unknown, $other_extension, 'Another extension\'s contract of the same customer renders the same not-found.' );
 		$this->assertStringNotContainsString( 'subscription-detail-block', $foreign );
+	}
+
+	public function test_list_with_only_foreign_contracts_renders_the_empty_state(): void {
+		$this->seed_foreign_contract();
+		$this->seed_foreign_contract( [ 'status' => 'on-hold' ] );
+
+		$html = $this->capture( [ new Endpoints(), 'render_list' ] );
+
+		$this->assertStringContainsString( 'You have no subscriptions yet.', $html );
+		$this->assertStringNotContainsString( 'account-subscriptions-table', $html );
+	}
+
+	public function test_ten_lite_contracts_and_newer_foreign_ones_fit_one_page(): void {
+		for ( $i = 0; $i < 10; $i++ ) {
+			$this->seed_contract( [ 'customer_id' => $this->customer_id ] );
+		}
+		$this->seed_foreign_contract();
+		$this->seed_foreign_contract();
+
+		$html = $this->capture( [ new Endpoints(), 'render_list' ] );
+
+		$this->assertSame( 10, substr_count( $html, '<tr class="subscription">' ) );
+		$this->assertStringNotContainsString( 'woocommerce-button--next', $html, 'Foreign rows do not fill the next-page probe.' );
+	}
+
+	public function test_eleven_lite_contracts_interleaved_with_foreign_ones_spill_to_page_two(): void {
+		$lite_ids    = [];
+		$foreign_ids = [];
+		for ( $i = 0; $i < 11; $i++ ) {
+			$foreign_ids[] = $this->seed_foreign_contract();
+			$lite_ids[]    = $this->seed_contract( [ 'customer_id' => $this->customer_id ] );
+		}
+		$foreign_ids[] = $this->seed_foreign_contract();
+
+		$endpoints = new Endpoints();
+		$page_one  = $this->capture( [ $endpoints, 'render_list' ] );
+		$page_two  = $this->capture(
+			static function () use ( $endpoints ): void {
+				$endpoints->render_list( '2' );
+			}
+		);
+
+		$this->assertSame( 10, substr_count( $page_one, '<tr class="subscription">' ) );
+		$this->assertStringContainsString( 'woocommerce-button--next', $page_one );
+		$this->assertSame( 1, substr_count( $page_two, '<tr class="subscription">' ), 'Page two holds the one remaining Lite row.' );
+		$this->assertStringContainsString( Endpoints::DETAIL_ENDPOINT . '/' . min( $lite_ids ) . '/', $page_two );
+		$this->assertStringNotContainsString( 'woocommerce-button--next', $page_two );
+		foreach ( $foreign_ids as $foreign_id ) {
+			$this->assertStringNotContainsString( Endpoints::DETAIL_ENDPOINT . '/' . $foreign_id . '/', $page_one . $page_two );
+		}
+	}
+
+	public function test_a_guest_list_renders_the_empty_state(): void {
+		$this->create_contract( $this->customer_id );
+		wp_set_current_user( 0 );
+
+		$html = $this->capture( [ new Endpoints(), 'render_list' ] );
+
+		$this->assertStringContainsString( 'You have no subscriptions yet.', $html );
+	}
+
+	/**
+	 * Seed an active contract of another extension for the portal's customer.
+	 *
+	 * @param array<string, mixed> $args Contract fields overriding the defaults.
+	 * @return int Contract id.
+	 */
+	private function seed_foreign_contract( array $args = [] ): int {
+		return $this->seed_contract(
+			array_merge(
+				[
+					'extension_slug' => 'other-extension',
+					'customer_id'    => $this->customer_id,
+				],
+				$args
+			)
+		);
 	}
 }
