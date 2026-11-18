@@ -14,7 +14,9 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Plans;
 
+use Automattic\WooCommerce\SubscriptionsEngine\Api\Plans;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\PlanStatus;
+use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ApplicabilityStore;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ProductApplicability;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
@@ -265,9 +267,14 @@ final class ApplicabilityStoreTest extends LiteIntegrationTestCase {
 		}
 	}
 
-	public function test_no_product_on_plans_without_products_carrying_a_plan_mode(): void {
-		$store = new ApplicabilityStore();
+	public function test_a_product_without_applicability_is_not_on_plans(): void {
 		$this->simple_product_id();
+
+		$this->assertFalse( ( new ApplicabilityStore() )->has_product_on_plans() );
+	}
+
+	public function test_a_product_with_plans_disabled_is_not_on_plans(): void {
+		$store = new ApplicabilityStore();
 		$store->set( $this->simple_product_id(), new ProductApplicability( ProductApplicability::MODE_DISABLE ) );
 
 		$this->assertFalse( $store->has_product_on_plans() );
@@ -290,20 +297,59 @@ final class ApplicabilityStoreTest extends LiteIntegrationTestCase {
 		$this->assertTrue( $store->has_product_on_plans() );
 	}
 
-	public function test_draft_and_trashed_products_on_plans_do_not_count(): void {
-		$store    = new ApplicabilityStore();
-		$draft_id = $this->simple_product_id();
-		$store->set( $draft_id, new ProductApplicability( ProductApplicability::MODE_INHERIT_ALL ) );
+	/**
+	 * Product statuses other than published.
+	 *
+	 * @return array<string, array{0: string}>
+	 */
+	public function unpublished_status_provider(): array {
+		return [
+			'draft'   => [ 'draft' ],
+			'pending' => [ 'pending' ],
+			'private' => [ 'private' ],
+			'trash'   => [ 'trash' ],
+		];
+	}
+
+	/**
+	 * @dataProvider unpublished_status_provider
+	 *
+	 * @param string $status Product post status.
+	 */
+	public function test_an_unpublished_product_on_plans_does_not_count( string $status ): void {
+		$store      = new ApplicabilityStore();
+		$product_id = $this->simple_product_id();
+		$store->set( $product_id, new ProductApplicability( ProductApplicability::MODE_INHERIT_ALL ) );
 		wp_update_post(
 			[
-				'ID'          => $draft_id,
-				'post_status' => 'draft',
+				'ID'          => $product_id,
+				'post_status' => $status,
 			]
 		);
-		$trashed_id = $this->simple_product_id();
-		$store->set( $trashed_id, new ProductApplicability( ProductApplicability::MODE_INHERIT_ALL ) );
-		wp_trash_post( $trashed_id );
 
 		$this->assertFalse( $store->has_product_on_plans() );
+	}
+
+	public function test_inherit_select_with_no_plans_still_counts(): void {
+		$store = new ApplicabilityStore();
+		$store->set( $this->simple_product_id(), new ProductApplicability( ProductApplicability::MODE_INHERIT_SELECT, [] ) );
+
+		$this->assertTrue( $store->has_product_on_plans(), 'The mode decides; the warning may show early, never late.' );
+	}
+
+	public function test_inherit_select_with_only_archived_plans_still_counts(): void {
+		$store   = new ApplicabilityStore();
+		$plan_id = $this->plan_id();
+		$store->set( $this->simple_product_id(), new ProductApplicability( ProductApplicability::MODE_INHERIT_SELECT, [ $plan_id ] ) );
+		$archived = Plans::update(
+			$plan_id,
+			[
+				'extension_slug' => Package::EXTENSION_SLUG,
+				'status'         => PlanStatus::ARCHIVED,
+			]
+		);
+		$this->assertNotNull( $archived );
+
+		$this->assertTrue( $store->has_product_on_plans(), 'The mode decides; the warning may show early, never late.' );
 	}
 }

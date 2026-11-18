@@ -18,37 +18,6 @@ use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTe
  */
 final class RenewalGatewaysTest extends LiteIntegrationTestCase {
 
-	/**
-	 * The `enabled` value of every registered gateway before the test.
-	 *
-	 * @var array<string, string>
-	 */
-	private $gateways_enabled_before = [];
-
-	public function set_up(): void {
-		parent::set_up();
-		foreach ( WC()->payment_gateways()->payment_gateways() as $gateway_id => $gateway ) {
-			$this->gateways_enabled_before[ $gateway_id ] = $gateway->enabled;
-		}
-	}
-
-	public function tear_down(): void {
-		foreach ( $this->gateways_enabled_before as $gateway_id => $enabled ) {
-			WC()->payment_gateways()->payment_gateways()[ $gateway_id ]->enabled = $enabled;
-		}
-		parent::tear_down();
-	}
-
-	/**
-	 * Enable exactly the given gateways and disable every other one.
-	 *
-	 * @param string[] $gateway_ids Gateway ids to enable.
-	 */
-	private function enable_only( array $gateway_ids ): void {
-		foreach ( WC()->payment_gateways()->payment_gateways() as $gateway_id => $gateway ) {
-			$gateway->enabled = in_array( $gateway_id, $gateway_ids, true ) ? 'yes' : 'no';
-		}
-	}
 
 	/**
 	 * Make the `cod` gateway declare exactly `$features`.
@@ -90,27 +59,27 @@ final class RenewalGatewaysTest extends LiteIntegrationTestCase {
 
 	public function test_an_enabled_gateway_that_can_charge_renewals_is_found(): void {
 		$this->declare_cod_features( [ Payments::GATEWAY_FEATURE, RenewalGateways::FEATURE ] );
-		$this->enable_only( [ 'bacs', 'cod' ] );
+		$this->enable_only_gateways( [ 'bacs', 'cod' ] );
 
 		$this->assertTrue( RenewalGateways::has_enabled_renewal_gateway() );
 	}
 
 	public function test_a_disabled_gateway_that_can_charge_renewals_is_not_found(): void {
 		$this->declare_cod_features( [ Payments::GATEWAY_FEATURE, RenewalGateways::FEATURE ] );
-		$this->enable_only( [ 'bacs', 'cheque' ] );
+		$this->enable_only_gateways( [ 'bacs', 'cheque' ] );
 
 		$this->assertFalse( RenewalGateways::has_enabled_renewal_gateway() );
 	}
 
 	public function test_enabled_gateways_that_cannot_charge_renewals_are_not_found(): void {
-		$this->enable_only( [ 'bacs', 'cheque', 'cod' ] );
+		$this->enable_only_gateways( [ 'bacs', 'cheque', 'cod' ] );
 
 		$this->assertFalse( RenewalGateways::has_enabled_renewal_gateway() );
 	}
 
 	public function test_an_enabled_gateway_with_only_the_engine_feature_is_not_found(): void {
 		$this->declare_cod_features( [ Payments::GATEWAY_FEATURE ] );
-		$this->enable_only( [ 'cod' ] );
+		$this->enable_only_gateways( [ 'cod' ] );
 
 		$this->assertFalse( RenewalGateways::has_enabled_renewal_gateway() );
 	}
@@ -118,7 +87,7 @@ final class RenewalGatewaysTest extends LiteIntegrationTestCase {
 	public function test_the_setup_message_links_to_the_payments_settings(): void {
 		$message = RenewalGateways::get_setup_message();
 
-		$this->assertStringContainsString( 'charge subscription renewals automatically', $message );
-		$this->assertStringContainsString( esc_url( admin_url( 'admin.php?page=wc-settings&tab=checkout' ) ), $message );
+		$this->assertStringContainsString( '<a href="' . esc_url( admin_url( 'admin.php?page=wc-settings&tab=checkout' ) ) . '">', $message );
+		$this->assertStringContainsString( '</a>', $message );
 	}
 }
