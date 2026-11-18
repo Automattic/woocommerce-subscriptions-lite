@@ -1,8 +1,8 @@
 <?php
 /**
- * Rendered when the requested contract does not exist OR belongs to a different
- * customer. Both collapse to "not found" so the portal does not leak the
- * existence of a contract the requester does not own.
+ * Rendered when the requested contract does not exist, belongs to a different
+ * customer, or belongs to another extension. All collapse to "not found" so the
+ * portal does not leak the existence of a contract it does not show.
  *
  * @var string $list_endpoint The subscriptions-list endpoint slug to link back to.
  *

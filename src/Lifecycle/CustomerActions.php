@@ -121,6 +121,8 @@ final class CustomerActions {
 	 */
 	public static function hide_drafts_from_customers( $caps, $cap, $user_id, $args ) {
 		$contract = in_array( $cap, [ self::READ_CAPABILITY, self::MANAGE_CAPABILITY ], true ) && is_array( $args ) ? ( $args[0] ?? null ) : null;
+		// The slug guard is load-bearing: `is_visible()` is false for every other extension's
+		// contract, so without it those contracts would be locked away from their customers.
 		if ( ! $contract instanceof ContractView
 			|| Package::EXTENSION_SLUG !== $contract->get_extension_slug()
 			|| CustomerVisibility::is_visible( $contract ) ) {

@@ -17,7 +17,6 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\CustomerPor
 
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
 use Automattic\WooCommerce\SubscriptionsLite\CustomerPortal\ViewModel;
-use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
 
 /**
@@ -36,7 +35,6 @@ final class ViewModelTest extends LiteIntegrationTestCase {
 			[
 				'id'               => 7,
 				'status'           => ContractStatus::ACTIVE,
-				'extension_slug'   => Package::EXTENSION_SLUG,
 				'billing_total'    => '19.99',
 				'currency'         => 'USD',
 				'billing_period'   => 'month',

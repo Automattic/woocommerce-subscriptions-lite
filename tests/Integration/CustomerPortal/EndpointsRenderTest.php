@@ -233,8 +233,7 @@ final class EndpointsRenderTest extends LiteIntegrationTestCase {
 		$this->assertSame( '', $state['error'] );
 		$this->assertSame( '', $state['actionError'] );
 		$this->assertSame( rest_url( 'wc/v3/subscriptions-engine/contracts/' ), $state['restBase'], 'Actions post to the engine\'s contract routes.' );
-		$this->assertSame( Contracts::get( $contract_id )->get_extension_slug(), $state['extensionSlug'], 'Actions name the contract\'s own owner.' );
-		$this->assertSame( Package::EXTENSION_SLUG, $state['extensionSlug'], 'Every rendered contract is Lite\'s.' );
+		$this->assertSame( Package::EXTENSION_SLUG, $state['extensionSlug'], 'Actions name Lite as the owner, so the engine refuses them on another extension\'s contract.' );
 	}
 
 	public function test_on_hold_admin_path_shows_reactivate(): void {

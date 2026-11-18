@@ -257,8 +257,9 @@ final class Endpoints {
 			self::STORE_NAMESPACE,
 			[
 				'contractId'    => $detail['id'],
-				// The store posts it as the action's `extension_slug`: the contract's own owner.
-				'extensionSlug' => (string) $contract['extension_slug'],
+				// The store posts it as the action's `extension_slug`. Lite's own slug, not the
+				// contract's: the engine refuses Lite's actions on another extension's contract.
+				'extensionSlug' => Package::EXTENSION_SLUG,
 				'status'        => $detail['status'],
 				'atPeriodEnd'   => (bool) $detail['at_period_end'],
 				'modalOpen'     => false,

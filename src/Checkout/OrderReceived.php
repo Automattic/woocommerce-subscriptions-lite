@@ -77,7 +77,8 @@ final class OrderReceived {
 	}
 
 	/**
-	 * The non-draft contract created from `$order` and owned by the order's customer, or null.
+	 * The Lite-owned, non-draft contract created from `$order` and owned by the order's
+	 * customer, or null: a contract of another extension is skipped.
 	 *
 	 * @param WC_Order $order The order.
 	 */
