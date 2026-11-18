@@ -69,7 +69,7 @@ final class ApplicabilityStore {
 	/**
 	 * Whether a published product sells on Lite plans: one bounded query (`LIMIT 1`, ids
 	 * only, no ordering or cache priming). Reads the mode, since 'inherit_all' stores no
-	 * plan ids; it does not check that an active plan exists.
+	 * plan ids; it does not check that an active plan exists, so it can answer yes early.
 	 */
 	public function has_product_on_plans(): bool {
 		$product_ids = get_posts(
@@ -81,7 +81,7 @@ final class ApplicabilityStore {
 				'orderby'                => 'none',
 				'update_post_meta_cache' => false,
 				'update_post_term_cache' => false,
-				// phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query -- One indexed meta_key lookup with LIMIT 1, run only when no enabled gateway can renew.
+				// phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query -- Indexed on meta_key; a miss scans every apply-mode row (the product editor writes one per saved product). Runs only when no enabled gateway can renew.
 				'meta_query'             => [
 					[
 						'key'     => self::META_APPLY_MODE,

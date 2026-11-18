@@ -5,6 +5,8 @@
  * Subscription checkouts offer only gateways that can charge renewals automatically, so a
  * store selling on plans with no such gateway enabled cannot sell subscriptions at all.
  * The warning stays while that holds, on WooCommerce screens, Lite's screen and Plugins.
+ * WooCommerce removes other plugins' notices from its React Settings > Payments page, so
+ * it does not show there (an in-page message is WOOSUBS-2177).
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Admin
  */
@@ -32,8 +34,9 @@ final class RenewalGatewayNotice {
 	}
 
 	/**
-	 * Print the warning when it applies. Checks run cheapest first: a store with an
-	 * enabled gateway that can renew runs no query.
+	 * Print the warning when it applies. Checks run cheapest first: for a store with an
+	 * enabled gateway that can renew, the notice runs no query of its own (the first call
+	 * on a request may load the gateways).
 	 */
 	public function render(): void {
 		if ( ! current_user_can( SettingsPage::CAPABILITY ) || ! self::is_targeted_screen() ) {
