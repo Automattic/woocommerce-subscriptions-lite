@@ -201,7 +201,7 @@ final class EngineDataProviderTest extends LiteIntegrationTestCase {
 	public function test_cadence_is_empty_for_a_plan_owned_by_another_extension(): void {
 		$customer_id = $this->create_customer();
 		$contract_id = $this->create_contract( $customer_id );
-		$foreign     = $this->make_plan( 'week', 2, null, [ 'extension_slug' => 'other-extension' ] );
+		$foreign     = $this->make_plan( 'week', 2, null, [ 'extension_slug' => self::FOREIGN_EXTENSION_SLUG ] );
 		$updated     = Contracts::update(
 			$contract_id,
 			[
@@ -326,24 +326,5 @@ final class EngineDataProviderTest extends LiteIntegrationTestCase {
 
 		$this->assertNull( $this->provider->get_contract( $foreign_id, $customer_id ) );
 		$this->assertNull( $this->provider->get_contract( $variant_id, $customer_id ), 'The owner match is exact: a case variant is not Lite\'s.' );
-	}
-
-	/**
-	 * Seed an active contract of another extension for `$customer_id`.
-	 *
-	 * @param int                  $customer_id Customer id.
-	 * @param array<string, mixed> $args        Contract fields overriding the defaults.
-	 * @return int Contract id.
-	 */
-	private function seed_foreign_contract( int $customer_id, array $args = [] ): int {
-		return $this->seed_contract(
-			array_merge(
-				[
-					'extension_slug' => 'other-extension',
-					'customer_id'    => $customer_id,
-				],
-				$args
-			)
-		);
 	}
 }

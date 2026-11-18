@@ -402,6 +402,7 @@ final class CustomerActionsTest extends LiteIntegrationTestCase {
 		$this->assertFalse( user_can( $this->owner_id, $capability, $lite_draft ), 'The owner cannot see a Lite draft.' );
 		$this->assertTrue( user_can( $this->create_store_manager(), $capability, $lite_draft ), 'A store manager can.' );
 		$this->assertTrue( user_can( $this->owner_id, $capability, $foreign_draft ), 'Another extension decides about its own drafts.' );
+		$this->assertTrue( user_can( $this->owner_id, $capability, $this->get_contract( $this->seed_foreign_contract( $this->owner_id ) ) ), 'Another extension\'s active contract stays its customer\'s.' );
 		$this->assertTrue( user_can( $this->owner_id, $capability, $this->get_contract( $this->seed_owned_contract() ) ), 'An active Lite contract is the owner\'s.' );
 	}
 

@@ -366,7 +366,7 @@ final class EndpointsRenderTest extends LiteIntegrationTestCase {
 
 	public function test_unknown_and_foreign_contracts_render_not_found_identically(): void {
 		$stranger_contract  = $this->create_contract( $this->create_customer() );
-		$other_extension_id = $this->seed_foreign_contract();
+		$other_extension_id = $this->seed_foreign_contract( $this->customer_id );
 
 		$endpoints = new Endpoints();
 
@@ -394,8 +394,8 @@ final class EndpointsRenderTest extends LiteIntegrationTestCase {
 	}
 
 	public function test_list_with_only_foreign_contracts_renders_the_empty_state(): void {
-		$this->seed_foreign_contract();
-		$this->seed_foreign_contract( [ 'status' => 'on-hold' ] );
+		$this->seed_foreign_contract( $this->customer_id );
+		$this->seed_foreign_contract( $this->customer_id, [ 'status' => 'on-hold' ] );
 
 		$html = $this->capture( [ new Endpoints(), 'render_list' ] );
 
@@ -407,8 +407,8 @@ final class EndpointsRenderTest extends LiteIntegrationTestCase {
 		for ( $i = 0; $i < 10; $i++ ) {
 			$this->seed_contract( [ 'customer_id' => $this->customer_id ] );
 		}
-		$this->seed_foreign_contract();
-		$this->seed_foreign_contract();
+		$this->seed_foreign_contract( $this->customer_id );
+		$this->seed_foreign_contract( $this->customer_id );
 
 		$html = $this->capture( [ new Endpoints(), 'render_list' ] );
 
@@ -420,10 +420,10 @@ final class EndpointsRenderTest extends LiteIntegrationTestCase {
 		$lite_ids    = [];
 		$foreign_ids = [];
 		for ( $i = 0; $i < 11; $i++ ) {
-			$foreign_ids[] = $this->seed_foreign_contract();
+			$foreign_ids[] = $this->seed_foreign_contract( $this->customer_id );
 			$lite_ids[]    = $this->seed_contract( [ 'customer_id' => $this->customer_id ] );
 		}
-		$foreign_ids[] = $this->seed_foreign_contract();
+		$foreign_ids[] = $this->seed_foreign_contract( $this->customer_id );
 
 		$endpoints = new Endpoints();
 		$page_one  = $this->capture( [ $endpoints, 'render_list' ] );
@@ -450,23 +450,5 @@ final class EndpointsRenderTest extends LiteIntegrationTestCase {
 		$html = $this->capture( [ new Endpoints(), 'render_list' ] );
 
 		$this->assertStringContainsString( 'You have no subscriptions yet.', $html );
-	}
-
-	/**
-	 * Seed an active contract of another extension for the portal's customer.
-	 *
-	 * @param array<string, mixed> $args Contract fields overriding the defaults.
-	 * @return int Contract id.
-	 */
-	private function seed_foreign_contract( array $args = [] ): int {
-		return $this->seed_contract(
-			array_merge(
-				[
-					'extension_slug' => 'other-extension',
-					'customer_id'    => $this->customer_id,
-				],
-				$args
-			)
-		);
 	}
 }

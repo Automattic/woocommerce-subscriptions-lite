@@ -131,24 +131,18 @@ final class OrderReceivedTest extends LiteIntegrationTestCase {
 	public function test_renders_nothing_for_a_contract_of_another_extension(): void {
 		$customer_id = $this->create_customer();
 		$order       = $this->create_subscription_order( $customer_id );
-		$this->seed_contract(
-			[
-				'extension_slug'  => 'other-extension',
-				'customer_id'     => $customer_id,
-				'origin_order_id' => $order->get_id(),
-			]
-		);
+		$this->seed_foreign_contract( $customer_id, [ 'origin_order_id' => $order->get_id() ] );
 
 		$this->assertSame( '', trim( $this->render( $order->get_id() ) ), 'The table would link to a detail page that reads it as not found.' );
 	}
 
 	public function test_shows_the_lite_contract_when_the_order_also_created_a_foreign_one(): void {
 		$customer_id = $this->create_customer();
-		$contract_id = $this->create_contract( $customer_id );
-		$order_id    = (int) Contracts::get( $contract_id )->get_origin_order_id();
-		$foreign_id  = $this->seed_contract(
+		$order_id    = $this->create_subscription_order( $customer_id )->get_id();
+		// The foreign contract comes first in origin-order lookups, so the loop must skip it.
+		$foreign_id  = $this->seed_foreign_contract( $customer_id, [ 'origin_order_id' => $order_id ] );
+		$contract_id = $this->seed_contract(
 			[
-				'extension_slug'  => 'other-extension',
 				'customer_id'     => $customer_id,
 				'origin_order_id' => $order_id,
 			]

@@ -60,6 +60,13 @@ use WP_UnitTestCase;
 abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 
 	/**
+	 * Owner slug of the contracts {@see self::seed_foreign_contract()} seeds.
+	 *
+	 * @var string
+	 */
+	protected const FOREIGN_EXTENSION_SLUG = 'other-extension';
+
+	/**
 	 * Default billing address used when seeding contracts.
 	 *
 	 * @var array<string, string>
@@ -386,6 +393,26 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 		);
 
 		return $contract->get_id();
+	}
+
+	/**
+	 * Create an active contract of another extension for `$customer_id`, for tests that
+	 * check Lite leaves other extensions' contracts alone.
+	 *
+	 * @param int                  $customer_id Customer id.
+	 * @param array<string, mixed> $args        Contract fields overriding the defaults.
+	 * @return int Contract id.
+	 */
+	protected function seed_foreign_contract( int $customer_id, array $args = [] ): int {
+		return $this->seed_contract(
+			array_merge(
+				[
+					'extension_slug' => self::FOREIGN_EXTENSION_SLUG,
+					'customer_id'    => $customer_id,
+				],
+				$args
+			)
+		);
 	}
 
 	/**
