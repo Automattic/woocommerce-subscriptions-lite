@@ -62,7 +62,7 @@ try {
 	$woocommerce_subscriptions_lite_product->set_name( 'Coffee beans' );
 	$woocommerce_subscriptions_lite_product->set_slug( 'coffee-beans' );
 	$woocommerce_subscriptions_lite_product->set_regular_price( '20' );
-	$woocommerce_subscriptions_lite_product->set_short_description( 'Sample product for the pull request preview. Choose a plan, add it to the cart and pay with "Cash on delivery".' );
+	$woocommerce_subscriptions_lite_product->set_short_description( 'Sample product for the pull request preview. Buy it once with "Cash on delivery". A plan cannot be bought here: a subscription checkout offers only payment methods that can renew automatically, and the preview has none.' );
 	$woocommerce_subscriptions_lite_product->save();
 
 	( new ApplicabilityStore() )->set(

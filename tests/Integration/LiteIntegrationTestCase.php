@@ -42,14 +42,16 @@ use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\HeldLocks;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Hold;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\HoldAnchor;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
+use Automattic\WooCommerce\SubscriptionsLite\Payments\RenewalGateways;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\RenewalOrderBuilder;
-use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\RenewalProcessor;
 use DateTimeImmutable;
 use DateTimeZone;
 use RuntimeException;
 use WC_Order;
 use WC_Product_Simple;
 use WP_Error;
+use WP_REST_Request;
+use WP_REST_Response;
 use WP_UnitTestCase;
 
 /**
@@ -497,6 +499,24 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Dispatch a Store API request (`wc/store/v1`) for the current user and cart, with a
+	 * valid nonce, as the block checkout sends it.
+	 *
+	 * @param string               $method HTTP method.
+	 * @param string               $route  Route under `wc/store/v1`, such as `/cart`.
+	 * @param array<string, mixed> $body   Body parameters.
+	 */
+	protected function dispatch_store_api( string $method, string $route, array $body = [] ): WP_REST_Response {
+		$request = new WP_REST_Request( $method, '/wc/store/v1' . $route );
+		$request->set_header( 'Nonce', wp_create_nonce( 'wc_store_api' ) );
+		if ( [] !== $body ) {
+			$request->set_body_params( $body );
+		}
+
+		return rest_do_request( $request );
+	}
+
+	/**
 	 * Outcome of the stub charge handler installed by {@see self::support_engine_charges()}:
 	 * `paid`, `failed`, `on-hold` (an asynchronous charge), `none` (the order is left pending)
 	 * or `throw` (the gateway throws, leaving the order pending).
@@ -521,7 +541,7 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 
 	/**
 	 * Make `$gateway` support engine charges and automatic renewal payments (the engine
-	 * feature and {@see RenewalProcessor::GATEWAY_RENEWAL_FEATURE}) and answer each charge
+	 * feature and {@see RenewalGateways::FEATURE}) and answer each charge
 	 * with `$outcome` (see {@see self::$charge_outcome}). Calling it again only changes the
 	 * outcome. The hooks are restored with the rest after the test.
 	 *
@@ -538,7 +558,7 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 		add_filter(
 			'woocommerce_payment_gateway_supports',
 			static function ( $supported, $feature, $payment_gateway ) use ( $gateway ) {
-				if ( in_array( $feature, [ Payments::GATEWAY_FEATURE, RenewalProcessor::GATEWAY_RENEWAL_FEATURE ], true ) && is_object( $payment_gateway ) && $gateway === $payment_gateway->id ) {
+				if ( in_array( $feature, [ Payments::GATEWAY_FEATURE, RenewalGateways::FEATURE ], true ) && is_object( $payment_gateway ) && $gateway === $payment_gateway->id ) {
 					return true;
 				}
 				return $supported;
