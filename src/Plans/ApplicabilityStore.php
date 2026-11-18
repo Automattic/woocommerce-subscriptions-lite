@@ -67,6 +67,35 @@ final class ApplicabilityStore {
 	}
 
 	/**
+	 * Whether a published product sells on Lite plans: one bounded query (`LIMIT 1`, ids
+	 * only, no ordering or cache priming). Reads the mode, since 'inherit_all' stores no
+	 * plan ids; it does not check that an active plan exists.
+	 */
+	public function has_product_on_plans(): bool {
+		$product_ids = get_posts(
+			[
+				'post_type'              => 'product',
+				'post_status'            => 'publish',
+				'numberposts'            => 1,
+				'fields'                 => 'ids',
+				'orderby'                => 'none',
+				'update_post_meta_cache' => false,
+				'update_post_term_cache' => false,
+				// phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query -- One indexed meta_key lookup with LIMIT 1, run only when no enabled gateway can renew.
+				'meta_query'             => [
+					[
+						'key'     => self::META_APPLY_MODE,
+						'value'   => [ ProductApplicability::MODE_INHERIT_ALL, ProductApplicability::MODE_INHERIT_SELECT ],
+						'compare' => 'IN',
+					],
+				],
+			]
+		);
+
+		return [] !== $product_ids;
+	}
+
+	/**
 	 * Write a product's applicability.
 	 *
 	 * Validates before writing, all-or-nothing: the product must exist and be

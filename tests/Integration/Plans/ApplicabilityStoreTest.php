@@ -264,4 +264,46 @@ final class ApplicabilityStoreTest extends LiteIntegrationTestCase {
 			$this->assertSame( [], get_post_meta( $product_id, ApplicabilityStore::META_PLAN_IDS, false ) );
 		}
 	}
+
+	public function test_no_product_on_plans_without_products_carrying_a_plan_mode(): void {
+		$store = new ApplicabilityStore();
+		$this->simple_product_id();
+		$store->set( $this->simple_product_id(), new ProductApplicability( ProductApplicability::MODE_DISABLE ) );
+
+		$this->assertFalse( $store->has_product_on_plans() );
+	}
+
+	public function test_a_published_simple_product_in_inherit_all_is_on_plans(): void {
+		$store = new ApplicabilityStore();
+		$store->set( $this->simple_product_id(), new ProductApplicability( ProductApplicability::MODE_INHERIT_ALL ) );
+
+		$this->assertTrue( $store->has_product_on_plans() );
+	}
+
+	public function test_a_published_variable_parent_in_inherit_select_is_on_plans(): void {
+		$store   = new ApplicabilityStore();
+		$product = new WC_Product_Variable();
+		$product->set_name( 'Coffee box' );
+		$product_id = (int) $product->save();
+		$store->set( $product_id, new ProductApplicability( ProductApplicability::MODE_INHERIT_SELECT, [ $this->plan_id() ] ) );
+
+		$this->assertTrue( $store->has_product_on_plans() );
+	}
+
+	public function test_draft_and_trashed_products_on_plans_do_not_count(): void {
+		$store    = new ApplicabilityStore();
+		$draft_id = $this->simple_product_id();
+		$store->set( $draft_id, new ProductApplicability( ProductApplicability::MODE_INHERIT_ALL ) );
+		wp_update_post(
+			[
+				'ID'          => $draft_id,
+				'post_status' => 'draft',
+			]
+		);
+		$trashed_id = $this->simple_product_id();
+		$store->set( $trashed_id, new ProductApplicability( ProductApplicability::MODE_INHERIT_ALL ) );
+		wp_trash_post( $trashed_id );
+
+		$this->assertFalse( $store->has_product_on_plans() );
+	}
 }
