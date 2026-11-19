@@ -71,7 +71,7 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 
 		$this->paid_at    = $paid->format( 'Y-m-d H:i:s' );
 		$this->due_at     = $due->format( 'Y-m-d H:i:s' );
-		$this->period_end = $period[1]->format( 'Y-m-d H:i:s' );
+		$this->period_end = $period[1]->get_moment()->format( 'Y-m-d H:i:s' );
 	}
 
 	/**

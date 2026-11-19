@@ -491,7 +491,8 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 	 *
 	 * @param int                  $contract_id Contract id.
 	 * @param int                  $customer_id Owning customer.
-	 * @param array<string, mixed> $args        total, status (order), date_created, cycle_status (default billed).
+	 * @param array<string, mixed> $args        total, status (order), date_created, cycle_status (default billed),
+	 *                                          ends_at_gmt (default one month after the cycle start).
 	 */
 	protected function create_renewal_order( int $contract_id, int $customer_id, array $args = [] ): WC_Order {
 		$order = wc_create_order(
@@ -515,7 +516,7 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 			'status'         => (string) ( $args['cycle_status'] ?? CycleStatus::BILLED ),
 			'count'          => null === $head ? 1 : (int) $head->get_count() + 1,
 			'starts_at_gmt'  => $starts_at,
-			'ends_at_gmt'    => $starts_at->modify( '+1 month' ),
+			'ends_at_gmt'    => isset( $args['ends_at_gmt'] ) ? new DateTimeImmutable( (string) $args['ends_at_gmt'], $utc ) : $starts_at->modify( '+1 month' ),
 			'expected_total' => $order->get_total(),
 			'currency'       => 'USD',
 			'order_id'       => $order_id,
@@ -856,11 +857,47 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 	}
 
 	/**
-	 * Restore the database clock after a test that pinned it, and the gateways'
-	 * enabled values after a test that changed them.
+	 * The store's `timezone_string` and `gmt_offset` before this test pinned them.
+	 *
+	 * @var array{0: mixed, 1: mixed}|null
+	 */
+	private $timezone_before;
+
+	/**
+	 * Pin the store time zone to UTC, so date tests never depend on the site's setting.
+	 */
+	public function set_up(): void {
+		parent::set_up();
+		$this->set_store_timezone( 'UTC' );
+	}
+
+	/**
+	 * Set the store time zone for this test: a time zone identifier, or an empty one with a
+	 * manual UTC offset in hours (an offset-only store). Restored in tear_down.
+	 *
+	 * @param string $timezone_string A time zone identifier, or '' for an offset-only store.
+	 * @param float  $gmt_offset      UTC offset in hours, read when `$timezone_string` is ''.
+	 */
+	protected function set_store_timezone( string $timezone_string, float $gmt_offset = 0.0 ): void {
+		if ( null === $this->timezone_before ) {
+			$this->timezone_before = [ get_option( 'timezone_string' ), get_option( 'gmt_offset' ) ];
+		}
+		update_option( 'timezone_string', $timezone_string );
+		update_option( 'gmt_offset', $gmt_offset );
+	}
+
+	/**
+	 * Restore the database clock after a test that pinned it, the store time zone, and the
+	 * gateways' enabled values after a test that changed them.
 	 */
 	public function tear_down(): void {
 		global $wpdb;
+
+		if ( null !== $this->timezone_before ) {
+			update_option( 'timezone_string', $this->timezone_before[0] );
+			update_option( 'gmt_offset', $this->timezone_before[1] );
+			$this->timezone_before = null;
+		}
 
 		if ( [] !== $this->gateways_enabled_before ) {
 			$gateways = WC()->payment_gateways()->payment_gateways();

@@ -6,8 +6,9 @@
  * Contract creation stores it from the start (or a trial in days or weeks, from its end);
  * {@see \Automattic\WooCommerce\SubscriptionsLite\Plans\ContractPlans::get_billing_terms_for()}
  * applies it to the contract's billing terms, so every renewal returns to it in months that
- * have it. A contract without one keeps the day of the date each renewal rolls from.
- * Lite-owned data.
+ * have it. A renewal, settlement or reactivation whose due date is off that schedule rewrites
+ * it under the same lock ({@see self::store_reanchored_day()}). A contract without one keeps
+ * the day of the date each renewal rolls from. Lite-owned data.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Pricing
  */
@@ -51,6 +52,24 @@ final class BillingDay {
 		} catch ( RuntimeException $e ) {
 			throw new RuntimeException( 'The billing day could not be stored.', 0, $e ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- the previous exception is not output.
 		}
+	}
+
+	/**
+	 * Store the billing day `$date` re-anchored the schedule to, under the lock the caller
+	 * writes that date with; nothing when the stored day stands.
+	 *
+	 * @param ContractLock $lock The caller's lock on the contract.
+	 * @param BillingDate  $date A date {@see BillingTerms} rolled to.
+	 * @throws ContractLockedException If the lock was lost.
+	 * @throws RuntimeException If the billing day could not be stored.
+	 */
+	public static function store_reanchored_day( ContractLock $lock, BillingDate $date ): void {
+		$billing_day = $date->get_reanchored_billing_day();
+		if ( null === $billing_day ) {
+			return;
+		}
+
+		self::store( $lock, $billing_day );
 	}
 
 	/**

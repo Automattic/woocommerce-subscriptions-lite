@@ -82,10 +82,11 @@ final class ContractPlansTest extends LiteIntegrationTestCase {
 
 		$due    = new DateTimeImmutable( '2026-02-28 10:00:00', new DateTimeZone( 'UTC' ) );
 		$period = $terms->get_period_to_bill( $due, $due );
-		$next   = $terms->get_next_due_after( $period[1], $period[1] );
+		$end    = $period[1]->get_moment();
+		$next   = $terms->get_next_due_after( $end, $end );
 
-		$this->assertSame( '2026-03-31 10:00:00', $period[1]->format( 'Y-m-d H:i:s' ), 'From 28 Feb back to the 31st.' );
-		$this->assertSame( '2026-04-30 10:00:00', $next->format( 'Y-m-d H:i:s' ) );
+		$this->assertSame( '2026-03-31 10:00:00', $end->format( 'Y-m-d H:i:s' ), 'From 28 Feb back to the 31st.' );
+		$this->assertSame( '2026-04-30 10:00:00', $next->get_moment()->format( 'Y-m-d H:i:s' ) );
 	}
 
 	public function test_billing_terms_without_a_valid_stored_day_keep_the_day_they_roll_from(): void {
@@ -99,6 +100,6 @@ final class ContractPlansTest extends LiteIntegrationTestCase {
 		$due    = new DateTimeImmutable( '2026-02-28 10:00:00', new DateTimeZone( 'UTC' ) );
 		$period = $terms->get_period_to_bill( $due, $due );
 
-		$this->assertSame( '2026-03-28 10:00:00', $period[1]->format( 'Y-m-d H:i:s' ) );
+		$this->assertSame( '2026-03-28 10:00:00', $period[1]->get_moment()->format( 'Y-m-d H:i:s' ) );
 	}
 }

@@ -27,6 +27,7 @@ use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\HoldAnchor;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Hold;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ContractPlans;
+use Automattic\WooCommerce\SubscriptionsLite\Pricing\BillingDay;
 use Automattic\WooCommerce\SubscriptionsLite\Utilities\ScheduledActions;
 use DateTimeImmutable;
 use DateTimeZone;
@@ -492,11 +493,14 @@ final class Settlement {
 		$next  = null === $terms
 			? null
 			: $terms->get_next_due_after( new DateTimeImmutable( $cycle->get_ends_at_gmt(), new DateTimeZone( 'UTC' ) ), $now );
+		if ( null !== $next ) {
+			BillingDay::store_reanchored_day( $lock, $next );
+		}
 
 		if ( ContractStatus::ON_HOLD === $status && null !== HoldAnchor::read( $contract_id ) ) {
 			// A customer hold absorbs a late payment: it resumes from the period after this one.
 			if ( null !== $next ) {
-				HoldAnchor::store( $lock, $next->format( 'Y-m-d H:i:s' ) );
+				HoldAnchor::store( $lock, $next->get_moment()->format( 'Y-m-d H:i:s' ) );
 			}
 			Contracts::update(
 				$contract_id,
@@ -514,7 +518,7 @@ final class Settlement {
 			[
 				'extension_slug'   => Package::EXTENSION_SLUG,
 				'status'           => ContractStatus::ACTIVE,
-				'next_payment_gmt' => $next,
+				'next_payment_gmt' => null === $next ? null : $next->get_moment(),
 				'last_payment_gmt' => $last_payment,
 			],
 			$lock

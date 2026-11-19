@@ -20,6 +20,8 @@ use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ContractPlans;
+use Automattic\WooCommerce\SubscriptionsLite\Pricing\BillingDate;
+use Automattic\WooCommerce\SubscriptionsLite\Pricing\BillingDay;
 use Automattic\WooCommerce\SubscriptionsLite\Pricing\BillingTerms;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\UnpaidRenewal;
 
@@ -76,13 +78,16 @@ final class Reactivation {
 			$utc_now      = ( $now ?? new DateTimeImmutable( 'now', $utc ) )->setTimezone( $utc );
 			$anchor       = $contract->get_next_payment_gmt() ?? HoldAnchor::read( $contract_id );
 			$next_payment = $this->recompute_next_payment( $contract, $anchor, $utc_now );
+			if ( null !== $next_payment ) {
+				BillingDay::store_reanchored_day( $lock, $next_payment );
+			}
 
 			$reactivated_contract = Contracts::update(
 				$contract_id,
 				[
 					'extension_slug'   => Package::EXTENSION_SLUG,
 					'status'           => ContractStatus::ACTIVE,
-					'next_payment_gmt' => $next_payment,
+					'next_payment_gmt' => null === $next_payment ? null : $next_payment->get_moment(),
 				],
 				$lock
 			);
@@ -115,28 +120,29 @@ final class Reactivation {
 	 *
 	 * A future anchor is kept; a past-due one is rolled forward by whole plan cadences until
 	 * it is in the future ({@see BillingTerms::get_next_due_after()}), or floored at `$now`
-	 * when there is no cadence; no anchor leaves the contract unscheduled.
+	 * when there is no cadence; no anchor leaves the contract unscheduled. A rolled anchor off
+	 * the billing-day schedule carries the billing day it re-anchored to.
 	 *
 	 * @param ContractView      $contract The contract being reactivated.
 	 * @param string|null       $anchor   GMT moment to recompute from, or null.
 	 * @param DateTimeImmutable $now      The current moment (UTC).
-	 * @return string|null The next-payment GMT string, or null when unscheduled.
+	 * @return BillingDate|null The next payment, or null when unscheduled.
 	 */
-	private function recompute_next_payment( ContractView $contract, ?string $anchor, DateTimeImmutable $now ): ?string {
+	private function recompute_next_payment( ContractView $contract, ?string $anchor, DateTimeImmutable $now ): ?BillingDate {
 		if ( null === $anchor ) {
 			return null;
 		}
 
 		$next_payment = new DateTimeImmutable( $anchor, new DateTimeZone( 'UTC' ) );
 		if ( $next_payment > $now ) {
-			return $anchor;
+			return new BillingDate( $next_payment, null );
 		}
 
 		$terms = ContractPlans::get_billing_terms_for( $contract );
 		if ( null === $terms ) {
-			return $now->format( 'Y-m-d H:i:s' );
+			return new BillingDate( $now, null );
 		}
 
-		return $terms->get_next_due_after( $next_payment, $now )->format( 'Y-m-d H:i:s' );
+		return $terms->get_next_due_after( $next_payment, $now );
 	}
 }
