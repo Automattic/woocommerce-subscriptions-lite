@@ -1286,6 +1286,8 @@ final class BillingTermsTest extends LiteIntegrationTestCase {
 			'week to month, day 31, due 7 Mar'  => [ 'month', 31, '2026-03-07 10:00:00', [ '2026-03-07 10:00:00', '2026-04-07 10:00:00' ], 7 ],
 			'week to year, day 1, due 29 Jan'   => [ 'year', 1, '2026-01-29 10:00:00', [ '2026-01-29 10:00:00', '2027-01-29 10:00:00' ], 29 ],
 			'two days late: day 15, due 17 Jan' => [ 'month', 15, '2026-01-17 10:00:00', [ '2026-01-17 10:00:00', '2026-02-17 10:00:00' ], 17 ],
+			'two days early: day 1, due 30 Jan' => [ 'month', 1, '2026-01-30 10:00:00', [ '2026-01-30 10:00:00', '2026-02-28 10:00:00' ], 30 ],
+			'two days after a clamped 28 Feb'   => [ 'month', 31, '2026-03-02 10:00:00', [ '2026-03-02 10:00:00', '2026-04-02 10:00:00' ], 2 ],
 			'on the schedule: 28 Feb, day 31'   => [ 'month', 31, '2026-02-28 10:00:00', [ '2026-02-28 10:00:00', '2026-03-31 10:00:00' ], null ],
 			'on the schedule: 30 Nov, day 31'   => [ 'month', 31, '2026-11-30 10:00:00', [ '2026-11-30 10:00:00', '2026-12-31 10:00:00' ], null ],
 			'on the schedule: day 15'           => [ 'month', 15, '2026-01-15 10:00:00', [ '2026-01-15 10:00:00', '2026-02-15 10:00:00' ], null ],
@@ -1297,6 +1299,38 @@ final class BillingTermsTest extends LiteIntegrationTestCase {
 			'no stored day'                     => [ 'month', null, '2026-01-29 10:00:00', [ '2026-01-29 10:00:00', '2026-02-28 10:00:00' ], null ],
 			'week cadence ignores the day'      => [ 'week', 5, '2026-01-29 10:00:00', [ '2026-01-29 10:00:00', '2026-02-05 10:00:00' ], null ],
 			'day cadence ignores the day'       => [ 'day', 5, '2026-01-29 10:00:00', [ '2026-01-29 10:00:00', '2026-01-30 10:00:00' ], null ],
+		];
+	}
+
+	/**
+	 * The tolerance counts store-calendar days, not hours: a day across a DST change is 23 or
+	 * 25 hours long, so one day off can be 25 hours and two days off can be 47.
+	 *
+	 * @dataProvider provide_due_dates_across_daylight_saving
+	 *
+	 * @param string             $timezone    Store time zone.
+	 * @param int                $billing_day Stored billing day.
+	 * @param string             $due         Due moment (UTC).
+	 * @param array<int, string> $expected    Expected period to bill (UTC).
+	 * @param int|null           $reanchored  Expected re-anchored billing day, or null.
+	 */
+	public function test_the_tolerance_counts_calendar_days_across_daylight_saving( string $timezone, int $billing_day, string $due, array $expected, ?int $reanchored ): void {
+		$this->set_store_timezone( $timezone );
+		$billed = $this->terms_on_day( 'month', 1, $billing_day )->get_period_to_bill( $this->utc( $due ), $this->utc( $due ) );
+
+		$this->assertSame( $expected, $this->format( $billed ) );
+		$this->assertSame( $reanchored, $billed[1]->get_reanchored_billing_day() );
+	}
+
+	/**
+	 * @return array<string, array{0: string, 1: int, 2: string, 3: array<int, string>, 4: int|null}>
+	 */
+	public function provide_due_dates_across_daylight_saving(): array {
+		return [
+			// 2 Nov 00:30 EST is 25 hours after 1 Nov 00:30 EDT, one calendar day: day 1 stays.
+			'25 hours, one day: New York, day 1'  => [ 'America/New_York', 1, '2026-11-02 05:30:00', [ '2026-11-02 05:30:00', '2026-12-01 05:30:00' ], null ],
+			// 7 Mar 10:00 EST is 47 hours before 9 Mar 10:00 EDT, two calendar days: re-anchors to 7.
+			'47 hours, two days: New York, day 9' => [ 'America/New_York', 9, '2026-03-07 15:00:00', [ '2026-03-07 15:00:00', '2026-04-07 14:00:00' ], 7 ],
 		];
 	}
 
