@@ -1254,9 +1254,10 @@ final class BillingTermsTest extends LiteIntegrationTestCase {
 	}
 
 	/**
-	 * A due date off the billing-day schedule re-anchors: the period steps from the due date's
-	 * own store day, a full cadence, and reports that day for the caller to store. A due date
-	 * on the schedule, terms without a day, and day or week cadences keep the stored day.
+	 * A due date more than a day off its scheduled date re-anchors: the period steps from the
+	 * due date's own store day, a full cadence, and reports that day for the caller to store. A
+	 * due date within a day of it, terms without a day, and day or week cadences keep the stored
+	 * day; within a day, the steps count from the scheduled date.
 	 *
 	 * @dataProvider provide_off_schedule_due_dates
 	 *
@@ -1279,16 +1280,23 @@ final class BillingTermsTest extends LiteIntegrationTestCase {
 	public function provide_off_schedule_due_dates(): array {
 		return [
 			// A weekly contract from 1 Jan whose plan became monthly at its 29 Jan due date.
-			'week to month, day 1, due 29 Jan' => [ 'month', 1, '2026-01-29 10:00:00', [ '2026-01-29 10:00:00', '2026-02-28 10:00:00' ], 29 ],
-			'week to month, leap year'         => [ 'month', 1, '2028-01-29 10:00:00', [ '2028-01-29 10:00:00', '2028-02-29 10:00:00' ], 29 ],
+			'week to month, day 1, due 29 Jan'  => [ 'month', 1, '2026-01-29 10:00:00', [ '2026-01-29 10:00:00', '2026-02-28 10:00:00' ], 29 ],
+			'week to month, leap year'          => [ 'month', 1, '2028-01-29 10:00:00', [ '2028-01-29 10:00:00', '2028-02-29 10:00:00' ], 29 ],
 			// A weekly contract from 31 Jan whose plan became monthly at its 7 Mar due date.
-			'week to month, day 31, due 7 Mar' => [ 'month', 31, '2026-03-07 10:00:00', [ '2026-03-07 10:00:00', '2026-04-07 10:00:00' ], 7 ],
-			'week to year, day 1, due 29 Jan'  => [ 'year', 1, '2026-01-29 10:00:00', [ '2026-01-29 10:00:00', '2027-01-29 10:00:00' ], 29 ],
-			'on the schedule: 28 Feb, day 31'  => [ 'month', 31, '2026-02-28 10:00:00', [ '2026-02-28 10:00:00', '2026-03-31 10:00:00' ], null ],
-			'on the schedule: day 15'          => [ 'month', 15, '2026-01-15 10:00:00', [ '2026-01-15 10:00:00', '2026-02-15 10:00:00' ], null ],
-			'no stored day'                    => [ 'month', null, '2026-01-29 10:00:00', [ '2026-01-29 10:00:00', '2026-02-28 10:00:00' ], null ],
-			'week cadence ignores the day'     => [ 'week', 5, '2026-01-29 10:00:00', [ '2026-01-29 10:00:00', '2026-02-05 10:00:00' ], null ],
-			'day cadence ignores the day'      => [ 'day', 5, '2026-01-29 10:00:00', [ '2026-01-29 10:00:00', '2026-01-30 10:00:00' ], null ],
+			'week to month, day 31, due 7 Mar'  => [ 'month', 31, '2026-03-07 10:00:00', [ '2026-03-07 10:00:00', '2026-04-07 10:00:00' ], 7 ],
+			'week to year, day 1, due 29 Jan'   => [ 'year', 1, '2026-01-29 10:00:00', [ '2026-01-29 10:00:00', '2027-01-29 10:00:00' ], 29 ],
+			'two days late: day 15, due 17 Jan' => [ 'month', 15, '2026-01-17 10:00:00', [ '2026-01-17 10:00:00', '2026-02-17 10:00:00' ], 17 ],
+			'on the schedule: 28 Feb, day 31'   => [ 'month', 31, '2026-02-28 10:00:00', [ '2026-02-28 10:00:00', '2026-03-31 10:00:00' ], null ],
+			'on the schedule: 30 Nov, day 31'   => [ 'month', 31, '2026-11-30 10:00:00', [ '2026-11-30 10:00:00', '2026-12-31 10:00:00' ], null ],
+			'on the schedule: day 15'           => [ 'month', 15, '2026-01-15 10:00:00', [ '2026-01-15 10:00:00', '2026-02-15 10:00:00' ], null ],
+			'a day late: day 15, due 16 Jan'    => [ 'month', 15, '2026-01-16 10:00:00', [ '2026-01-16 10:00:00', '2026-02-15 10:00:00' ], null ],
+			'a day early: day 1, due 31 Jan'    => [ 'month', 1, '2026-01-31 10:00:00', [ '2026-01-31 10:00:00', '2026-03-01 10:00:00' ], null ],
+			'a day after a clamped 28 Feb'      => [ 'month', 31, '2026-03-01 10:00:00', [ '2026-03-01 10:00:00', '2026-03-31 10:00:00' ], null ],
+			'a day before a clamped 30 Nov'     => [ 'month', 31, '2026-11-29 10:00:00', [ '2026-11-29 10:00:00', '2026-12-31 10:00:00' ], null ],
+			'a day late, yearly: 1 Mar, day 29' => [ 'year', 29, '2027-03-01 10:00:00', [ '2027-03-01 10:00:00', '2028-02-29 10:00:00' ], null ],
+			'no stored day'                     => [ 'month', null, '2026-01-29 10:00:00', [ '2026-01-29 10:00:00', '2026-02-28 10:00:00' ], null ],
+			'week cadence ignores the day'      => [ 'week', 5, '2026-01-29 10:00:00', [ '2026-01-29 10:00:00', '2026-02-05 10:00:00' ], null ],
+			'day cadence ignores the day'       => [ 'day', 5, '2026-01-29 10:00:00', [ '2026-01-29 10:00:00', '2026-01-30 10:00:00' ], null ],
 		];
 	}
 
@@ -1301,6 +1309,17 @@ final class BillingTermsTest extends LiteIntegrationTestCase {
 
 		$chain = $this->renewal_chain( $terms->with_billing_day( $day ), $billed[1]->get_moment()->format( 'Y-m-d H:i:s' ), 2 );
 		$this->assertSame( [ '2026-03-29 10:00:00', '2026-04-29 10:00:00' ], $chain );
+	}
+
+	public function test_a_rerun_with_the_reanchored_day_bills_the_same_period(): void {
+		$due   = $this->utc( '2026-01-29 10:00:00' );
+		$first = $this->terms_on_day( 'month', 1, 1 )->get_period_to_bill( $due, $due );
+		$this->assertSame( 29, $first[1]->get_reanchored_billing_day() );
+
+		$rerun = $this->terms_on_day( 'month', 1, 29 )->get_period_to_bill( $due, $due );
+
+		$this->assertSame( $this->format( $first ), $this->format( $rerun ), 'A retry after the day was stored bills the same period.' );
+		$this->assertNull( $rerun[1]->get_reanchored_billing_day(), 'And re-anchors nothing.' );
 	}
 
 	public function test_get_next_due_after_reanchors_an_off_schedule_moment(): void {
@@ -1320,40 +1339,110 @@ final class BillingTermsTest extends LiteIntegrationTestCase {
 
 	/**
 	 * A store time zone change between activation and renewal reads a near-midnight due date
-	 * on another day: it re-anchors there and bills a full month, never a day or two months.
+	 * on the neighbouring day: within a day of its scheduled date, so the billing day stays and
+	 * the period ends on the next scheduled date, never a day or two months away.
 	 *
 	 * @dataProvider provide_time_zone_changes
 	 *
+	 * @param string                     $period      Plan period.
 	 * @param array{0: string, 1: float} $before      Store time zone (identifier, offset) at activation.
 	 * @param array{0: string, 1: float} $after       Store time zone (identifier, offset) at renewal.
 	 * @param int                        $billing_day Billing day stored at activation.
 	 * @param string                     $due         Due moment (UTC), on the schedule in `$before`.
 	 * @param string                     $end         Expected period end (UTC).
-	 * @param int                        $reanchored  Expected re-anchored billing day.
 	 */
-	public function test_a_store_time_zone_change_reanchors_a_near_midnight_due_date( array $before, array $after, int $billing_day, string $due, string $end, int $reanchored ): void {
+	public function test_a_store_time_zone_change_keeps_the_billing_day( string $period, array $before, array $after, int $billing_day, string $due, string $end ): void {
 		$this->set_store_timezone( $before[0], $before[1] );
-		$terms = $this->terms_on_day( 'month', 1, $billing_day );
+		$terms      = $this->terms_on_day( $period, 1, $billing_day );
+		$day_before = $this->get_store_day_of( $due );
 		$this->assertNull( $terms->get_period_to_bill( $this->utc( $due ), $this->utc( $due ) )[1]->get_reanchored_billing_day(), 'The due date is on the schedule before the change.' );
 
 		$this->set_store_timezone( $after[0], $after[1] );
+		$this->assertNotSame( $day_before, $this->get_store_day_of( $due ), 'The change moves it to another store day.' );
 		$billed = $terms->get_period_to_bill( $this->utc( $due ), $this->utc( $due ) );
 
 		$this->assertSame( [ $due, $end ], $this->format( $billed ) );
-		$this->assertSame( $reanchored, $billed[1]->get_reanchored_billing_day() );
+		$this->assertNull( $billed[1]->get_reanchored_billing_day() );
 	}
 
 	/**
-	 * @return array<string, array{0: array{0: string, 1: float}, 1: array{0: string, 1: float}, 2: int, 3: string, 4: string, 5: int}>
+	 * @return array<string, array{0: string, 1: array{0: string, 1: float}, 2: array{0: string, 1: float}, 3: int, 4: string, 5: string}>
 	 */
 	public function provide_time_zone_changes(): array {
 		return [
-			// 1 Apr 00:30 BST reads 31 Mar 19:30 EDT: a full month to 30 Apr, not one day to 1 Apr.
-			'London to New York, day 1' => [ [ 'Europe/London', 0.0 ], [ 'America/New_York', 0.0 ], 1, '2026-03-31 23:30:00', '2026-04-30 23:30:00', 31 ],
-			// 30 Apr 23:00 EDT reads 1 May 03:00 UTC: a full month to 1 Jun, not two to 30 Jun.
-			'New York to UTC, day 31'   => [ [ 'America/New_York', 0.0 ], [ 'UTC', 0.0 ], 31, '2026-05-01 03:00:00', '2026-06-01 03:00:00', 1 ],
+			// 1 Mar 00:30 UTC reads 28 Feb 19:30 EST: to 1 Apr 19:30 EDT, not to 28 Mar.
+			'UTC to New York, day 1, February' => [ 'month', [ 'UTC', 0.0 ], [ 'America/New_York', 0.0 ], 1, '2026-03-01 00:30:00', '2026-04-01 23:30:00' ],
+			// 1 Apr 00:30 BST reads 31 Mar 19:30 EDT: to 1 May 19:30 EDT.
+			'London to New York, day 1'        => [ 'month', [ 'Europe/London', 0.0 ], [ 'America/New_York', 0.0 ], 1, '2026-03-31 23:30:00', '2026-05-01 23:30:00' ],
+			// 30 Apr 23:00 EDT reads 1 May 03:00 UTC: to 31 May, not to 1 Jun or 30 Jun.
+			'New York to UTC, day 31'          => [ 'month', [ 'America/New_York', 0.0 ], [ 'UTC', 0.0 ], 31, '2026-05-01 03:00:00', '2026-05-31 03:00:00' ],
+			// A clamped 30 Apr 23:30 UTC reads 1 May 01:30 CEST: to 31 May 01:30 CEST.
+			'UTC to Berlin, clamped day 31'    => [ 'month', [ 'UTC', 0.0 ], [ 'Europe/Berlin', 0.0 ], 31, '2026-04-30 23:30:00', '2026-05-30 23:30:00' ],
 			// A manual offset moved from UTC+2 to UTC: 1 Apr 00:30 reads 31 Mar 22:30.
-			'offset +2 to offset 0'     => [ [ '', 2.0 ], [ '', 0.0 ], 1, '2026-03-31 22:30:00', '2026-04-30 22:30:00', 31 ],
+			'offset +2 to offset 0'            => [ 'month', [ '', 2.0 ], [ '', 0.0 ], 1, '2026-03-31 22:30:00', '2026-05-01 22:30:00' ],
+			// A clamped 28 Feb 2027 23:30 GMT reads 1 Mar 00:30 CET: still 29 Feb in 2028.
+			'London to Paris, yearly day 29'   => [ 'year', [ 'Europe/London', 0.0 ], [ 'Europe/Paris', 0.0 ], 29, '2027-02-28 23:30:00', '2028-02-28 23:30:00' ],
 		];
+	}
+
+	/**
+	 * The day of the month of a UTC moment in the store calendar.
+	 *
+	 * @param string $moment UTC moment.
+	 */
+	private function get_store_day_of( string $moment ): int {
+		return (int) $this->utc( $moment )->setTimezone( wp_timezone() )->format( 'j' );
+	}
+
+	public function test_a_store_time_zone_round_trip_keeps_the_billing_day(): void {
+		$terms = $this->terms_on_day( 'month', 1, 1 );
+		$this->set_store_timezone( 'Europe/London' );
+		$due = $this->utc( '2026-03-01 00:30:00' );
+
+		$this->set_store_timezone( 'America/New_York' );
+		$there = $terms->get_period_to_bill( $due, $due );
+		$this->set_store_timezone( 'Europe/London' );
+		$back = $terms->get_period_to_bill( $there[1]->get_moment(), $there[1]->get_moment() );
+
+		$this->assertSame( [ '2026-03-01 00:30:00', '2026-04-01 23:30:00' ], $this->format( $there ), '1 Apr 19:30 in New York.' );
+		$this->assertSame( [ '2026-04-01 23:30:00', '2026-04-30 23:30:00' ], $this->format( $back ), '1 May 00:30 in London.' );
+		$this->assertNull( $there[1]->get_reanchored_billing_day() );
+		$this->assertNull( $back[1]->get_reanchored_billing_day() );
+	}
+
+	public function test_a_manual_offset_toggled_for_daylight_saving_keeps_the_billing_day(): void {
+		$terms = $this->terms_on_day( 'month', 1, 30 );
+
+		// 30 Apr 23:30 at UTC+1 is 1 May 00:30 at UTC+2.
+		$this->set_store_timezone( '', 2.0 );
+		$summer = $terms->get_period_to_bill( $this->utc( '2026-04-30 22:30:00' ), $this->utc( '2026-04-30 22:30:00' ) );
+		// 30 May 00:30 at UTC+2 is 29 May 23:30 at UTC+1.
+		$this->set_store_timezone( '', 1.0 );
+		$winter = $terms->get_period_to_bill( $summer[1]->get_moment(), $summer[1]->get_moment() );
+
+		$this->assertSame( [ '2026-04-30 22:30:00', '2026-05-29 22:30:00' ], $this->format( $summer ) );
+		$this->assertSame( [ '2026-05-29 22:30:00', '2026-06-30 22:30:00' ], $this->format( $winter ) );
+		$this->assertNull( $summer[1]->get_reanchored_billing_day() );
+		$this->assertNull( $winter[1]->get_reanchored_billing_day() );
+	}
+
+	/**
+	 * In America/Nuuk daylight saving starts at 23:00 on the last Saturday of March, so a
+	 * 23:30 renewal on 28 Mar 2026 moves to 00:30 on the 29th. That is within a day of the
+	 * 28th: the billing day stays 28 and April renews on the 28th.
+	 */
+	public function test_a_daylight_saving_gap_across_midnight_keeps_the_billing_day(): void {
+		$this->set_store_timezone( 'America/Nuuk' );
+		$terms  = $this->terms_on_day( 'month', 1, 28 );
+		$moment = $this->utc( '2026-03-01 01:30:00' );
+		$chain  = [];
+		for ( $i = 0; $i < 3; $i++ ) {
+			$period = $terms->get_period_to_bill( $moment, $moment );
+			$this->assertNull( $period[1]->get_reanchored_billing_day() );
+			$moment  = $period[1]->get_moment();
+			$chain[] = $moment->setTimezone( wp_timezone() )->format( 'Y-m-d H:i' );
+		}
+
+		$this->assertSame( [ '2026-03-29 00:30', '2026-04-28 00:30', '2026-05-28 00:30' ], $chain, 'Store time: the gap moves the time, not the billing day.' );
 	}
 }

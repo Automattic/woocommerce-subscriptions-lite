@@ -259,19 +259,39 @@ final class SettlementTest extends LiteIntegrationTestCase {
 		$this->assertSame( 31, BillingDay::read( $contract_id ) );
 	}
 
-	public function test_a_late_payment_off_the_billing_day_schedule_reanchors_it(): void {
-		[ $contract_id, $order ] = $this->seed_failed_month_end_renewal();
-		$lock                    = $this->hold_lock( $contract_id );
+	/**
+	 * Store a billing day for a contract under its lock.
+	 *
+	 * @param int $contract_id Contract id.
+	 * @param int $billing_day Day of the month.
+	 */
+	private function store_billing_day( int $contract_id, int $billing_day ): void {
+		$lock = $this->hold_lock( $contract_id );
 		try {
-			BillingDay::store( $lock, 1 );
+			BillingDay::store( $lock, $billing_day );
 		} finally {
 			$lock->release();
 		}
+	}
+
+	public function test_a_late_payment_off_the_billing_day_schedule_reanchors_it(): void {
+		[ $contract_id, $order ] = $this->seed_failed_month_end_renewal();
+		$this->store_billing_day( $contract_id, 3 );
 
 		( new Settlement() )->settle( $order, $this->utc( '2026-04-10 00:00:00' ) );
 
-		$this->assertSame( '2026-04-28 10:00:00', $this->get_contract( $contract_id )->get_next_payment_gmt(), 'Whole months from 28 Feb, not 1 Mar.' );
+		$this->assertSame( '2026-04-28 10:00:00', $this->get_contract( $contract_id )->get_next_payment_gmt(), 'Whole months from 28 Feb, not 3 Mar.' );
 		$this->assertSame( 28, BillingDay::read( $contract_id ) );
+	}
+
+	public function test_a_late_payment_a_day_off_the_billing_day_schedule_keeps_it(): void {
+		[ $contract_id, $order ] = $this->seed_failed_month_end_renewal();
+		$this->store_billing_day( $contract_id, 1 );
+
+		( new Settlement() )->settle( $order, $this->utc( '2026-04-10 00:00:00' ) );
+
+		$this->assertSame( '2026-05-01 10:00:00', $this->get_contract( $contract_id )->get_next_payment_gmt(), '28 Feb is a day from 1 Mar: 1 Apr, then 1 May past now.' );
+		$this->assertSame( 1, BillingDay::read( $contract_id ) );
 	}
 
 	public function test_a_late_payment_during_a_customer_hold_moves_the_anchor_on_the_stored_billing_day(): void {

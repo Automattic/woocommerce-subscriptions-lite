@@ -18,9 +18,10 @@
  * arithmetic. Month and year steps (a year is 12 months) are read in the store calendar
  * ({@see wp_timezone()}), keep the local time of day and land on the billing day, clamped to
  * the last day of a shorter month: billing day 31 runs 31 Jan, 28 Feb, 31 Mar, 30 Apr. Results
- * are in UTC. A due date off that schedule (its store day is not the billing day clamped to its
- * month, after a plan cadence or store time zone change) re-anchors: the roll keeps the due
- * date's own day and returns it with the date ({@see BillingDate}) for the caller to store.
+ * are in UTC. A due date within one day of its scheduled date (a store time zone or DST shift)
+ * stays on the schedule. One further off (after a plan cadence change) re-anchors: the roll
+ * keeps the due date's own day and returns it with the date ({@see BillingDate}) for the caller
+ * to store.
  * Catch-up rule: a contract that comes back
  * due late (after a hold, an owner absence or a cron outage) bills one period - the one
  * containing now - and its next due moment is the end of that period, always in the future.
@@ -323,20 +324,53 @@ final class BillingTerms {
 	}
 
 	/**
-	 * The billing day a roll from `$from` keeps: the terms' own while `$from` is on its schedule
-	 * (`$from`'s store day is the billing day clamped to its month), else the day of `$from` in
-	 * the store calendar. Day and week cadences never leave the schedule: they ignore the day.
+	 * Where a roll from `$from` counts its steps from, and the billing day it keeps. Within one
+	 * day of its scheduled date (the billing day clamped to the previous, same or next month,
+	 * whichever is nearest) `$from` is on schedule: steps count from that scheduled date on the
+	 * terms' day. Further off it re-anchors on its own store day. Day and week cadences and terms
+	 * without a day step from `$from` itself.
 	 *
 	 * @param DateTimeImmutable $from The moment the roll starts from.
+	 * @return array{0: DateTimeImmutable, 1: int} The moment steps count from, and the billing day.
 	 */
-	private function get_billing_day_for_roll( DateTimeImmutable $from ): int {
-		$local    = $from->setTimezone( wp_timezone() );
-		$from_day = (int) $local->format( 'j' );
+	private function get_roll_origin( DateTimeImmutable $from ): array {
 		if ( null === $this->billing_day || ! $this->has_month_steps() ) {
-			return $this->billing_day ?? $from_day;
+			return [ $from, $this->billing_day ?? self::get_store_day( $from ) ];
 		}
 
-		return min( $this->billing_day, (int) $local->format( 't' ) ) === $from_day ? $this->billing_day : $from_day;
+		$nearest     = $from;
+		$nearest_gap = PHP_INT_MAX;
+		foreach ( [ -1, 0, 1 ] as $months ) {
+			$scheduled = self::add_months( $from, $months, $this->billing_day );
+			$gap       = self::get_calendar_days_between( $from, $scheduled );
+			if ( $gap < $nearest_gap ) {
+				$nearest     = $scheduled;
+				$nearest_gap = $gap;
+			}
+		}
+
+		// Calendar days, not 24 hours: a zone or DST shift moves the store date by one day
+		// whatever the hours, and a day across a DST change is 23 or 25 hours long.
+		if ( $nearest_gap <= 1 ) {
+			return [ $nearest, $this->billing_day ];
+		}
+
+		return [ $from, self::get_store_day( $from ) ];
+	}
+
+	/**
+	 * The number of days between the store-calendar dates of two moments, ignoring the time.
+	 *
+	 * @param DateTimeImmutable $first  One moment.
+	 * @param DateTimeImmutable $second The other moment.
+	 */
+	private static function get_calendar_days_between( DateTimeImmutable $first, DateTimeImmutable $second ): int {
+		$store = wp_timezone();
+		$utc   = new DateTimeZone( 'UTC' );
+		$from  = new DateTimeImmutable( $first->setTimezone( $store )->format( 'Y-m-d' ), $utc );
+		$to    = new DateTimeImmutable( $second->setTimezone( $store )->format( 'Y-m-d' ), $utc );
+
+		return (int) $from->diff( $to )->days;
 	}
 
 	/**
@@ -354,9 +388,11 @@ final class BillingTerms {
 	 * @param int               $billing_day The billing day the roll kept.
 	 */
 	private function to_billing_date( DateTimeImmutable $moment, int $billing_day ): BillingDate {
-		$reanchored = null !== $this->billing_day && $this->has_month_steps() && $billing_day !== $this->billing_day;
+		if ( null === $this->billing_day || ! $this->has_month_steps() || $billing_day === $this->billing_day ) {
+			return new BillingDate( $moment, null );
+		}
 
-		return new BillingDate( $moment, $reanchored ? $billing_day : null );
+		return new BillingDate( $moment, $billing_day );
 	}
 
 	/**
@@ -423,8 +459,9 @@ final class BillingTerms {
 	/**
 	 * The period to bill: it starts at `$anchor` rolled forward by whole cadences while the
 	 * following boundary is not after `$now`, so it contains `$now` (or starts at a future
-	 * anchor). Month and year steps keep the billing day of {@see self::get_billing_day_for_roll()}.
-	 * When the roll cap runs out the period starts at `$now`, on now's own day (logged).
+	 * anchor). Month and year steps count from and keep the billing day of
+	 * {@see self::get_roll_origin()}; the period still starts at the due moment. When the roll
+	 * cap runs out the period starts at `$now`, on now's own day (logged).
 	 *
 	 * @param DateTimeImmutable $anchor The due moment the renewal was anchored on.
 	 * @param DateTimeImmutable $now    The current moment.
@@ -432,11 +469,12 @@ final class BillingTerms {
 	 *                                                     billing day it re-anchored to, if any.
 	 */
 	public function get_period_to_bill( DateTimeImmutable $anchor, DateTimeImmutable $now ): array {
-		$utc         = new DateTimeZone( 'UTC' );
-		$start       = $anchor->setTimezone( $utc );
-		$now         = $now->setTimezone( $utc );
-		$billing_day = $this->get_billing_day_for_roll( $start );
-		$end         = $this->get_next_renewal_from( $start, $billing_day );
+		$utc   = new DateTimeZone( 'UTC' );
+		$start = $anchor->setTimezone( $utc );
+		$now   = $now->setTimezone( $utc );
+
+		[ $origin, $billing_day ] = $this->get_roll_origin( $start );
+		$end                      = $this->get_next_renewal_from( $origin, $billing_day );
 
 		$rolls_left = self::MAX_ROLLS;
 		while ( $end <= $now && $rolls_left-- > 0 ) {
@@ -456,8 +494,8 @@ final class BillingTerms {
 
 	/**
 	 * The next due moment from `$from`: kept when it is after `$now`, else rolled forward by
-	 * whole cadences until it is. Month and year steps keep the billing day of
-	 * {@see self::get_billing_day_for_roll()}, so a kept `$from` off the schedule re-anchors too.
+	 * whole cadences until it is. Month and year steps count from and keep the billing day of
+	 * {@see self::get_roll_origin()}, so a kept `$from` off the schedule re-anchors too.
 	 * When the roll cap runs out it is one cadence after `$now`, on now's own day (logged).
 	 *
 	 * @param DateTimeImmutable $from The moment to start from (typically a period end).
@@ -465,14 +503,16 @@ final class BillingTerms {
 	 * @return BillingDate The next due moment (UTC), with the billing day it re-anchored to, if any.
 	 */
 	public function get_next_due_after( DateTimeImmutable $from, DateTimeImmutable $now ): BillingDate {
-		$utc         = new DateTimeZone( 'UTC' );
-		$next        = $from->setTimezone( $utc );
-		$now         = $now->setTimezone( $utc );
-		$billing_day = $this->get_billing_day_for_roll( $next );
+		$utc  = new DateTimeZone( 'UTC' );
+		$next = $from->setTimezone( $utc );
+		$now  = $now->setTimezone( $utc );
+
+		[ $origin, $billing_day ] = $this->get_roll_origin( $next );
 
 		$rolls_left = self::MAX_ROLLS;
 		while ( $next <= $now && $rolls_left-- > 0 ) {
-			$next = $this->get_next_renewal_from( $next, $billing_day );
+			$next   = $this->get_next_renewal_from( $origin, $billing_day );
+			$origin = $next;
 		}
 
 		if ( $next <= $now ) {

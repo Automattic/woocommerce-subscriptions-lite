@@ -210,10 +210,11 @@ final class RenewalScenariosTest extends LiteIntegrationTestCase {
 
 	/**
 	 * A contract activated in a London store at 00:30 on the 1st renews after the store moved
-	 * to New York, where its due date reads 19:30 on the 31st: the renewal bills a full month
-	 * on the 31st (not one day to 1 Feb) and moves the billing day there.
+	 * to New York, where its due date reads 19:30 on the 31st: a day from its scheduled 1 Feb,
+	 * so the billing day stays 1 and the renewal bills to 1 Mar 19:30 New York time, with no
+	 * short or long period, then 1 Apr.
 	 */
-	public function test_a_store_time_zone_change_reanchors_a_near_midnight_due_date(): void {
+	public function test_a_store_time_zone_change_keeps_the_billing_day(): void {
 		$this->support_engine_charges( 'cod' );
 		$this->set_store_timezone( 'Europe/London' );
 		$contract_id = $this->create_contract(
@@ -229,13 +230,16 @@ final class RenewalScenariosTest extends LiteIntegrationTestCase {
 		$this->set_store_timezone( 'America/New_York' );
 		$this->assertSame( 1, $this->run_due_dispatch( new DateTimeImmutable( '2099-02-01 01:00:00', new DateTimeZone( 'UTC' ) ) ) );
 
-		$this->assertSame( '2099-03-01 00:30:00', $this->head( $contract_id )->get_ends_at_gmt(), '28 Feb 19:30 in New York.' );
-		$this->assertSame( '2099-03-01 00:30:00', $this->get_contract( $contract_id )->get_next_payment_gmt() );
-		$this->assertSame( 31, BillingDay::read( $contract_id ) );
+		$this->assertSame( '2099-02-01 00:30:00', $this->head( $contract_id )->get_starts_at_gmt() );
+		$this->assertSame( '2099-03-02 00:30:00', $this->head( $contract_id )->get_ends_at_gmt(), '1 Mar 19:30 in New York.' );
+		$this->assertSame( '2099-03-02 00:30:00', $this->get_contract( $contract_id )->get_next_payment_gmt() );
+		$this->assertSame( 1, BillingDay::read( $contract_id ), 'A day off its scheduled date keeps the billing day.' );
 
-		$this->assertSame( 1, $this->run_due_dispatch( new DateTimeImmutable( '2099-03-01 01:00:00', new DateTimeZone( 'UTC' ) ) ) );
+		$this->assertSame( 1, $this->run_due_dispatch( new DateTimeImmutable( '2099-03-02 01:00:00', new DateTimeZone( 'UTC' ) ) ) );
 
-		$this->assertSame( '2099-03-31 23:30:00', $this->head( $contract_id )->get_ends_at_gmt(), '31 Mar 19:30 in New York (daylight saving).' );
+		$this->assertSame( '2099-03-02 00:30:00', $this->head( $contract_id )->get_starts_at_gmt() );
+		$this->assertSame( '2099-04-01 23:30:00', $this->head( $contract_id )->get_ends_at_gmt(), '1 Apr 19:30 in New York (daylight saving).' );
+		$this->assertSame( 1, BillingDay::read( $contract_id ) );
 	}
 
 	public function test_a_contract_several_periods_behind_is_billed_once_with_the_next_due_in_the_future(): void {
