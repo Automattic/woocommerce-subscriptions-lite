@@ -667,8 +667,9 @@ final class BillingTermsTest extends LiteIntegrationTestCase {
 	}
 
 	/**
-	 * First renewal dates for every cadence and trial unit, pinned: month and year overflow
-	 * (31 Jan + 1 month = 3 Mar), a trial wins over the cadence, and results are in UTC.
+	 * First renewal dates for every cadence and trial unit, pinned: month and year steps clamp
+	 * to the end of a shorter month (31 Jan + 1 month = 28 Feb), a trial wins over the cadence,
+	 * and results are in UTC.
 	 *
 	 * @dataProvider provide_first_renewals
 	 *
@@ -707,16 +708,16 @@ final class BillingTermsTest extends LiteIntegrationTestCase {
 			'every day'                  => [ $cadence( 'day', 1 ), $start, '2026-02-01 10:00:00' ],
 			'every week'                 => [ $cadence( 'week', 1 ), $start, '2026-02-07 10:00:00' ],
 			'every two weeks'            => [ $cadence( 'week', 2 ), $start, '2026-02-14 10:00:00' ],
-			'every month overflows'      => [ $cadence( 'month', 1 ), $start, '2026-03-03 10:00:00' ],
-			'every three months'         => [ $cadence( 'month', 3 ), $start, '2026-05-01 10:00:00' ],
+			'every month clamps'         => [ $cadence( 'month', 1 ), $start, '2026-02-28 10:00:00' ],
+			'every three months'         => [ $cadence( 'month', 3 ), $start, '2026-04-30 10:00:00' ],
 			'every year'                 => [ $cadence( 'year', 1 ), $start, '2027-01-31 10:00:00' ],
-			'every year from a leap day' => [ $cadence( 'year', 1 ), '2024-02-29 00:00:00', '2025-03-01 00:00:00' ],
+			'every year from a leap day' => [ $cadence( 'year', 1 ), '2024-02-29 00:00:00', '2025-02-28 00:00:00' ],
 			'14 day trial'               => [ $trial( 14, 'day' ), $start, '2026-02-14 10:00:00' ],
 			'2 week trial'               => [ $trial( 2, 'week' ), $start, '2026-02-14 10:00:00' ],
-			'1 month trial'              => [ $trial( 1, 'month' ), $start, '2026-03-03 10:00:00' ],
+			'1 month trial'              => [ $trial( 1, 'month' ), $start, '2026-02-28 10:00:00' ],
 			'1 year trial'               => [ $trial( 1, 'year' ), $start, '2027-01-31 10:00:00' ],
-			'non-UTC start'              => [ $cadence( 'month', 1 ), '2026-01-31T23:30:00+02:00', '2026-03-03 21:30:00' ],
-			'non-UTC start with trial'   => [ $trial( 1, 'month' ), '2026-01-31T23:30:00+02:00', '2026-03-03 21:30:00' ],
+			'non-UTC start'              => [ $cadence( 'month', 1 ), '2026-01-31T23:30:00+02:00', '2026-02-28 21:30:00' ],
+			'non-UTC start with trial'   => [ $trial( 1, 'month' ), '2026-01-31T23:30:00+02:00', '2026-02-28 21:30:00' ],
 		];
 	}
 
@@ -846,29 +847,350 @@ final class BillingTermsTest extends LiteIntegrationTestCase {
 		$this->assertTrue( $this->has_logged( 'exhausted the roll cap' ) );
 	}
 
-	public function test_a_month_end_anchor_rolls_with_overflow(): void {
+	public function test_a_month_end_anchor_rolls_on_its_day_clamped_to_the_month_end(): void {
 		$period = $this->terms()->get_period_to_bill( $this->utc( '2026-01-31 00:00:00' ), $this->utc( '2026-03-10 00:00:00' ) );
 
-		$this->assertSame( [ '2026-03-03 00:00:00', '2026-04-03 00:00:00' ], $this->format( $period ) );
+		$this->assertSame( [ '2026-02-28 00:00:00', '2026-03-31 00:00:00' ], $this->format( $period ) );
 	}
 
-	public function test_get_next_due_after_overflows_a_month_end(): void {
+	public function test_get_next_due_after_clamps_a_month_end(): void {
 		$next = $this->terms()->get_next_due_after( $this->utc( '2026-01-31 00:00:00' ), $this->utc( '2026-02-15 00:00:00' ) );
 
-		$this->assertSame( '2026-03-03 00:00:00', $next->format( 'Y-m-d H:i:s' ) );
+		$this->assertSame( '2026-02-28 00:00:00', $next->format( 'Y-m-d H:i:s' ) );
 	}
 
-	public function test_a_leap_day_anchor_rolls_by_year(): void {
+	public function test_a_leap_day_anchor_rolls_by_year_to_the_end_of_february(): void {
 		$period = $this->terms( 'year' )->get_period_to_bill( $this->utc( '2024-02-29 00:00:00' ), $this->utc( '2025-06-01 00:00:00' ) );
 		$next   = $this->terms( 'year' )->get_next_due_after( $this->utc( '2024-02-29 00:00:00' ), $this->utc( '2024-03-01 00:00:00' ) );
 
-		$this->assertSame( [ '2025-03-01 00:00:00', '2026-03-01 00:00:00' ], $this->format( $period ) );
-		$this->assertSame( '2025-03-01 00:00:00', $next->format( 'Y-m-d H:i:s' ) );
+		$this->assertSame( [ '2025-02-28 00:00:00', '2026-02-28 00:00:00' ], $this->format( $period ) );
+		$this->assertSame( '2025-02-28 00:00:00', $next->format( 'Y-m-d H:i:s' ) );
 	}
 
-	public function test_a_non_utc_anchor_is_billed_in_utc(): void {
+	public function test_a_non_utc_anchor_is_billed_in_the_utc_store_calendar(): void {
 		$period = $this->terms()->get_period_to_bill( new DateTimeImmutable( '2026-01-31T23:30:00+02:00' ), $this->utc( '2026-02-01 00:00:00' ) );
 
-		$this->assertSame( [ '2026-01-31 21:30:00', '2026-03-03 21:30:00' ], $this->format( $period ) );
+		$this->assertSame( [ '2026-01-31 21:30:00', '2026-02-28 21:30:00' ], $this->format( $period ) );
+	}
+
+	/**
+	 * The store's `timezone_string` before a test changed it.
+	 *
+	 * @var string|null
+	 */
+	private $timezone_before;
+
+	public function tear_down(): void {
+		if ( null !== $this->timezone_before ) {
+			update_option( 'timezone_string', $this->timezone_before );
+			$this->timezone_before = null;
+		}
+		parent::tear_down();
+	}
+
+	/**
+	 * Set the store time zone for this test; restored in tear_down.
+	 *
+	 * @param string $timezone A time zone identifier.
+	 */
+	private function set_store_timezone( string $timezone ): void {
+		if ( null === $this->timezone_before ) {
+			$this->timezone_before = (string) get_option( 'timezone_string' );
+		}
+		update_option( 'timezone_string', $timezone );
+	}
+
+	/**
+	 * Monthly billing terms on a billing day, or on none.
+	 *
+	 * @param string   $period      Period.
+	 * @param int      $interval    Interval.
+	 * @param int|null $billing_day Billing day, or null for none.
+	 */
+	private function terms_on_day( string $period, int $interval, ?int $billing_day ): BillingTerms {
+		$terms = $this->terms( $period, $interval );
+
+		return null === $billing_day ? $terms : $terms->with_billing_day( $billing_day );
+	}
+
+	/**
+	 * The renewal dates of `$steps` on-time renewals from the due moment `$due`, each one billed
+	 * when it falls due (as the renewal flow does: the next due moment is the period's end).
+	 *
+	 * @param BillingTerms $terms Terms.
+	 * @param string       $due   First due moment (GMT).
+	 * @param int          $steps Number of renewals.
+	 * @return array<int, string>
+	 */
+	private function renewal_chain( BillingTerms $terms, string $due, int $steps = 4 ): array {
+		$chain  = [];
+		$moment = $this->utc( $due );
+		for ( $i = 0; $i < $steps; $i++ ) {
+			$period  = $terms->get_period_to_bill( $moment, $moment );
+			$moment  = $period[1];
+			$chain[] = $moment->format( 'Y-m-d H:i:s' );
+		}
+
+		return $chain;
+	}
+
+	/**
+	 * Monthly chains land on the billing day, clamped to a shorter month's last day, and return
+	 * to it in months that have it.
+	 *
+	 * @dataProvider provide_monthly_chains
+	 *
+	 * @param string             $due         First due moment.
+	 * @param int|null           $billing_day Billing day, or null for none stored.
+	 * @param array<int, string> $expected    The next four renewals.
+	 */
+	public function test_a_monthly_chain_keeps_the_billing_day( string $due, ?int $billing_day, array $expected ): void {
+		$this->assertSame( $expected, $this->renewal_chain( $this->terms_on_day( 'month', 1, $billing_day ), $due ) );
+	}
+
+	/**
+	 * @return array<string, array{0: string, 1: int|null, 2: array<int, string>}>
+	 */
+	public function provide_monthly_chains(): array {
+		return [
+			'28th, 2026'                 => [ '2026-01-28 10:00:00', 28, [ '2026-02-28 10:00:00', '2026-03-28 10:00:00', '2026-04-28 10:00:00', '2026-05-28 10:00:00' ] ],
+			'29th, 2026'                 => [ '2026-01-29 10:00:00', 29, [ '2026-02-28 10:00:00', '2026-03-29 10:00:00', '2026-04-29 10:00:00', '2026-05-29 10:00:00' ] ],
+			'30th, 2026'                 => [ '2026-01-30 10:00:00', 30, [ '2026-02-28 10:00:00', '2026-03-30 10:00:00', '2026-04-30 10:00:00', '2026-05-30 10:00:00' ] ],
+			'31st, 2026'                 => [ '2026-01-31 10:00:00', 31, [ '2026-02-28 10:00:00', '2026-03-31 10:00:00', '2026-04-30 10:00:00', '2026-05-31 10:00:00' ] ],
+			'28th, leap 2028'            => [ '2028-01-28 10:00:00', 28, [ '2028-02-28 10:00:00', '2028-03-28 10:00:00', '2028-04-28 10:00:00', '2028-05-28 10:00:00' ] ],
+			'29th, leap 2028'            => [ '2028-01-29 10:00:00', 29, [ '2028-02-29 10:00:00', '2028-03-29 10:00:00', '2028-04-29 10:00:00', '2028-05-29 10:00:00' ] ],
+			'30th, leap 2028'            => [ '2028-01-30 10:00:00', 30, [ '2028-02-29 10:00:00', '2028-03-30 10:00:00', '2028-04-30 10:00:00', '2028-05-30 10:00:00' ] ],
+			'31st, leap 2028'            => [ '2028-01-31 10:00:00', 31, [ '2028-02-29 10:00:00', '2028-03-31 10:00:00', '2028-04-30 10:00:00', '2028-05-31 10:00:00' ] ],
+			'15th control'               => [ '2026-01-15 10:00:00', 15, [ '2026-02-15 10:00:00', '2026-03-15 10:00:00', '2026-04-15 10:00:00', '2026-05-15 10:00:00' ] ],
+			'30 Apr is not a month end'  => [ '2026-04-30 10:00:00', 30, [ '2026-05-30 10:00:00', '2026-06-30 10:00:00', '2026-07-30 10:00:00', '2026-08-30 10:00:00' ] ],
+			'31st, across the year end'  => [ '2026-10-31 10:00:00', 31, [ '2026-11-30 10:00:00', '2026-12-31 10:00:00', '2027-01-31 10:00:00', '2027-02-28 10:00:00' ] ],
+			'no billing day: own day'    => [ '2026-01-31 10:00:00', null, [ '2026-02-28 10:00:00', '2026-03-28 10:00:00', '2026-04-28 10:00:00', '2026-05-28 10:00:00' ] ],
+			'off-grid due snaps to 31st' => [ '2026-02-28 10:00:00', 31, [ '2026-03-31 10:00:00', '2026-04-30 10:00:00', '2026-05-31 10:00:00', '2026-06-30 10:00:00' ] ],
+		];
+	}
+
+	/**
+	 * A cadence of several months clamps once per step.
+	 *
+	 * @dataProvider provide_multi_month_steps
+	 *
+	 * @param int                $interval    Months per cycle.
+	 * @param string             $due         First due moment.
+	 * @param int                $billing_day Billing day.
+	 * @param array<int, string> $expected    The next renewals.
+	 */
+	public function test_a_multi_month_cadence_clamps_each_step( int $interval, string $due, int $billing_day, array $expected ): void {
+		$this->assertSame( $expected, $this->renewal_chain( $this->terms_on_day( 'month', $interval, $billing_day ), $due, count( $expected ) ) );
+	}
+
+	/**
+	 * @return array<string, array{0: int, 1: string, 2: int, 3: array<int, string>}>
+	 */
+	public function provide_multi_month_steps(): array {
+		return [
+			'every 2 months from 31 Jan' => [ 2, '2026-01-31 10:00:00', 31, [ '2026-03-31 10:00:00', '2026-05-31 10:00:00', '2026-07-31 10:00:00' ] ],
+			'every 3 months from 31 Jan' => [ 3, '2026-01-31 10:00:00', 31, [ '2026-04-30 10:00:00', '2026-07-31 10:00:00', '2026-10-31 10:00:00' ] ],
+			'every 2 months from 30 Nov' => [ 2, '2026-11-30 10:00:00', 30, [ '2027-01-30 10:00:00', '2027-03-30 10:00:00', '2027-05-30 10:00:00' ] ],
+			'every 3 months from 30 Nov' => [ 3, '2026-11-30 10:00:00', 30, [ '2027-02-28 10:00:00', '2027-05-30 10:00:00', '2027-08-30 10:00:00', '2027-11-30 10:00:00' ] ],
+		];
+	}
+
+	/**
+	 * A year is 12 months under the same clamp: a leap day renews on 28 Feb in other years.
+	 *
+	 * @dataProvider provide_yearly_chains
+	 *
+	 * @param int                $interval    Years per cycle.
+	 * @param string             $due         First due moment.
+	 * @param int                $billing_day Billing day.
+	 * @param array<int, string> $expected    The next renewals.
+	 */
+	public function test_a_yearly_cadence_clamps_as_twelve_months( int $interval, string $due, int $billing_day, array $expected ): void {
+		$this->assertSame( $expected, $this->renewal_chain( $this->terms_on_day( 'year', $interval, $billing_day ), $due, count( $expected ) ) );
+	}
+
+	/**
+	 * @return array<string, array{0: int, 1: string, 2: int, 3: array<int, string>}>
+	 */
+	public function provide_yearly_chains(): array {
+		return [
+			'29 Feb 2024, chained'          => [ 1, '2024-02-29 10:00:00', 29, [ '2025-02-28 10:00:00', '2026-02-28 10:00:00', '2027-02-28 10:00:00', '2028-02-29 10:00:00' ] ],
+			'28 Feb 2025 stays on the 28th' => [ 1, '2025-02-28 10:00:00', 28, [ '2026-02-28 10:00:00', '2027-02-28 10:00:00', '2028-02-28 10:00:00', '2029-02-28 10:00:00' ] ],
+			'29 Feb 2024 plus 4 years'      => [ 4, '2024-02-29 10:00:00', 29, [ '2028-02-29 10:00:00', '2032-02-29 10:00:00' ] ],
+		];
+	}
+
+	/**
+	 * A trial in months or years keeps the start's day; a trial in days or weeks makes its end
+	 * the billing day. The renewal after the trial lands on that day.
+	 *
+	 * @dataProvider provide_trials
+	 *
+	 * @param string $period      Plan period.
+	 * @param string $start       Contract start.
+	 * @param int    $length      Trial length.
+	 * @param string $unit        Trial unit.
+	 * @param string $first       Expected first renewal.
+	 * @param int    $billing_day Expected billing day.
+	 * @param string $second      Expected renewal after the first.
+	 */
+	public function test_a_trial_sets_the_first_renewal_and_the_billing_day( string $period, string $start, int $length, string $unit, string $first, int $billing_day, string $second ): void {
+		$terms = BillingTerms::from_plan(
+			$this->make_plan(
+				$period,
+				1,
+				null,
+				[
+					'billing_policy' => [
+						'period'         => $period,
+						'interval'       => 1,
+						'trial_duration' => [
+							'length' => $length,
+							'unit'   => $unit,
+						],
+					],
+				]
+			)
+		);
+		$this->assertInstanceOf( BillingTerms::class, $terms );
+
+		$first_renewal = $terms->get_first_renewal_from( $this->utc( $start ) );
+		$day           = $terms->get_billing_day_from( $this->utc( $start ) );
+		$period_billed = $terms->with_billing_day( $day )->get_period_to_bill( $first_renewal, $first_renewal );
+
+		$this->assertSame( $first, $first_renewal->format( 'Y-m-d H:i:s' ) );
+		$this->assertSame( $billing_day, $day );
+		$this->assertSame( $second, $period_billed[1]->format( 'Y-m-d H:i:s' ) );
+	}
+
+	/**
+	 * @return array<string, array{0: string, 1: string, 2: int, 3: string, 4: string, 5: int, 6: string}>
+	 */
+	public function provide_trials(): array {
+		return [
+			'1 month trial from 31 Jan'      => [ 'month', '2026-01-31 10:00:00', 1, 'month', '2026-02-28 10:00:00', 31, '2026-03-31 10:00:00' ],
+			'1 month trial from 30 Jan'      => [ 'month', '2026-01-30 10:00:00', 1, 'month', '2026-02-28 10:00:00', 30, '2026-03-30 10:00:00' ],
+			'1 month trial from 29 Jan'      => [ 'month', '2026-01-29 10:00:00', 1, 'month', '2026-02-28 10:00:00', 29, '2026-03-29 10:00:00' ],
+			'1 month trial from 29 Jan 2028' => [ 'month', '2028-01-29 10:00:00', 1, 'month', '2028-02-29 10:00:00', 29, '2028-03-29 10:00:00' ],
+			'1 year trial from 29 Feb'       => [ 'month', '2024-02-29 10:00:00', 1, 'year', '2025-02-28 10:00:00', 29, '2025-03-29 10:00:00' ],
+			'1 year trial, yearly plan'      => [ 'year', '2024-02-29 10:00:00', 1, 'year', '2025-02-28 10:00:00', 29, '2026-02-28 10:00:00' ],
+			'1 year trial from 31 Jan'       => [ 'month', '2026-01-31 10:00:00', 1, 'year', '2027-01-31 10:00:00', 31, '2027-02-28 10:00:00' ],
+			'14 day trial ending on 31st'    => [ 'month', '2026-01-17 10:00:00', 14, 'day', '2026-01-31 10:00:00', 31, '2026-02-28 10:00:00' ],
+			'2 week trial ending on 2nd'     => [ 'month', '2026-02-16 10:00:00', 2, 'week', '2026-03-02 10:00:00', 2, '2026-04-02 10:00:00' ],
+		];
+	}
+
+	public function test_without_a_trial_the_billing_day_is_the_start_day(): void {
+		$this->assertSame( 31, $this->terms()->get_billing_day_from( $this->utc( '2026-01-31 10:00:00' ) ) );
+	}
+
+	/**
+	 * The catch-up roll follows the billing day.
+	 *
+	 * @dataProvider provide_catch_up
+	 *
+	 * @param string             $period      Plan period.
+	 * @param int                $billing_day Billing day.
+	 * @param string             $due         Due moment.
+	 * @param string             $now         The current moment.
+	 * @param array<int, string> $expected    Expected period to bill.
+	 * @param string             $next_due    Expected next due moment after `$due`.
+	 */
+	public function test_the_catch_up_roll_keeps_the_billing_day( string $period, int $billing_day, string $due, string $now, array $expected, string $next_due ): void {
+		$terms = $this->terms_on_day( $period, 1, $billing_day );
+
+		$billed = $terms->get_period_to_bill( $this->utc( $due ), $this->utc( $now ) );
+		$next   = $terms->get_next_due_after( $this->utc( $due ), $this->utc( $now ) );
+
+		$this->assertSame( $expected, $this->format( $billed ) );
+		$this->assertSame( $next_due, $next->format( 'Y-m-d H:i:s' ) );
+	}
+
+	/**
+	 * @return array<string, array{0: string, 1: int, 2: string, 3: string, 4: array<int, string>, 5: string}>
+	 */
+	public function provide_catch_up(): array {
+		return [
+			'31st, across February'      => [ 'month', 31, '2026-01-31 10:00:00', '2026-03-10 00:00:00', [ '2026-02-28 10:00:00', '2026-03-31 10:00:00' ], '2026-03-31 10:00:00' ],
+			'30th, two periods behind'   => [ 'month', 30, '2026-01-30 10:00:00', '2026-04-10 00:00:00', [ '2026-03-30 10:00:00', '2026-04-30 10:00:00' ], '2026-04-30 10:00:00' ],
+			'29th, across February'      => [ 'month', 29, '2026-01-29 10:00:00', '2026-03-10 00:00:00', [ '2026-02-28 10:00:00', '2026-03-29 10:00:00' ], '2026-03-29 10:00:00' ],
+			'31st, leap February'        => [ 'month', 31, '2028-01-31 10:00:00', '2028-03-01 00:00:00', [ '2028-02-29 10:00:00', '2028-03-31 10:00:00' ], '2028-03-31 10:00:00' ],
+			'leap day, into a leap year' => [ 'year', 29, '2024-02-29 10:00:00', '2027-06-01 00:00:00', [ '2027-02-28 10:00:00', '2028-02-29 10:00:00' ], '2028-02-29 10:00:00' ],
+		];
+	}
+
+	public function test_a_monthly_roll_cap_restarts_on_the_day_of_now(): void {
+		$this->capture_log();
+		$terms = $this->terms_on_day( 'month', 1, 15 );
+
+		$period = $terms->get_period_to_bill( $this->utc( '1900-01-15 10:00:00' ), $this->utc( '2026-01-31 10:00:00' ) );
+		$next   = $terms->get_next_due_after( $this->utc( '1900-01-15 10:00:00' ), $this->utc( '2026-01-31 10:00:00' ) );
+
+		$this->assertSame( [ '2026-01-31 10:00:00', '2026-02-28 10:00:00' ], $this->format( $period ) );
+		$this->assertSame( '2026-02-28 10:00:00', $next->format( 'Y-m-d H:i:s' ) );
+		$this->assertTrue( $this->has_logged( 'exhausted the roll cap' ) );
+	}
+
+	/**
+	 * @dataProvider provide_out_of_range_billing_days
+	 *
+	 * @param int $billing_day Billing day.
+	 */
+	public function test_with_billing_day_refuses_a_day_outside_the_month( int $billing_day ): void {
+		$this->expectException( \InvalidArgumentException::class );
+
+		$this->terms()->with_billing_day( $billing_day );
+	}
+
+	/**
+	 * @return array<string, array{0: int}>
+	 */
+	public function provide_out_of_range_billing_days(): array {
+		return [
+			'zero' => [ 0 ],
+			'32'   => [ 32 ],
+		];
+	}
+
+	public function test_day_and_week_cadences_ignore_the_billing_day(): void {
+		$this->assertSame( [ '2026-02-01 10:00:00' ], $this->renewal_chain( $this->terms_on_day( 'day', 1, 5 ), '2026-01-31 10:00:00', 1 ) );
+		$this->assertSame( [ '2026-02-07 10:00:00' ], $this->renewal_chain( $this->terms_on_day( 'week', 1, 5 ), '2026-01-31 10:00:00', 1 ) );
+	}
+
+	/**
+	 * Month ends and the billing day are read in the store calendar, at the local time of day,
+	 * across daylight saving changes; results are stored in UTC.
+	 *
+	 * @dataProvider provide_store_time_zones
+	 *
+	 * @param string             $timezone    Store time zone.
+	 * @param string             $start       Contract start (UTC).
+	 * @param int                $billing_day Expected billing day.
+	 * @param array<int, string> $expected    First renewal and the three after it (UTC).
+	 */
+	public function test_month_steps_follow_the_store_calendar( string $timezone, string $start, int $billing_day, array $expected ): void {
+		$this->set_store_timezone( $timezone );
+		$terms = $this->terms();
+
+		$day   = $terms->get_billing_day_from( $this->utc( $start ) );
+		$first = $terms->get_first_renewal_from( $this->utc( $start ) )->format( 'Y-m-d H:i:s' );
+		$chain = $this->renewal_chain( $terms->with_billing_day( $day ), $first, 3 );
+
+		$this->assertSame( $billing_day, $day );
+		$this->assertSame( $expected, array_merge( [ $first ], $chain ) );
+	}
+
+	/**
+	 * @return array<string, array{0: string, 1: string, 2: int, 3: array<int, string>}>
+	 */
+	public function provide_store_time_zones(): array {
+		return [
+			// 31 Jan 08:00 in Sydney: 28 Feb, 31 Mar, 30 Apr, 31 May at 08:00 local (daylight saving ends 5 Apr).
+			'Sydney, paid on the 31st local'   => [ 'Australia/Sydney', '2026-01-30 21:00:00', 31, [ '2026-02-27 21:00:00', '2026-03-30 21:00:00', '2026-04-29 22:00:00', '2026-05-30 22:00:00' ] ],
+			// 30 Jan 22:00 in New York: 28 Feb, 30 Mar, 30 Apr, 30 May at 22:00 local (daylight saving starts 8 Mar).
+			'New York, paid on the 30th local' => [ 'America/New_York', '2026-01-31 03:00:00', 30, [ '2026-03-01 03:00:00', '2026-03-31 02:00:00', '2026-05-01 02:00:00', '2026-05-31 02:00:00' ] ],
+			// 31 Dec 23:30 in Kiritimati (UTC+14): 31 Jan, 28 Feb, 31 Mar, 30 Apr at 23:30 local.
+			'Kiritimati, far east of UTC'      => [ 'Pacific/Kiritimati', '2026-12-31 09:30:00', 31, [ '2027-01-31 09:30:00', '2027-02-28 09:30:00', '2027-03-31 09:30:00', '2027-04-30 09:30:00' ] ],
+		];
 	}
 }
