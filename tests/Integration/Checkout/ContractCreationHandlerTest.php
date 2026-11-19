@@ -164,6 +164,22 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 		$this->assertSame( '2026-02-28 10:00:00', Contracts::get_cycles( $contract->get_id() )[0]->get_ends_at_gmt() );
 	}
 
+	public function test_a_sydney_store_keeps_the_local_day_and_renews_at_the_local_month_end(): void {
+		$this->set_store_timezone( 'Australia/Sydney' );
+		$customer_id = $this->create_customer();
+		$plan        = $this->make_plan();
+		// 31 Jan 08:00 in Sydney; with an offset, as a bare string is read in the store zone.
+		$order = $this->create_subscription_order( $customer_id, [ 'date_paid' => '2026-01-30T21:00:00+00:00' ] );
+		$this->apply_and_stamp( $order, $plan );
+
+		$order->update_status( OrderStatus::PROCESSING );
+
+		$contracts = Contracts::find_by_origin_order( $order->get_id() );
+		$this->assertCount( 1, $contracts );
+		$this->assertSame( 31, BillingDay::read( $contracts[0]->get_id() ), 'The Sydney day, not the UTC 30th.' );
+		$this->assertSame( '2026-02-27 21:00:00', $contracts[0]->get_next_payment_gmt(), '28 Feb 08:00 in Sydney.' );
+	}
+
 	public function test_a_day_trial_ending_on_the_31st_makes_the_31st_the_billing_day(): void {
 		$customer_id = $this->create_customer();
 		$plan        = $this->make_plan(
