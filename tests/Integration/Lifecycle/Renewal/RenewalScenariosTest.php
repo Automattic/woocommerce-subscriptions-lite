@@ -242,6 +242,33 @@ final class RenewalScenariosTest extends LiteIntegrationTestCase {
 		$this->assertSame( 1, BillingDay::read( $contract_id ) );
 	}
 
+	/**
+	 * A billed head whose settlement lost its contract write, ending more than a day off the
+	 * billing-day schedule (29 Mar for day 1): the next dispatch re-applies the schedule and
+	 * stores the re-anchored day with it.
+	 */
+	public function test_a_reapplied_schedule_off_the_billing_day_stores_the_reanchored_day(): void {
+		$this->support_engine_charges( 'cod' );
+		$customer_id = $this->create_customer();
+		$contract_id = $this->create_contract(
+			$customer_id,
+			[
+				'payment_method' => 'cod',
+				'date_paid'      => '2099-01-01 10:00:00',
+			]
+		);
+		$this->create_renewal_order( $contract_id, $customer_id, [ 'ends_at_gmt' => '2099-03-29 10:00:00' ] );
+		$this->assertSame( '2099-02-01 10:00:00', $this->get_contract( $contract_id )->get_next_payment_gmt(), 'The settlement\'s contract write was lost.' );
+		$this->assertSame( 1, BillingDay::read( $contract_id ) );
+
+		$this->run_due_dispatch( new DateTimeImmutable( '2099-02-01 11:00:00', new DateTimeZone( 'UTC' ) ) );
+
+		$this->assertSame( 0, $this->charge_count(), 'The billed head is not billed again.' );
+		$this->assertSame( 2, $this->head( $contract_id )->get_count() );
+		$this->assertSame( '2099-03-29 10:00:00', $this->get_contract( $contract_id )->get_next_payment_gmt() );
+		$this->assertSame( 29, BillingDay::read( $contract_id ), 'The re-applied schedule stores the re-anchored day.' );
+	}
+
 	public function test_a_contract_several_periods_behind_is_billed_once_with_the_next_due_in_the_future(): void {
 		$this->support_engine_charges( 'cod' );
 		$contract_id = $this->make_contract_paid( '-160 days' );

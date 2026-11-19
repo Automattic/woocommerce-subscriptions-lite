@@ -1306,6 +1306,7 @@ final class BillingTermsTest extends LiteIntegrationTestCase {
 		$billed = $terms->get_period_to_bill( $this->utc( '2026-01-29 10:00:00' ), $this->utc( '2026-01-29 10:00:00' ) );
 		$day    = $billed[1]->get_reanchored_billing_day();
 		$this->assertSame( 29, $day );
+		$this->assertSame( 1, $billed[1]->get_replaced_billing_day(), 'It reports the day it replaces.' );
 
 		$chain = $this->renewal_chain( $terms->with_billing_day( $day ), $billed[1]->get_moment()->format( 'Y-m-d H:i:s' ), 2 );
 		$this->assertSame( [ '2026-03-29 10:00:00', '2026-04-29 10:00:00' ], $chain );

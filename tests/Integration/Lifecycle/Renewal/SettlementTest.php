@@ -304,6 +304,18 @@ final class SettlementTest extends LiteIntegrationTestCase {
 		$this->assertSame( '2026-04-30 10:00:00', HoldAnchor::read( $contract_id ) );
 	}
 
+	public function test_a_late_payment_during_a_customer_hold_off_the_billing_day_schedule_reanchors_it(): void {
+		[ $contract_id, $order ] = $this->seed_failed_month_end_renewal();
+		$this->store_billing_day( $contract_id, 3 );
+		$this->store_hold_anchor( $contract_id, '2026-02-28 10:00:00' );
+
+		( new Settlement() )->settle( $order, $this->utc( '2026-04-10 00:00:00' ) );
+
+		$this->assertSame( ContractStatus::ON_HOLD, $this->get_contract( $contract_id )->get_status() );
+		$this->assertSame( '2026-04-28 10:00:00', HoldAnchor::read( $contract_id ), 'Whole months from 28 Feb, not 3 Mar.' );
+		$this->assertSame( 28, BillingDay::read( $contract_id ) );
+	}
+
 	public function test_a_payment_during_a_customer_hold_bills_the_cycle_and_keeps_the_hold(): void {
 		[ $contract_id, $order ] = $this->seed_renewal( 'on-hold', CycleStatus::PROCESSING );
 		Contracts::update(
