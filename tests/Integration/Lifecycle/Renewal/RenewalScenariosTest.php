@@ -25,6 +25,7 @@ use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Reactivation;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\RenewalOrderBuilder;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\UnpaidRenewal;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
+use Automattic\WooCommerce\SubscriptionsLite\Pricing\BillingDay;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
 use DateTimeImmutable;
 use DateTimeZone;
@@ -128,6 +129,36 @@ final class RenewalScenariosTest extends LiteIntegrationTestCase {
 		$this->assertSame( CycleStatus::BILLED, $this->head( $contract_id )->get_status() );
 		$this->assertSame( $this->head( $contract_id )->get_ends_at_gmt(), $this->get_contract( $contract_id )->get_next_payment_gmt(), 'The next period starts where the billed one ends.' );
 		$this->assertGreaterThan( $scan_at, $this->next_payment( $contract_id ) );
+	}
+
+	/**
+	 * A contract paid on 31 Jan renews on 28 Feb and returns to the 31st: each renewal bills
+	 * up to the billing day, clamped to a shorter month, and settlement arms the next payment
+	 * there. Dates are far in the future so the wall clock settlement reads stays before them.
+	 */
+	public function test_a_31st_contract_renews_at_the_end_of_february_and_returns_to_the_31st(): void {
+		$this->support_engine_charges( 'cod' );
+		$contract_id = $this->create_contract(
+			$this->create_customer(),
+			[
+				'payment_method' => 'cod',
+				'date_paid'      => '2099-01-31 10:00:00',
+			]
+		);
+		$this->assertSame( 31, BillingDay::read( $contract_id ) );
+		$this->assertSame( '2099-02-28 10:00:00', $this->get_contract( $contract_id )->get_next_payment_gmt() );
+
+		$this->assertSame( 1, $this->run_due_dispatch( new DateTimeImmutable( '2099-02-28 11:00:00', new DateTimeZone( 'UTC' ) ) ) );
+
+		$this->assertSame( '2099-02-28 10:00:00', $this->head( $contract_id )->get_starts_at_gmt() );
+		$this->assertSame( '2099-03-31 10:00:00', $this->head( $contract_id )->get_ends_at_gmt() );
+		$this->assertSame( '2099-03-31 10:00:00', $this->get_contract( $contract_id )->get_next_payment_gmt(), 'Settlement arms the 31st.' );
+
+		$this->assertSame( 1, $this->run_due_dispatch( new DateTimeImmutable( '2099-03-31 11:00:00', new DateTimeZone( 'UTC' ) ) ) );
+
+		$this->assertSame( '2099-04-30 10:00:00', $this->head( $contract_id )->get_ends_at_gmt() );
+		$this->assertSame( '2099-04-30 10:00:00', $this->get_contract( $contract_id )->get_next_payment_gmt() );
+		$this->assertSame( 2, $this->charge_count() );
 	}
 
 	public function test_a_contract_several_periods_behind_is_billed_once_with_the_next_due_in_the_future(): void {

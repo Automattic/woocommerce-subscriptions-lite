@@ -29,6 +29,7 @@ use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\RenewalOrderBuilder;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ApplicabilityStore;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ProductApplicability;
+use Automattic\WooCommerce\SubscriptionsLite\Pricing\BillingDay;
 use Automattic\WooCommerce\SubscriptionsLite\Utilities\ScheduledActions;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
 use DomainException;
@@ -145,6 +146,50 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 		$this->assertSame( '19.99000000', $history[0]->get_expected_total() );
 		$this->assertSame( '2026-01-15 00:00:00', $history[0]->get_starts_at_gmt() );
 		$this->assertSame( '2026-02-15 00:00:00', $history[0]->get_ends_at_gmt() );
+	}
+
+	public function test_a_contract_paid_on_the_31st_keeps_billing_day_31_and_renews_at_the_end_of_february(): void {
+		$customer_id = $this->create_customer();
+		$plan        = $this->make_plan();
+		$order       = $this->create_subscription_order( $customer_id, [ 'date_paid' => '2026-01-31 10:00:00' ] );
+		$this->apply_and_stamp( $order, $plan );
+
+		$order->update_status( OrderStatus::PROCESSING );
+
+		$contracts = Contracts::find_by_origin_order( $order->get_id() );
+		$this->assertCount( 1, $contracts );
+		$contract = $contracts[0];
+		$this->assertSame( 31, BillingDay::read( $contract->get_id() ) );
+		$this->assertSame( '2026-02-28 10:00:00', $contract->get_next_payment_gmt() );
+		$this->assertSame( '2026-02-28 10:00:00', Contracts::get_cycles( $contract->get_id() )[0]->get_ends_at_gmt() );
+	}
+
+	public function test_a_day_trial_ending_on_the_31st_makes_the_31st_the_billing_day(): void {
+		$customer_id = $this->create_customer();
+		$plan        = $this->make_plan(
+			'month',
+			1,
+			null,
+			[
+				'billing_policy' => [
+					'period'         => 'month',
+					'interval'       => 1,
+					'trial_duration' => [
+						'length' => 14,
+						'unit'   => 'day',
+					],
+				],
+			]
+		);
+		$order       = $this->create_subscription_order( $customer_id, [ 'date_paid' => '2026-01-17 10:00:00' ] );
+		$this->apply_and_stamp( $order, $plan );
+
+		$order->update_status( OrderStatus::PROCESSING );
+
+		$contracts = Contracts::find_by_origin_order( $order->get_id() );
+		$this->assertCount( 1, $contracts );
+		$this->assertSame( 31, BillingDay::read( $contracts[0]->get_id() ) );
+		$this->assertSame( '2026-01-31 10:00:00', $contracts[0]->get_next_payment_gmt() );
 	}
 
 	public function test_billing_total_excludes_a_fee_line(): void {
@@ -625,6 +670,7 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 		$contract = $this->get_contract( $drafts[0]->get_id() );
 		$this->assertSame( ContractStatus::ACTIVE, $contract->get_status() );
 		$this->assertSame( '2026-02-15 00:00:00', $contract->get_next_payment_gmt() );
+		$this->assertSame( 15, BillingDay::read( $contract->get_id() ), 'The resume stores the billing day.' );
 		$this->assertNull( $contract->get_lock_state() );
 		$this->assertCount( 1, Contracts::get_cycles( $drafts[0]->get_id() ), 'No second cycle.' );
 		$this->assertCount( 1, $this->get_order_notes_containing( $order->get_id(), 'activated after its creation was interrupted' ) );
