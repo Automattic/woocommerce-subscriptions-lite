@@ -2,7 +2,7 @@
 /**
  * Formatting - date and money rendering for the admin screens.
  *
- * Wraps WooCommerce's `wc_price()` and WordPress's `date_i18n()` so the list
+ * Wraps WooCommerce's `wc_price()` and WordPress's `wp_date()` so the list
  * table and detail renderer format engine values (GMT timestamp strings,
  * decimal-safe money strings) the same way, with graceful fallbacks when the
  * value is empty or the WooCommerce helper is unavailable. Cadence and period
@@ -41,7 +41,7 @@ final class Formatting {
 			return Formatter::PLACEHOLDER;
 		}
 
-		return date_i18n( (string) get_option( 'date_format', 'Y-m-d' ), $timestamp );
+		return (string) wp_date( (string) get_option( 'date_format', 'Y-m-d' ), $timestamp );
 	}
 
 	/**

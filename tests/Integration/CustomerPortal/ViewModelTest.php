@@ -6,7 +6,7 @@
  * rely on - status labels, the dynamic detail date-row, the recurring summary,
  * the next-payment dash rule, and the action-visibility flags - with REAL
  * WooCommerce formatting (wc_price, the per-country address formatter,
- * date_i18n), not stub approximations.
+ * wp_date), not stub approximations.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Tests
  */
@@ -68,7 +68,7 @@ final class ViewModelTest extends LiteIntegrationTestCase {
 	 * @param string $gmt GMT date stamp.
 	 */
 	private function date( string $gmt ): string {
-		return date_i18n( get_option( 'date_format' ), strtotime( $gmt . ' UTC' ) );
+		return (string) wp_date( (string) get_option( 'date_format' ), (int) strtotime( $gmt . ' UTC' ) );
 	}
 
 	public function test_detail_items_and_totals_rows(): void {
@@ -364,6 +364,16 @@ final class ViewModelTest extends LiteIntegrationTestCase {
 
 		$this->assertSame( '', $row['next_payment'], 'Cancelled rows never show a next-payment date.' );
 		$this->assertSame( 'Cancelled', $row['status_label'] );
+	}
+
+	public function test_dates_show_the_store_calendar_day(): void {
+		$this->set_store_timezone( 'Pacific/Auckland' );
+		update_option( 'date_format', 'F j, Y' );
+
+		// 11:30 UTC on 29 Nov is 00:30 on 30 Nov in Auckland (UTC+13).
+		$row = ( new ViewModel() )->build_row( $this->contract( [ 'next_payment_gmt' => '2026-11-29 11:30:00' ] ) );
+
+		$this->assertSame( 'November 30, 2026', $row['next_payment'] );
 	}
 
 	public function test_build_list_shapes_each_contract(): void {

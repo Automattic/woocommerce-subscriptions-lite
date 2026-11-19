@@ -499,8 +499,8 @@ final class ViewModel {
 	}
 
 	/**
-	 * Format a GMT timestamp string into the site's date format. Empty string
-	 * for an empty input or an unparseable value.
+	 * Format a GMT timestamp string into the site's date format and timezone.
+	 * Empty string for an empty input or an unparseable value.
 	 *
 	 * @param string $gmt GMT timestamp ('Y-m-d H:i:s') or empty.
 	 */
@@ -512,7 +512,7 @@ final class ViewModel {
 		if ( false === $timestamp ) {
 			return '';
 		}
-		return date_i18n( get_option( 'date_format' ), $timestamp );
+		return (string) wp_date( (string) get_option( 'date_format' ), $timestamp );
 	}
 
 	/**
