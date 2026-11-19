@@ -297,13 +297,12 @@ final class BillingTerms {
 
 	/**
 	 * The first renewal of a contract starting at `$start` (UTC): the end of the trial when the
-	 * terms have one, else one cadence after the start, on the terms' billing day, else on
-	 * {@see self::get_billing_day_from()}.
+	 * terms have one, else one cadence after the start, on {@see self::get_billing_day_from()}.
 	 *
 	 * @param DateTimeImmutable $start Contract start.
 	 */
 	public function get_first_renewal_from( DateTimeImmutable $start ): DateTimeImmutable {
-		$billing_day = $this->billing_day ?? $this->get_billing_day_from( $start );
+		$billing_day = $this->get_billing_day_from( $start );
 		$trial       = $this->trial_duration;
 		if ( null === $trial ) {
 			return $this->get_next_renewal_from( $start, $billing_day );

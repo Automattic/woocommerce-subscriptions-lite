@@ -1247,12 +1247,6 @@ final class BillingTermsTest extends LiteIntegrationTestCase {
 		);
 	}
 
-	public function test_the_first_renewal_keeps_a_billing_day_the_terms_carry(): void {
-		$next = $this->terms()->with_billing_day( 31 )->get_first_renewal_from( $this->utc( '2026-02-15 10:00:00' ) );
-
-		$this->assertSame( '2026-03-31 10:00:00', $next->format( 'Y-m-d H:i:s' ) );
-	}
-
 	public function test_an_interval_at_the_cap_steps_without_overflow(): void {
 		$next = $this->terms( 'year', 1000 )->get_first_renewal_from( $this->utc( '2024-02-29 10:00:00' ) );
 
