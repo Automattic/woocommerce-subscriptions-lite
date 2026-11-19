@@ -16,7 +16,8 @@
  * avoid the collision; the canonical slugs return once the premium plugin
  * consumes this package.
  *
- * Each render callback reads through the engine-backed {@see EngineDataProvider},
+ * Both pages show only Lite's own contracts, drafts excepted (the provider applies
+ * the rule). Each render callback reads through the engine-backed {@see EngineDataProvider},
  * builds the presentation view-model via {@see ViewModel}, seeds client state with
  * `wp_interactivity_state()`, and renders a server-side template carrying the
  * Interactivity API directives.
@@ -228,8 +229,9 @@ final class Endpoints {
 			? $this->provider->get_contract( $contract_id, $customer_id )
 			: null;
 
-		// Asymmetric not-found: an unknown id and a foreign-owned contract both
-		// land here, indistinguishable to the requester.
+		// Asymmetric not-found: an unknown id, another customer's contract and
+		// another extension's contract all land here, indistinguishable to the
+		// requester.
 		if ( null === $contract ) {
 			wc_get_template(
 				'myaccount/subscription-not-found.php',
@@ -255,6 +257,8 @@ final class Endpoints {
 			self::STORE_NAMESPACE,
 			[
 				'contractId'    => $detail['id'],
+				// The store posts it as the action's `extension_slug`. Lite's own slug, not the
+				// contract's: the engine refuses Lite's actions on another extension's contract.
 				'extensionSlug' => Package::EXTENSION_SLUG,
 				'status'        => $detail['status'],
 				'atPeriodEnd'   => (bool) $detail['at_period_end'],

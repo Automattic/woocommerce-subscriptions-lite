@@ -6,13 +6,14 @@
  * {@see Contracts} facade ONLY - never the engine's `Integration\` internals - and the
  * contract's orders through Lite's {@see RelatedOrders} (the engine has no order facade),
  * and reduces them ({@see ContractView}, `WC_Order`) to the domain-ish arrays
- * {@see ViewModel} and the templates consume. Draft contracts are
- * hidden from customers: they are left out of the list and read as not found.
+ * {@see ViewModel} and the templates consume. The customer sees only Lite's own contracts,
+ * drafts excepted ({@see CustomerVisibility}): others are left out of the list and read as
+ * not found.
  *
  * Ownership / not-found: {@see self::get_contract()} delegates the asymmetric not-found
  * rule to the facade's ownership-checked read - an unknown id and a contract owned by
- * another customer both come back null - so the portal never confirms a contract the
- * requester does not own. {@see self::get_related_orders()} is gated by call order: the
+ * another customer both come back null, and so do a draft and another extension's
+ * contract - so the portal never confirms a contract it does not show. {@see self::get_related_orders()} is gated by call order: the
  * endpoints resolve + ownership-check the contract via {@see self::get_contract()} before
  * reading its orders, so a foreign or unknown contract is already turned away before any
  * order read runs and no orders can leak across customers.
@@ -52,8 +53,9 @@ final class EngineDataProvider {
 	 * Return the customer's contracts as domain-ish list-row arrays.
 	 *
 	 * Reads the customer-scoped contract list off the facade and reduces each contract to
-	 * the row shape {@see ViewModel} consumes. Drafts are filtered out before paging, so a
-	 * page holds up to `$limit` visible rows. The empty array means "no subscriptions".
+	 * the row shape {@see ViewModel} consumes. Drafts and other extensions' contracts are
+	 * filtered out in the query, before paging, so a page holds up to `$limit` visible rows.
+	 * The empty array means "no subscriptions".
 	 *
 	 * @param int $customer_id The logged-in customer id.
 	 * @param int $limit       Maximum contracts to return.
@@ -61,7 +63,7 @@ final class EngineDataProvider {
 	 * @return array<int, array<string, mixed>>
 	 */
 	public function get_contracts_for_customer( int $customer_id, int $limit = 20, int $offset = 0 ): array {
-		$contracts = Contracts::list_for_customer( $customer_id, $limit, $offset, [ 'status' => CustomerVisibility::visible_statuses() ] );
+		$contracts = Contracts::list_for_customer( $customer_id, $limit, $offset, CustomerVisibility::get_list_args() );
 		$plans     = ContractPlans::for_contracts( $contracts );
 
 		$rows = [];
@@ -77,7 +79,7 @@ final class EngineDataProvider {
 	 * The facade's ownership-checked read enforces the asymmetric not-found rule: a
 	 * contract the customer does not own - whether it does not exist, belongs to someone
 	 * else, or its row vanished under the guard - comes back null, and this returns null
-	 * before any detail mapping. A draft also reads as null.
+	 * before any detail mapping. A draft or another extension's contract also reads as null.
 	 *
 	 * @param int $contract_id The contract id from the URL.
 	 * @param int $customer_id The logged-in customer id (ownership check).
@@ -141,7 +143,6 @@ final class EngineDataProvider {
 		return [
 			'id'               => (int) $contract->get_id(),
 			'status'           => $contract->get_status(),
-			'extension_slug'   => $contract->get_extension_slug(),
 			'billing_total'    => $contract->get_billing_total(),
 			'currency'         => $contract->get_currency(),
 			'billing_period'   => $cadence['period'],

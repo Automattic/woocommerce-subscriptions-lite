@@ -21,7 +21,6 @@ namespace Automattic\WooCommerce\SubscriptionsLite\CustomerPortal;
 
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\CustomerActionRules;
-use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Utilities\Formatter;
 
 defined( 'ABSPATH' ) || exit;
@@ -85,9 +84,8 @@ final class ViewModel {
 	public function build_detail( array $contract, array $related_orders = [] ): array {
 		$status             = (string) ( $contract['status'] ?? '' );
 		$has_unpaid_renewal = ! empty( $contract['has_unpaid_renewal'] );
-		$is_lite            = Package::EXTENSION_SLUG === ( $contract['extension_slug'] ?? '' );
 		$payment_method     = $this->normalize_payment_method( $contract['payment_method'] ?? [] );
-		$needs_payment      = $is_lite && CustomerActionRules::needs_payment( $status, $has_unpaid_renewal );
+		$needs_payment      = CustomerActionRules::needs_payment( $status, $has_unpaid_renewal );
 
 		return [
 			'id'                     => (int) ( $contract['id'] ?? 0 ),
@@ -100,9 +98,9 @@ final class ViewModel {
 			'date_row_value'         => $this->date_row_value( $status, $contract ),
 			'payment_method_title'   => $payment_method['title'],
 			'payment_method_expires' => $payment_method['expires'],
-			'cancel_visible'         => $is_lite && CustomerActionRules::can_cancel( $status ),
-			'hold_visible'           => $is_lite && CustomerActionRules::can_hold( $status ),
-			'reactivate_visible'     => $is_lite && CustomerActionRules::can_reactivate( $status, $has_unpaid_renewal ),
+			'cancel_visible'         => CustomerActionRules::can_cancel( $status ),
+			'hold_visible'           => CustomerActionRules::can_hold( $status ),
+			'reactivate_visible'     => CustomerActionRules::can_reactivate( $status, $has_unpaid_renewal ),
 			'needs_payment_notice'   => $needs_payment,
 			// An asynchronous charge still awaiting confirmation: nothing to pay or arrange yet.
 			'payment_in_flight'      => $needs_payment && ! empty( $contract['unpaid_renewal_in_flight'] ),

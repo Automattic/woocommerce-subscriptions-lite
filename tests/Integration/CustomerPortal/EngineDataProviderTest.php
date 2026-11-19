@@ -47,7 +47,7 @@ final class EngineDataProviderTest extends LiteIntegrationTestCase {
 
 		$this->assertCount( 1, $rows );
 		$this->assertSame(
-			[ 'id', 'status', 'extension_slug', 'billing_total', 'currency', 'billing_period', 'billing_interval', 'next_payment_gmt', 'payment_method' ],
+			[ 'id', 'status', 'billing_total', 'currency', 'billing_period', 'billing_interval', 'next_payment_gmt', 'payment_method' ],
 			array_keys( $rows[0] )
 		);
 		$this->assertSame( 'active', $rows[0]['status'] );
@@ -201,7 +201,7 @@ final class EngineDataProviderTest extends LiteIntegrationTestCase {
 	public function test_cadence_is_empty_for_a_plan_owned_by_another_extension(): void {
 		$customer_id = $this->create_customer();
 		$contract_id = $this->create_contract( $customer_id );
-		$foreign     = $this->make_plan( 'week', 2, null, [ 'extension_slug' => 'other-extension' ] );
+		$foreign     = $this->make_plan( 'week', 2, null, [ 'extension_slug' => self::FOREIGN_EXTENSION_SLUG ] );
 		$updated     = Contracts::update(
 			$contract_id,
 			[
@@ -287,5 +287,44 @@ final class EngineDataProviderTest extends LiteIntegrationTestCase {
 		$this->assertCount( 3, $this->provider->get_contracts_for_customer( $customer_id ) );
 		$this->assertCount( 2, $this->provider->get_contracts_for_customer( $customer_id, 2, 0 ) );
 		$this->assertCount( 1, $this->provider->get_contracts_for_customer( $customer_id, 2, 2 ) );
+	}
+
+	public function test_contracts_of_another_extension_are_left_out_of_the_list(): void {
+		$customer_id = $this->create_customer();
+		$lite_id     = $this->create_contract( $customer_id );
+		$this->seed_foreign_contract( $customer_id );
+
+		$this->assertSame( [ $lite_id ], array_column( $this->provider->get_contracts_for_customer( $customer_id ), 'id' ) );
+	}
+
+	public function test_a_customer_with_only_foreign_contracts_gets_an_empty_list(): void {
+		$customer_id = $this->create_customer();
+		$this->seed_foreign_contract( $customer_id );
+		$this->seed_foreign_contract( $customer_id, [ 'status' => 'on-hold' ] );
+
+		$this->assertSame( [], $this->provider->get_contracts_for_customer( $customer_id ) );
+	}
+
+	public function test_mixed_paging_windows_count_only_lite_contracts(): void {
+		$customer_id = $this->create_customer();
+		$oldest_id   = $this->create_contract( $customer_id );
+		$this->seed_foreign_contract( $customer_id );
+		$middle_id = $this->create_contract( $customer_id );
+		$this->seed_foreign_contract( $customer_id );
+		$newest_id = $this->create_contract( $customer_id );
+		$this->seed_foreign_contract( $customer_id );
+
+		$this->assertSame( [ $newest_id, $middle_id ], array_column( $this->provider->get_contracts_for_customer( $customer_id, 2, 0 ), 'id' ) );
+		$this->assertSame( [ $oldest_id ], array_column( $this->provider->get_contracts_for_customer( $customer_id, 2, 2 ), 'id' ) );
+		$this->assertSame( [], $this->provider->get_contracts_for_customer( $customer_id, 2, 3 ) );
+	}
+
+	public function test_get_contract_reads_a_foreign_contract_of_the_same_customer_as_not_found(): void {
+		$customer_id = $this->create_customer();
+		$foreign_id  = $this->seed_foreign_contract( $customer_id );
+		$variant_id  = $this->seed_foreign_contract( $customer_id, [ 'extension_slug' => 'WooCommerce-Subscriptions-Lite' ] );
+
+		$this->assertNull( $this->provider->get_contract( $foreign_id, $customer_id ) );
+		$this->assertNull( $this->provider->get_contract( $variant_id, $customer_id ), 'The owner match is exact: a case variant is not Lite\'s.' );
 	}
 }
