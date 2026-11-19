@@ -1334,6 +1334,21 @@ final class BillingTermsTest extends LiteIntegrationTestCase {
 		];
 	}
 
+	/**
+	 * In America/Nuuk 28 Mar 2026 23:30 falls in the daylight saving gap. A due date one day
+	 * before it (a store zone change can land one there) is measured against the calendar date
+	 * 28 Mar, not the moment the gap moves to the 29th, so it is one day off and day 28 stays.
+	 */
+	public function test_a_due_date_a_day_before_a_daylight_saving_gap_keeps_the_billing_day(): void {
+		$this->set_store_timezone( 'America/Nuuk' );
+		$due    = $this->utc( '2026-03-28 01:30:00' );
+		$billed = $this->terms_on_day( 'month', 1, 28 )->get_period_to_bill( $due, $due );
+
+		$this->assertSame( '2026-03-27 23:30', $due->setTimezone( wp_timezone() )->format( 'Y-m-d H:i' ), 'The due date reads 27 Mar 23:30 in Nuuk.' );
+		$this->assertSame( [ '2026-03-28 01:30:00', '2026-04-28 01:30:00' ], $this->format( $billed ), 'To 28 Apr 00:30 in Nuuk.' );
+		$this->assertNull( $billed[1]->get_reanchored_billing_day() );
+	}
+
 	public function test_a_reanchored_schedule_continues_on_the_new_day(): void {
 		$terms = $this->terms_on_day( 'month', 1, 1 );
 

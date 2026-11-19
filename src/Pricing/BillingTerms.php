@@ -338,39 +338,25 @@ final class BillingTerms {
 			return [ $from, $this->billing_day ?? self::get_store_day( $from ) ];
 		}
 
-		$nearest     = $from;
-		$nearest_gap = PHP_INT_MAX;
+		$local          = $from->setTimezone( wp_timezone() );
+		$from_date      = self::get_month_date( $local, 0, (int) $local->format( 'j' ) );
+		$nearest_months = 0;
+		$nearest_gap    = PHP_INT_MAX;
 		foreach ( [ -1, 0, 1 ] as $months ) {
-			$scheduled = self::add_months( $from, $months, $this->billing_day );
-			$gap       = self::get_calendar_days_between( $from, $scheduled );
+			$gap = (int) $from_date->diff( self::get_month_date( $local, $months, $this->billing_day ) )->days;
 			if ( $gap < $nearest_gap ) {
-				$nearest     = $scheduled;
-				$nearest_gap = $gap;
+				$nearest_months = $months;
+				$nearest_gap    = $gap;
 			}
 		}
 
 		// Calendar days, not 24 hours: a zone or DST shift moves the store date by one day
 		// whatever the hours, and a day across a DST change is 23 or 25 hours long.
 		if ( $nearest_gap <= 1 ) {
-			return [ $nearest, $this->billing_day ];
+			return [ self::add_months( $from, $nearest_months, $this->billing_day ), $this->billing_day ];
 		}
 
 		return [ $from, self::get_store_day( $from ) ];
-	}
-
-	/**
-	 * The number of days between the store-calendar dates of two moments, ignoring the time.
-	 *
-	 * @param DateTimeImmutable $first  One moment.
-	 * @param DateTimeImmutable $second The other moment.
-	 */
-	private static function get_calendar_days_between( DateTimeImmutable $first, DateTimeImmutable $second ): int {
-		$store = wp_timezone();
-		$utc   = new DateTimeZone( 'UTC' );
-		$from  = new DateTimeImmutable( $first->setTimezone( $store )->format( 'Y-m-d' ), $utc );
-		$to    = new DateTimeImmutable( $second->setTimezone( $store )->format( 'Y-m-d' ), $utc );
-
-		return (int) $from->diff( $to )->days;
 	}
 
 	/**
@@ -438,13 +424,28 @@ final class BillingTerms {
 	 */
 	private static function add_months( DateTimeImmutable $from, int $months, int $billing_day ): DateTimeImmutable {
 		$local  = $from->setTimezone( wp_timezone() );
-		$index  = (int) $local->format( 'Y' ) * 12 + (int) $local->format( 'n' ) - 1 + $months;
-		$year   = intdiv( $index, 12 );
-		$month  = $index % 12 + 1;
-		$target = $local->setDate( $year, $month, 1 );
-		$target = $target->setDate( $year, $month, min( $billing_day, (int) $target->format( 't' ) ) );
+		$date   = self::get_month_date( $local, $months, $billing_day );
+		$target = $local->setDate( (int) $date->format( 'Y' ), (int) $date->format( 'n' ), (int) $date->format( 'j' ) );
 
 		return $target->setTimezone( new DateTimeZone( 'UTC' ) );
+	}
+
+	/**
+	 * The calendar date `$months` after `$local`'s, on `$billing_day` or the target month's last
+	 * day when it is shorter, as midnight UTC: a date without a time of day, so a DST gap in the
+	 * store time zone cannot move it to the next day.
+	 *
+	 * @param DateTimeImmutable $local       A moment in the store time zone.
+	 * @param int               $months      Number of months.
+	 * @param int               $billing_day Day of the month to land on, 1-31.
+	 */
+	private static function get_month_date( DateTimeImmutable $local, int $months, int $billing_day ): DateTimeImmutable {
+		$index = (int) $local->format( 'Y' ) * 12 + (int) $local->format( 'n' ) - 1 + $months;
+		$year  = intdiv( $index, 12 );
+		$month = $index % 12 + 1;
+		$first = new DateTimeImmutable( sprintf( '%04d-%02d-01', $year, $month ), new DateTimeZone( 'UTC' ) );
+
+		return $first->setDate( $year, $month, min( $billing_day, (int) $first->format( 't' ) ) );
 	}
 
 	/**
