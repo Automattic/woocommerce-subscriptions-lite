@@ -328,7 +328,8 @@ final class BillingTerms {
 	 * day of its scheduled date (the billing day clamped to the previous, same or next month,
 	 * whichever is nearest) `$from` is on schedule: steps count from that scheduled date on the
 	 * terms' day. Further off it re-anchors on its own store day. Day and week cadences and terms
-	 * without a day step from `$from` itself.
+	 * without a day step from `$from` itself. A path that sets a renewal date on purpose stores
+	 * its day with {@see BillingDay::store()} first, or a one-day move is snapped back here.
 	 *
 	 * @param DateTimeImmutable $from The moment the roll starts from.
 	 * @return array{0: DateTimeImmutable, 1: int} The moment steps count from, and the billing day.
