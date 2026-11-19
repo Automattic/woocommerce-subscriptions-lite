@@ -2,8 +2,8 @@
 /**
  * BillingDate - a renewal date and the billing day it re-anchored the schedule to, if any.
  *
- * {@see BillingTerms} returns one for each date it rolls to. A due date off the billing-day
- * schedule (after a plan cadence or store time zone change) re-anchors: later month and year
+ * {@see BillingTerms} returns one for each date it rolls to. A due date more than a day off
+ * the billing-day schedule (after a plan cadence change) re-anchors: later month and year
  * steps keep that date's own store-calendar day, which the caller stores with
  * {@see BillingDay::store_reanchored_day()} under the lock it writes the date with.
  *
@@ -38,14 +38,23 @@ final class BillingDate {
 	private $reanchored_billing_day;
 
 	/**
+	 * The billing day a re-anchor replaces, or null.
+	 *
+	 * @var int|null
+	 */
+	private $replaced_billing_day;
+
+	/**
 	 * Build a renewal date.
 	 *
 	 * @param DateTimeImmutable $moment                 The date, in UTC.
 	 * @param int|null          $reanchored_billing_day The billing day the schedule was re-anchored to, or null.
+	 * @param int|null          $replaced_billing_day   The billing day that re-anchor replaces, or null.
 	 */
-	public function __construct( DateTimeImmutable $moment, ?int $reanchored_billing_day ) {
+	public function __construct( DateTimeImmutable $moment, ?int $reanchored_billing_day, ?int $replaced_billing_day = null ) {
 		$this->moment                 = $moment;
 		$this->reanchored_billing_day = $reanchored_billing_day;
+		$this->replaced_billing_day   = $replaced_billing_day;
 	}
 
 	/**
@@ -61,5 +70,12 @@ final class BillingDate {
 	 */
 	public function get_reanchored_billing_day(): ?int {
 		return $this->reanchored_billing_day;
+	}
+
+	/**
+	 * The billing day a re-anchor replaces; null when there was no re-anchor.
+	 */
+	public function get_replaced_billing_day(): ?int {
+		return $this->replaced_billing_day;
 	}
 }

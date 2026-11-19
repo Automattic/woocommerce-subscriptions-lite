@@ -392,7 +392,7 @@ final class BillingTerms {
 			return new BillingDate( $moment, null );
 		}
 
-		return new BillingDate( $moment, $billing_day );
+		return new BillingDate( $moment, $billing_day, $this->billing_day );
 	}
 
 	/**
