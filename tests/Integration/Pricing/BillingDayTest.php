@@ -56,14 +56,37 @@ final class BillingDayTest extends LiteIntegrationTestCase {
 		$lock        = $this->hold_lock( $contract_id );
 		try {
 			BillingDay::store( $lock, 1 );
-			$this->capture_log();
+			$logged = [];
+			add_filter(
+				'woocommerce_logger_log_message',
+				function ( $message, $level, $context ) use ( &$logged ) {
+					$logged[] = [ (string) $message, $level, $context['source'] ?? null ];
+					return $message;
+				},
+				10,
+				3
+			);
 			BillingDay::store_reanchored_day( $lock, new BillingDate( $moment, 29, 1 ) );
 		} finally {
 			$lock->release();
 		}
 
 		$this->assertSame( 29, BillingDay::read( $contract_id ) );
-		$this->assertTrue( $this->has_logged( sprintf( 'contract %d re-anchored its billing day from 1 to 29; next due 2026-02-28 10:00:00 UTC.', $contract_id ) ) );
+		$reanchored = array_values(
+			array_filter(
+				$logged,
+				static function ( array $entry ): bool {
+					return false !== strpos( $entry[0], 're-anchored its billing day' );
+				}
+			)
+		);
+		$this->assertCount( 1, array_unique( array_map( 'serialize', $reanchored ) ), 'One message; the filter runs once per log handler.' );
+		[ $message, $level, $source ] = $reanchored[0];
+		$this->assertStringContainsString( sprintf( 'contract %d ', $contract_id ), $message );
+		$this->assertStringContainsString( 'from 1 to 29', $message );
+		$this->assertStringContainsString( 'next due 2026-02-28 10:00:00 UTC', $message );
+		$this->assertSame( 'info', $level );
+		$this->assertSame( 'woocommerce-subscriptions-lite', $source );
 	}
 
 	public function test_a_date_on_the_schedule_leaves_the_billing_day_alone(): void {

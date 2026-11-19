@@ -7,8 +7,8 @@
  * {@see \Automattic\WooCommerce\SubscriptionsLite\Plans\ContractPlans::get_billing_terms_for()}
  * applies it to the contract's billing terms, so every renewal returns to it in months that
  * have it. A renewal, settlement or reactivation whose due date is more than a day off that
- * schedule rewrites it under the same lock, and logs it ({@see self::store_reanchored_day()}). A contract without one keeps
- * the day of the date each renewal rolls from. Lite-owned data.
+ * schedule rewrites it under the same lock, and logs it ({@see self::store_reanchored_day()}).
+ * A contract without one keeps the day of the date each renewal rolls from. Lite-owned data.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Pricing
  */
@@ -74,9 +74,9 @@ final class BillingDay {
 		$contract_id = $lock->get_contract_id();
 		wc_get_logger()->info(
 			sprintf(
-				'BillingDay: contract %1$d re-anchored its billing day from %2$s to %3$d; next due %4$s UTC.',
+				'BillingDay: contract %1$d re-anchored its billing day from %2$d to %3$d; next due %4$s UTC.',
 				$contract_id,
-				null === $date->get_replaced_billing_day() ? 'none' : (string) $date->get_replaced_billing_day(),
+				$date->get_replaced_billing_day(),
 				$billing_day,
 				$date->get_moment()->format( 'Y-m-d H:i:s' )
 			),
