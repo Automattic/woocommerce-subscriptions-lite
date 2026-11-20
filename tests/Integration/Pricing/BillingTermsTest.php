@@ -1231,6 +1231,22 @@ final class BillingTermsTest extends LiteIntegrationTestCase {
 	}
 
 	/**
+	 * A billing time in the repeated fall-back hour keeps the offset of the moment it steps
+	 * from: the store date and wall time are right either way, only the UTC instant differs.
+	 */
+	public function test_a_billing_time_in_the_repeated_fall_back_hour_keeps_the_source_offset(): void {
+		$this->set_store_timezone( 'Europe/London' );
+
+		// From 30 Sep 2027 01:30 BST and from 31 Oct 2026 01:30 GMT: 01:00-01:59 on 31 Oct 2027
+		// happens twice (BST, then GMT); each step keeps the offset it started from.
+		$monthly = $this->renewal_chain( $this->terms_on_day( 'month', 1, 31 ), '2027-09-30 00:30:00', 1 );
+		$yearly  = $this->renewal_chain( $this->terms_on_day( 'year', 1, 31 ), '2026-10-31 01:30:00', 1 );
+
+		$this->assertSame( [ '2027-10-31 00:30:00' ], $monthly, 'Monthly from BST: 01:30 BST.' );
+		$this->assertSame( [ '2027-10-31 01:30:00' ], $yearly, 'Yearly from GMT: 01:30 GMT.' );
+	}
+
+	/**
 	 * Day and week steps are UTC instants: in a store with daylight saving they keep the UTC
 	 * time of day across the change.
 	 */
