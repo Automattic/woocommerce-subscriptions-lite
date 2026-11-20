@@ -12,6 +12,7 @@ declare( strict_types=1 );
 namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Lifecycle\Renewal;
 
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\Plans;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\CycleView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\CycleStatus;
@@ -25,6 +26,7 @@ use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Reactivation;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\RenewalOrderBuilder;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\UnpaidRenewal;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
+use Automattic\WooCommerce\SubscriptionsLite\Pricing\BillingDay;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
 use DateTimeImmutable;
 use DateTimeZone;
@@ -128,6 +130,143 @@ final class RenewalScenariosTest extends LiteIntegrationTestCase {
 		$this->assertSame( CycleStatus::BILLED, $this->head( $contract_id )->get_status() );
 		$this->assertSame( $this->head( $contract_id )->get_ends_at_gmt(), $this->get_contract( $contract_id )->get_next_payment_gmt(), 'The next period starts where the billed one ends.' );
 		$this->assertGreaterThan( $scan_at, $this->next_payment( $contract_id ) );
+	}
+
+	/**
+	 * A contract paid on 31 Jan renews on 28 Feb and returns to the 31st: each renewal bills
+	 * up to the billing day, clamped to a shorter month, and settlement arms the next payment
+	 * there. Dates are far in the future so the wall clock settlement reads stays before them.
+	 */
+	public function test_a_31st_contract_renews_at_the_end_of_february_and_returns_to_the_31st(): void {
+		$this->support_engine_charges( 'cod' );
+		$contract_id = $this->create_contract(
+			$this->create_customer(),
+			[
+				'payment_method' => 'cod',
+				'date_paid'      => '2099-01-31 10:00:00',
+			]
+		);
+		$this->assertSame( 31, BillingDay::read( $contract_id ) );
+		$this->assertSame( '2099-02-28 10:00:00', $this->get_contract( $contract_id )->get_next_payment_gmt() );
+
+		$this->assertSame( 1, $this->run_due_dispatch( new DateTimeImmutable( '2099-02-28 11:00:00', new DateTimeZone( 'UTC' ) ) ) );
+
+		$this->assertSame( '2099-02-28 10:00:00', $this->head( $contract_id )->get_starts_at_gmt() );
+		$this->assertSame( '2099-03-31 10:00:00', $this->head( $contract_id )->get_ends_at_gmt() );
+		$this->assertSame( '2099-03-31 10:00:00', $this->get_contract( $contract_id )->get_next_payment_gmt(), 'Settlement arms the 31st.' );
+
+		$this->assertSame( 1, $this->run_due_dispatch( new DateTimeImmutable( '2099-03-31 11:00:00', new DateTimeZone( 'UTC' ) ) ) );
+
+		$this->assertSame( '2099-04-30 10:00:00', $this->head( $contract_id )->get_ends_at_gmt() );
+		$this->assertSame( '2099-04-30 10:00:00', $this->get_contract( $contract_id )->get_next_payment_gmt() );
+		$this->assertSame( 2, $this->charge_count() );
+	}
+
+	/**
+	 * A weekly contract started 1 Jan whose plan becomes monthly at its 29 Jan due date renews
+	 * for a full month, to 28 Feb, and moves its billing day to the 29th: the due date was off
+	 * the stored day's schedule, so the renewal re-anchors on it.
+	 */
+	public function test_a_plan_switched_from_weekly_to_monthly_renews_a_full_month_and_reanchors(): void {
+		$this->support_engine_charges( 'cod' );
+		$contract_id = $this->create_contract(
+			$this->create_customer(),
+			[
+				'payment_method' => 'cod',
+				'period'         => 'week',
+				'date_paid'      => '2099-01-01 10:00:00',
+			]
+		);
+		$this->assertSame( 1, BillingDay::read( $contract_id ) );
+		foreach ( [ '2099-01-08', '2099-01-15', '2099-01-22' ] as $due ) {
+			$this->assertSame( 1, $this->run_due_dispatch( new DateTimeImmutable( $due . ' 11:00:00', new DateTimeZone( 'UTC' ) ) ) );
+		}
+		$this->assertSame( '2099-01-29 10:00:00', $this->get_contract( $contract_id )->get_next_payment_gmt() );
+
+		$plan = Plans::update(
+			(int) $this->get_contract( $contract_id )->get_selling_plan_id(),
+			[
+				'extension_slug' => Package::EXTENSION_SLUG,
+				'billing_policy' => [
+					'period'   => 'month',
+					'interval' => 1,
+				],
+			]
+		);
+		$this->assertNotNull( $plan );
+
+		$this->assertSame( 1, $this->run_due_dispatch( new DateTimeImmutable( '2099-01-29 11:00:00', new DateTimeZone( 'UTC' ) ) ) );
+
+		$this->assertSame( '2099-01-29 10:00:00', $this->head( $contract_id )->get_starts_at_gmt() );
+		$this->assertSame( '2099-02-28 10:00:00', $this->head( $contract_id )->get_ends_at_gmt(), 'A full month, not three days to 1 Feb.' );
+		$this->assertSame( '2099-02-28 10:00:00', $this->get_contract( $contract_id )->get_next_payment_gmt() );
+		$this->assertSame( 29, BillingDay::read( $contract_id ), 'The billing day moves to the due date\'s day.' );
+
+		$this->assertSame( 1, $this->run_due_dispatch( new DateTimeImmutable( '2099-02-28 11:00:00', new DateTimeZone( 'UTC' ) ) ) );
+
+		$this->assertSame( '2099-03-29 10:00:00', $this->head( $contract_id )->get_ends_at_gmt(), 'Back to the 29th after February.' );
+		$this->assertSame( 29, BillingDay::read( $contract_id ) );
+	}
+
+	/**
+	 * A contract activated in a London store at 00:30 on the 1st renews after the store moved
+	 * to New York, where its due date reads 19:30 on the 31st: a day from its scheduled 1 Feb,
+	 * so the billing day stays 1 and the renewal bills to 1 Mar 19:30 New York time, with no
+	 * short or long period, then 1 Apr.
+	 */
+	public function test_a_store_time_zone_change_keeps_the_billing_day(): void {
+		$this->support_engine_charges( 'cod' );
+		$this->set_store_timezone( 'Europe/London' );
+		$contract_id = $this->create_contract(
+			$this->create_customer(),
+			[
+				'payment_method' => 'cod',
+				'date_paid'      => '2099-01-01 00:30:00',
+			]
+		);
+		$this->assertSame( 1, BillingDay::read( $contract_id ) );
+		$this->assertSame( '2099-02-01 00:30:00', $this->get_contract( $contract_id )->get_next_payment_gmt() );
+
+		$this->set_store_timezone( 'America/New_York' );
+		$this->assertSame( 1, $this->run_due_dispatch( new DateTimeImmutable( '2099-02-01 01:00:00', new DateTimeZone( 'UTC' ) ) ) );
+
+		$this->assertSame( '2099-02-01 00:30:00', $this->head( $contract_id )->get_starts_at_gmt() );
+		$this->assertSame( '2099-03-02 00:30:00', $this->head( $contract_id )->get_ends_at_gmt(), '1 Mar 19:30 in New York.' );
+		$this->assertSame( '2099-03-02 00:30:00', $this->get_contract( $contract_id )->get_next_payment_gmt() );
+		$this->assertSame( 1, BillingDay::read( $contract_id ), 'A day off its scheduled date keeps the billing day.' );
+
+		$this->assertSame( 1, $this->run_due_dispatch( new DateTimeImmutable( '2099-03-02 01:00:00', new DateTimeZone( 'UTC' ) ) ) );
+
+		$this->assertSame( '2099-03-02 00:30:00', $this->head( $contract_id )->get_starts_at_gmt() );
+		$this->assertSame( '2099-04-01 23:30:00', $this->head( $contract_id )->get_ends_at_gmt(), '1 Apr 19:30 in New York (daylight saving).' );
+		$this->assertSame( 1, BillingDay::read( $contract_id ) );
+	}
+
+	/**
+	 * A billed head whose settlement lost its contract write, ending more than a day off the
+	 * billing-day schedule (29 Mar for day 1): the next dispatch re-applies the schedule and
+	 * stores the re-anchored day with it.
+	 */
+	public function test_a_reapplied_schedule_off_the_billing_day_stores_the_reanchored_day(): void {
+		$this->support_engine_charges( 'cod' );
+		$customer_id = $this->create_customer();
+		$contract_id = $this->create_contract(
+			$customer_id,
+			[
+				'payment_method' => 'cod',
+				'date_paid'      => '2099-01-01 10:00:00',
+			]
+		);
+		$this->create_renewal_order( $contract_id, $customer_id, [ 'ends_at_gmt' => '2099-03-29 10:00:00' ] );
+		$this->assertSame( '2099-02-01 10:00:00', $this->get_contract( $contract_id )->get_next_payment_gmt(), 'The settlement\'s contract write was lost.' );
+		$this->assertSame( 1, BillingDay::read( $contract_id ) );
+
+		$this->run_due_dispatch( new DateTimeImmutable( '2099-02-01 11:00:00', new DateTimeZone( 'UTC' ) ) );
+
+		$this->assertSame( 0, $this->charge_count(), 'The billed head is not billed again.' );
+		$this->assertSame( 2, $this->head( $contract_id )->get_count() );
+		$this->assertSame( '2099-03-29 10:00:00', $this->get_contract( $contract_id )->get_next_payment_gmt() );
+		$this->assertSame( 29, BillingDay::read( $contract_id ), 'The re-applied schedule stores the re-anchored day.' );
 	}
 
 	public function test_a_contract_several_periods_behind_is_billed_once_with_the_next_due_in_the_future(): void {

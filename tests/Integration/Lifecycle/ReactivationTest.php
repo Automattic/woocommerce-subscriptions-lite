@@ -23,6 +23,7 @@ use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\HoldAnchor;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\LifecycleNotAllowedException;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Reactivation;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
+use Automattic\WooCommerce\SubscriptionsLite\Pricing\BillingDay;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
 
 /**
@@ -124,6 +125,50 @@ final class ReactivationTest extends LiteIntegrationTestCase {
 
 		$this->assertSame( '2026-05-01 00:00:00', $this->get_contract( $contract_id )->get_next_payment_gmt() );
 		$this->assertSame( '', $this->get_stored_anchor( $contract_id ) );
+	}
+
+	/**
+	 * Store a billing day for a contract under its lock.
+	 *
+	 * @param int $contract_id Contract id.
+	 * @param int $billing_day Day of the month.
+	 */
+	private function store_billing_day( int $contract_id, int $billing_day ): void {
+		$lock = $this->hold_lock( $contract_id );
+		try {
+			BillingDay::store( $lock, $billing_day );
+		} finally {
+			$lock->release();
+		}
+	}
+
+	public function test_reactivate_rolls_a_past_anchor_on_the_stored_billing_day(): void {
+		$contract_id = $this->seed_held_contract( null, $this->make_monthly_plan_id(), '2026-02-28 10:00:00' );
+		$this->store_billing_day( $contract_id, 31 );
+
+		( new Reactivation() )->reactivate( $contract_id, $this->utc( '2026-03-10 00:00:00' ) );
+
+		$this->assertSame( '2026-03-31 10:00:00', $this->get_contract( $contract_id )->get_next_payment_gmt(), '28 Feb returns to the 31st.' );
+		$this->assertSame( 31, BillingDay::read( $contract_id ), 'An anchor on the schedule keeps the billing day.' );
+	}
+
+	public function test_reactivate_without_a_billing_day_keeps_the_anchor_day(): void {
+		$contract_id = $this->seed_held_contract( null, $this->make_monthly_plan_id(), '2026-02-28 10:00:00' );
+
+		( new Reactivation() )->reactivate( $contract_id, $this->utc( '2026-03-10 00:00:00' ) );
+
+		$this->assertSame( '2026-03-28 10:00:00', $this->get_contract( $contract_id )->get_next_payment_gmt() );
+		$this->assertNull( BillingDay::read( $contract_id ) );
+	}
+
+	public function test_reactivate_reanchors_an_anchor_off_the_billing_day_schedule(): void {
+		$contract_id = $this->seed_held_contract( null, $this->make_monthly_plan_id(), '2026-01-29 10:00:00' );
+		$this->store_billing_day( $contract_id, 1 );
+
+		( new Reactivation() )->reactivate( $contract_id, $this->utc( '2026-03-10 00:00:00' ) );
+
+		$this->assertSame( '2026-03-29 10:00:00', $this->get_contract( $contract_id )->get_next_payment_gmt(), 'A full month from 28 Feb, not 1 Mar.' );
+		$this->assertSame( 29, BillingDay::read( $contract_id ), 'The billing day moves to the anchor day.' );
 	}
 
 	/**

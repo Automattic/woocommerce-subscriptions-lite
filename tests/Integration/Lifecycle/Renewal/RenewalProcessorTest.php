@@ -23,6 +23,7 @@ use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\RenewalOrderBuild
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\RenewalProcessor;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\Settlement;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
+use Automattic\WooCommerce\SubscriptionsLite\Pricing\BillingTerms;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
 use DateTimeImmutable;
 use DateTimeZone;
@@ -35,8 +36,8 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 
 	/**
 	 * When the test contracts were paid: 33 days ago (midnight UTC), so they are due now on
-	 * the wall clock that settlement from order status hooks reads (plain day arithmetic:
-	 * plus one month lands 2 to 5 days ago in every month, with no month-end overflow).
+	 * the wall clock that settlement from order status hooks reads (plus one month, clamped to
+	 * a shorter month's end, lands 2 to 5 days ago in every month).
 	 *
 	 * @var string
 	 */
@@ -56,13 +57,21 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 	 */
 	private $period_end;
 
+	/**
+	 * Due and period-end moments computed through the billing terms the contracts use, so they
+	 * agree with contract creation and renewal on any day of the month.
+	 */
 	public function set_up(): void {
 		parent::set_up();
-		$paid             = new DateTimeImmutable( 'today -33 days', new DateTimeZone( 'UTC' ) );
-		$due              = $paid->modify( '+1 month' );
+		$paid  = new DateTimeImmutable( 'today -33 days', new DateTimeZone( 'UTC' ) );
+		$terms = BillingTerms::from_plan( $this->make_plan( 'month', 1 ) );
+		$this->assertInstanceOf( BillingTerms::class, $terms );
+		$due    = $terms->get_first_renewal_from( $paid );
+		$period = $terms->with_billing_day( $terms->get_billing_day_from( $paid ) )->get_period_to_bill( $due, $due );
+
 		$this->paid_at    = $paid->format( 'Y-m-d H:i:s' );
 		$this->due_at     = $due->format( 'Y-m-d H:i:s' );
-		$this->period_end = $due->modify( '+1 month' )->format( 'Y-m-d H:i:s' );
+		$this->period_end = $period[1]->get_moment()->format( 'Y-m-d H:i:s' );
 	}
 
 	/**

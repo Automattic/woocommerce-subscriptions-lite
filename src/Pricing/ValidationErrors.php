@@ -93,6 +93,24 @@ final class ValidationErrors {
 	}
 
 	/**
+	 * Add an `out_of_bounds` error for a number above `$max`.
+	 *
+	 * @param WP_Error $errors Error collector.
+	 * @param string   $field  Field path.
+	 * @param int      $max    Largest allowed value.
+	 */
+	public static function add_above_maximum( WP_Error $errors, string $field, int $max ): void {
+		self::add(
+			$errors,
+			ValidationErrorCode::OUT_OF_BOUNDS,
+			$field,
+			/* translators: %d: the largest allowed value. */
+			sprintf( __( 'Must not exceed %d.', 'woocommerce-subscriptions-lite' ), $max ),
+			[ 'max' => $max ]
+		);
+	}
+
+	/**
 	 * Add a `not_in_enum` error.
 	 *
 	 * @param WP_Error $errors  Error collector.

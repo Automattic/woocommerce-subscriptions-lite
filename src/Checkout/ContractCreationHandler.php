@@ -32,6 +32,7 @@ use Automattic\WooCommerce\SubscriptionsLite\Contracts\AddressFields;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\HeldLocks;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ProductPlanResolver;
+use Automattic\WooCommerce\SubscriptionsLite\Pricing\BillingDay;
 use Automattic\WooCommerce\SubscriptionsLite\Pricing\BillingTerms;
 use Automattic\WooCommerce\SubscriptionsLite\Utilities\ScheduledActions;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\RenewalOrderBuilder;
@@ -310,7 +311,8 @@ final class ContractCreationHandler {
 	 *              was deleted): resume it later. True once the draft is resumed or is no draft.
 	 */
 	private function resume_draft( WC_Order $order, int $contract_id, PlanView $plan ): bool {
-		[ $start, $next ] = self::get_first_period( $order, $plan );
+		$terms = self::get_billing_terms( $plan );
+		$start = self::get_start( $order );
 
 		$lock     = HeldLocks::get( $contract_id );
 		$acquired = null === $lock;
@@ -327,7 +329,7 @@ final class ContractCreationHandler {
 				return true;
 			}
 
-			$activated = self::activate( $order, $start, $next, (string) $draft->get_billing_total(), $lock );
+			$activated = self::activate( $order, $terms, $start, (string) $draft->get_billing_total(), $lock );
 		} finally {
 			if ( $acquired ) {
 				HeldLocks::release( $lock );
@@ -438,7 +440,8 @@ final class ContractCreationHandler {
 			}
 		}
 
-		[ $start, $next ] = self::get_first_period( $order, $plan );
+		$terms = self::get_billing_terms( $plan );
+		$start = self::get_start( $order );
 
 		$totals = $this->get_recurring_totals( $order, $plan_lines );
 
@@ -476,7 +479,7 @@ final class ContractCreationHandler {
 		$lock = $created['lock'];
 		HeldLocks::register( $lock );
 		try {
-			$activated = self::activate( $order, $start, $next, $totals['billing_total'], $lock );
+			$activated = self::activate( $order, $terms, $start, $totals['billing_total'], $lock );
 		} finally {
 			HeldLocks::release( $lock );
 		}
@@ -489,25 +492,31 @@ final class ContractCreationHandler {
 	}
 
 	/**
-	 * The contract start (the order's payment, else now) and the first renewal date.
+	 * The billing terms of the order's selling plan.
 	 *
-	 * @param WC_Order $order The paid order.
-	 * @param PlanView $plan  The order's selling plan.
-	 * @return array{0: DateTimeImmutable, 1: DateTimeImmutable}
+	 * @param PlanView $plan The order's selling plan.
 	 * @throws DomainException When the plan has invalid billing terms.
 	 */
-	private static function get_first_period( WC_Order $order, PlanView $plan ): array {
-		$paid  = $order->get_date_paid();
-		$start = null !== $paid
-			? new DateTimeImmutable( '@' . $paid->getTimestamp() )
-			: new DateTimeImmutable( 'now', new DateTimeZone( 'UTC' ) );
-
+	private static function get_billing_terms( PlanView $plan ): BillingTerms {
 		$terms = BillingTerms::from_plan( $plan );
 		if ( null === $terms ) {
 			throw new DomainException( sprintf( 'Selling plan %d has invalid billing terms, so no contract can be created from it.', (int) $plan->get_id() ) );
 		}
 
-		return [ $start, $terms->get_first_renewal_from( $start ) ];
+		return $terms;
+	}
+
+	/**
+	 * The contract start: the order's payment, else now.
+	 *
+	 * @param WC_Order $order The paid order.
+	 */
+	private static function get_start( WC_Order $order ): DateTimeImmutable {
+		$paid = $order->get_date_paid();
+
+		return null !== $paid
+			? new DateTimeImmutable( '@' . $paid->getTimestamp() )
+			: new DateTimeImmutable( 'now', new DateTimeZone( 'UTC' ) );
 	}
 
 	/**
@@ -520,17 +529,19 @@ final class ContractCreationHandler {
 	}
 
 	/**
-	 * Cycle 1 (unless the draft already has it) and activation of a draft, under its lock.
+	 * Cycle 1 (unless the draft already has it) up to the first renewal, the billing day and
+	 * activation of a draft, under its lock.
 	 *
 	 * @param WC_Order          $order         The paid order.
+	 * @param BillingTerms      $terms         The plan's billing terms.
 	 * @param DateTimeImmutable $start         Contract start.
-	 * @param DateTimeImmutable $next          First renewal date.
 	 * @param string            $billing_total Recurring total.
 	 * @param ContractLock      $lock          The new contract's lock.
 	 * @return ContractView|null The active contract, as written under the lock; null when it is gone.
 	 */
-	private static function activate( WC_Order $order, DateTimeImmutable $start, DateTimeImmutable $next, string $billing_total, ContractLock $lock ): ?ContractView {
+	private static function activate( WC_Order $order, BillingTerms $terms, DateTimeImmutable $start, string $billing_total, ContractLock $lock ): ?ContractView {
 		$contract_id = $lock->get_contract_id();
+		$next        = $terms->get_first_renewal_from( $start );
 		// Null when cycle 1 exists: a resumed draft whose creation was cut short after it.
 		Contracts::add_cycle(
 			$contract_id,
@@ -546,6 +557,8 @@ final class ContractCreationHandler {
 			],
 			$lock
 		);
+
+		BillingDay::store( $lock, $terms->get_billing_day_from( $start ) );
 
 		return Contracts::update(
 			$contract_id,

@@ -22,6 +22,7 @@ use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\CycleView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\CycleStatus;
+use Automattic\WooCommerce\SubscriptionsLite\Pricing\BillingDay;
 use Automattic\WooCommerce\SubscriptionsLite\Pricing\BillingTerms;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\HeldLocks;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Hold;
@@ -196,12 +197,16 @@ final class RenewalProcessor {
 				break;
 		}
 
-		[ $starts_at, $ends_at ] = $terms->get_period_to_bill( $anchor, $now );
+		[ $starts_at, $period_end ] = $terms->get_period_to_bill( $anchor, $now );
+		$ends_at                    = $period_end->get_moment();
 
 		if ( CycleStatus::BILLED === $head->get_status() && new DateTimeImmutable( $head->get_ends_at_gmt(), new DateTimeZone( 'UTC' ) ) >= $ends_at ) {
 			$this->reapply_schedule( $contract, $head, $now, $terms, $lock );
 			return null;
 		}
+
+		// A due date off the billing-day schedule re-anchors it on its own day.
+		BillingDay::store_reanchored_day( $lock, $period_end );
 
 		// Null when the position is taken, which the lock leaves to a writer outside Lite.
 		return Contracts::add_cycle(
@@ -231,11 +236,13 @@ final class RenewalProcessor {
 	 */
 	private function reapply_schedule( ContractView $contract, CycleView $head, DateTimeImmutable $now, BillingTerms $terms, ContractLock $lock ): void {
 		$this->log( 'warning', sprintf( 'contract %d is due for a period its newest cycle already billed; its next due moment is re-applied.', $contract->get_id() ), $contract->get_id() );
+		$next = $terms->get_next_due_after( new DateTimeImmutable( $head->get_ends_at_gmt(), new DateTimeZone( 'UTC' ) ), $now );
+		BillingDay::store_reanchored_day( $lock, $next );
 		Contracts::update(
 			$contract->get_id(),
 			[
 				'extension_slug'   => Package::EXTENSION_SLUG,
-				'next_payment_gmt' => $terms->get_next_due_after( new DateTimeImmutable( $head->get_ends_at_gmt(), new DateTimeZone( 'UTC' ) ), $now ),
+				'next_payment_gmt' => $next->get_moment(),
 			],
 			$lock
 		);

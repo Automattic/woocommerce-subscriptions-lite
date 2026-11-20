@@ -18,6 +18,7 @@ use Automattic\WooCommerce\SubscriptionsEngine\Api\Plans;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\PlanView;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
+use Automattic\WooCommerce\SubscriptionsLite\Pricing\BillingDay;
 use Automattic\WooCommerce\SubscriptionsLite\Pricing\BillingTerms;
 
 defined( 'ABSPATH' ) || exit;
@@ -37,13 +38,21 @@ final class ContractPlans {
 	}
 
 	/**
-	 * The billing terms of a contract's live plan, or null when there are none: no plan, a
-	 * deleted or foreign plan, or billing {@see BillingTerms::validate()} refuses.
+	 * The billing terms of a contract's live plan, on the contract's stored billing day when it
+	 * has one; null when there are none: no plan, a deleted or foreign plan, or billing
+	 * {@see BillingTerms::validate()} refuses.
 	 *
 	 * @param ContractView $contract Contract.
 	 */
 	public static function get_billing_terms_for( ContractView $contract ): ?BillingTerms {
-		return BillingTerms::from_plan( self::for_contract( $contract ) );
+		$terms = BillingTerms::from_plan( self::for_contract( $contract ) );
+		if ( null === $terms ) {
+			return null;
+		}
+
+		$billing_day = BillingDay::read( $contract->get_id() );
+
+		return null === $billing_day ? $terms : $terms->with_billing_day( $billing_day );
 	}
 
 	/**

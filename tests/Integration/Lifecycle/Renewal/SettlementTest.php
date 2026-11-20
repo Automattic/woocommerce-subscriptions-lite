@@ -18,6 +18,7 @@ use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\SchemaInstall
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Hold;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\HoldAnchor;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
+use Automattic\WooCommerce\SubscriptionsLite\Pricing\BillingDay;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\RenewalOrderBuilder;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\Settlement;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
@@ -207,6 +208,112 @@ final class SettlementTest extends LiteIntegrationTestCase {
 		$this->assertNull( $this->head( $contract_id )->get_reason() );
 		$this->assertSame( ContractStatus::ACTIVE, $contract->get_status() );
 		$this->assertSame( '2026-05-15 00:00:00', $contract->get_next_payment_gmt() );
+	}
+
+	/**
+	 * A contract paid on 31 Dec (billing day 31) whose failed renewal for 31 Jan - 28 Feb is
+	 * paid late: the contract is on hold with no next payment until the payment.
+	 *
+	 * @return array{0: int, 1: WC_Order}
+	 */
+	private function seed_failed_month_end_renewal(): array {
+		$customer_id = $this->create_customer();
+		$contract_id = $this->create_contract(
+			$customer_id,
+			[
+				'payment_method' => 'cod',
+				'date_paid'      => '2025-12-31 10:00:00',
+			]
+		);
+		$order       = $this->create_renewal_order(
+			$contract_id,
+			$customer_id,
+			[
+				'status'       => 'failed',
+				'cycle_status' => CycleStatus::FAILED,
+				'ends_at_gmt'  => '2026-02-28 10:00:00',
+			]
+		);
+		Contracts::update(
+			$contract_id,
+			[
+				'extension_slug'   => Package::EXTENSION_SLUG,
+				'status'           => ContractStatus::ON_HOLD,
+				'next_payment_gmt' => null,
+			]
+		);
+		$this->pay( $order );
+
+		return [ $contract_id, $order ];
+	}
+
+	public function test_a_late_payment_rearms_on_the_stored_billing_day(): void {
+		[ $contract_id, $order ] = $this->seed_failed_month_end_renewal();
+		$this->assertSame( 31, BillingDay::read( $contract_id ) );
+
+		( new Settlement() )->settle( $order, $this->utc( '2026-04-10 00:00:00' ) );
+
+		$contract = $this->get_contract( $contract_id );
+		$this->assertSame( ContractStatus::ACTIVE, $contract->get_status() );
+		$this->assertSame( '2026-04-30 10:00:00', $contract->get_next_payment_gmt(), 'From 28 Feb on the 31st: 31 Mar, then 30 Apr past now.' );
+		$this->assertSame( 31, BillingDay::read( $contract_id ) );
+	}
+
+	/**
+	 * Store a billing day for a contract under its lock.
+	 *
+	 * @param int $contract_id Contract id.
+	 * @param int $billing_day Day of the month.
+	 */
+	private function store_billing_day( int $contract_id, int $billing_day ): void {
+		$lock = $this->hold_lock( $contract_id );
+		try {
+			BillingDay::store( $lock, $billing_day );
+		} finally {
+			$lock->release();
+		}
+	}
+
+	public function test_a_late_payment_off_the_billing_day_schedule_reanchors_it(): void {
+		[ $contract_id, $order ] = $this->seed_failed_month_end_renewal();
+		$this->store_billing_day( $contract_id, 3 );
+
+		( new Settlement() )->settle( $order, $this->utc( '2026-04-10 00:00:00' ) );
+
+		$this->assertSame( '2026-04-28 10:00:00', $this->get_contract( $contract_id )->get_next_payment_gmt(), 'Whole months from 28 Feb, not 3 Mar.' );
+		$this->assertSame( 28, BillingDay::read( $contract_id ) );
+	}
+
+	public function test_a_late_payment_a_day_off_the_billing_day_schedule_keeps_it(): void {
+		[ $contract_id, $order ] = $this->seed_failed_month_end_renewal();
+		$this->store_billing_day( $contract_id, 1 );
+
+		( new Settlement() )->settle( $order, $this->utc( '2026-04-10 00:00:00' ) );
+
+		$this->assertSame( '2026-05-01 10:00:00', $this->get_contract( $contract_id )->get_next_payment_gmt(), '28 Feb is a day from 1 Mar: 1 Apr, then 1 May past now.' );
+		$this->assertSame( 1, BillingDay::read( $contract_id ) );
+	}
+
+	public function test_a_late_payment_during_a_customer_hold_moves_the_anchor_on_the_stored_billing_day(): void {
+		[ $contract_id, $order ] = $this->seed_failed_month_end_renewal();
+		$this->store_hold_anchor( $contract_id, '2026-02-28 10:00:00' );
+
+		( new Settlement() )->settle( $order, $this->utc( '2026-04-10 00:00:00' ) );
+
+		$this->assertSame( ContractStatus::ON_HOLD, $this->get_contract( $contract_id )->get_status() );
+		$this->assertSame( '2026-04-30 10:00:00', HoldAnchor::read( $contract_id ) );
+	}
+
+	public function test_a_late_payment_during_a_customer_hold_off_the_billing_day_schedule_reanchors_it(): void {
+		[ $contract_id, $order ] = $this->seed_failed_month_end_renewal();
+		$this->store_billing_day( $contract_id, 3 );
+		$this->store_hold_anchor( $contract_id, '2026-02-28 10:00:00' );
+
+		( new Settlement() )->settle( $order, $this->utc( '2026-04-10 00:00:00' ) );
+
+		$this->assertSame( ContractStatus::ON_HOLD, $this->get_contract( $contract_id )->get_status() );
+		$this->assertSame( '2026-04-28 10:00:00', HoldAnchor::read( $contract_id ), 'Whole months from 28 Feb, not 3 Mar.' );
+		$this->assertSame( 28, BillingDay::read( $contract_id ) );
 	}
 
 	public function test_a_payment_during_a_customer_hold_bills_the_cycle_and_keeps_the_hold(): void {
