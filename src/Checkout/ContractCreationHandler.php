@@ -3,9 +3,10 @@
  * ContractCreationHandler - turns a paid checkout order into a subscription contract.
  *
  * On a paid status change (`is_paid()`, so offline payments count too), one clean plan group
- * becomes one active contract written through the engine facade; divergent plans or a mixed
- * cart are left uncreated with a note and a flag, and checkout is never blocked. A creation cut
- * short leaves a draft that the next paid change or the resume action finishes.
+ * becomes one active contract written through the engine facade; divergent plans, a mixed
+ * cart, or a payment method that cannot charge the renewals are left uncreated with a note and
+ * a flag, and checkout is never blocked. A creation cut short leaves a draft that the next paid
+ * change or the resume action finishes.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Checkout
  */
@@ -31,6 +32,7 @@ use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\CycleStatus;
 use Automattic\WooCommerce\SubscriptionsLite\Contracts\AddressFields;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\HeldLocks;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
+use Automattic\WooCommerce\SubscriptionsLite\Payments\RenewalGateways;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ProductPlanResolver;
 use Automattic\WooCommerce\SubscriptionsLite\Pricing\BillingDay;
 use Automattic\WooCommerce\SubscriptionsLite\Pricing\BillingTerms;
@@ -82,6 +84,28 @@ final class ContractCreationHandler {
 	 * for a reason that would repeat on every retry (an invalid field or billing).
 	 */
 	public const REASON_CREATION_FAILED = 'creation_failed';
+
+	/**
+	 * Deferral reason: the order was paid with a payment method that cannot charge the
+	 * subscription's renewals automatically, as when a gateway builds the order itself and
+	 * checkout's gateway filter never runs. Lite has no manual renewals to fall back on.
+	 */
+	public const REASON_PAYMENT_METHOD_CANNOT_RENEW = 'payment_method_cannot_renew';
+
+	/**
+	 * Why a payment method cannot renew (note and log wording only): the order has none.
+	 */
+	private const CAUSE_MISSING = 'missing';
+
+	/**
+	 * Why a payment method cannot renew: it is not among this request's registered gateways.
+	 */
+	private const CAUSE_NOT_FOUND = 'not_found';
+
+	/**
+	 * Why a payment method cannot renew: a registered gateway without automatic renewals.
+	 */
+	private const CAUSE_UNSUPPORTED = 'unsupported';
 
 	/**
 	 * Operation label of the new contract's lock while checkout builds it.
@@ -210,6 +234,11 @@ final class ContractCreationHandler {
 
 		if ( null !== $outcome['reason'] ) {
 			$this->record_deferral( $order, $outcome['reason'] );
+			return true;
+		}
+
+		if ( ! $this->can_renew_with_payment_method( $order, $outcome['plan'] ) ) {
+			$this->record_deferral( $order, self::REASON_PAYMENT_METHOD_CANNOT_RENEW );
 			return true;
 		}
 
@@ -433,12 +462,7 @@ final class ContractCreationHandler {
 	 */
 	public function create_contract( WC_Order $order, PlanView $plan ): ?ContractView {
 		$plan_id    = $plan->get_id();
-		$plan_lines = [];
-		foreach ( $order->get_items() as $item ) {
-			if ( $item instanceof WC_Order_Item_Product && $plan_id === (int) $item->get_meta( self::SELLING_PLAN_META ) ) {
-				$plan_lines[] = $item;
-			}
-		}
+		$plan_lines = self::get_plan_lines( $order, $plan );
 
 		$terms = self::get_billing_terms( $plan );
 		$start = self::get_start( $order );
@@ -489,6 +513,43 @@ final class ContractCreationHandler {
 		}
 
 		return $activated;
+	}
+
+	/**
+	 * The order's lines on the selling plan.
+	 *
+	 * @param WC_Order $order The order.
+	 * @param PlanView $plan  The order's selling plan.
+	 * @return array<int, WC_Order_Item_Product>
+	 */
+	private static function get_plan_lines( WC_Order $order, PlanView $plan ): array {
+		$plan_id    = $plan->get_id();
+		$plan_lines = [];
+		foreach ( $order->get_items() as $item ) {
+			if ( $item instanceof WC_Order_Item_Product && $plan_id === (int) $item->get_meta( self::SELLING_PLAN_META ) ) {
+				$plan_lines[] = $item;
+			}
+		}
+
+		return $plan_lines;
+	}
+
+	/**
+	 * Whether the order's payment method can charge the subscription's renewals, with the
+	 * renewal path's own check: a free subscription needs no gateway (a free renewal is
+	 * completed without one), and a gateway that is no longer registered cannot charge.
+	 *
+	 * @param WC_Order $order The paid order.
+	 * @param PlanView $plan  The order's selling plan.
+	 */
+	private function can_renew_with_payment_method( WC_Order $order, PlanView $plan ): bool {
+		$totals = $this->get_recurring_totals( $order, self::get_plan_lines( $order, $plan ) );
+		// The renewal amount is the contract's billing total: 0 or less renews for free.
+		if ( (float) $totals['billing_total'] <= 0 ) {
+			return true;
+		}
+
+		return RenewalGateways::can_charge_renewals( $order->get_payment_method() );
 	}
 
 	/**
@@ -716,18 +777,76 @@ final class ContractCreationHandler {
 	 * @param string   $reason One of the REASON_* constants.
 	 */
 	private function record_deferral( WC_Order $order, string $reason ): void {
-		$order->add_order_note(
-			sprintf(
-				/* translators: %s: machine-readable reason code (e.g. "divergent_plans"). */
-				__( 'No subscription was created automatically for this order (reason: %s). This order needs manual review.', 'woocommerce-subscriptions-lite' ),
-				$reason
-			)
-		);
+		$order->add_order_note( self::get_deferral_note( $order, $reason ) );
+		$detail = self::REASON_PAYMENT_METHOD_CANNOT_RENEW === $reason ? ': ' . self::get_payment_method_log_detail( $order ) : '';
 		wc_get_logger()->warning(
-			sprintf( 'ContractCreationHandler: deferred contract creation for order %d (%s).', $order->get_id(), $reason ),
+			sprintf( 'ContractCreationHandler: deferred contract creation for order %d (%s%s).', $order->get_id(), $reason, $detail ),
 			[ 'source' => self::LOG_SOURCE ]
 		);
 		$order->update_meta_data( self::CREATION_DEFERRED_META, $reason );
 		$order->save();
+	}
+
+	/**
+	 * Why the order's payment method cannot charge renewals: one of the CAUSE_* constants.
+	 * A method missing from this request's gateway list is reported as not found, which is
+	 * all the check observes (its plugin may be inactive, or register only in some requests).
+	 *
+	 * @param WC_Order $order The order.
+	 */
+	private static function get_payment_method_problem( WC_Order $order ): string {
+		if ( '' === $order->get_payment_method() ) {
+			return self::CAUSE_MISSING;
+		}
+
+		return false === wc_get_payment_gateway_by_order( $order ) ? self::CAUSE_NOT_FOUND : self::CAUSE_UNSUPPORTED;
+	}
+
+	/**
+	 * The log line's detail for a payment method that cannot renew.
+	 *
+	 * @param WC_Order $order The order.
+	 */
+	private static function get_payment_method_log_detail( WC_Order $order ): string {
+		$method_id = $order->get_payment_method();
+		$details   = [
+			self::CAUSE_MISSING     => 'the order has no payment method',
+			self::CAUSE_NOT_FOUND   => sprintf( 'payment method "%s" was not found among the site\'s payment gateways', $method_id ),
+			self::CAUSE_UNSUPPORTED => sprintf( 'payment method "%s" cannot charge renewals automatically', $method_id ),
+		];
+
+		return $details[ self::get_payment_method_problem( $order ) ];
+	}
+
+	/**
+	 * The merchant's order note for a deferral: for a payment method that cannot renew it
+	 * names the method, why, and the way forward; for every other reason the reason code.
+	 *
+	 * @param WC_Order $order  The order.
+	 * @param string   $reason One of the REASON_* constants.
+	 */
+	private static function get_deferral_note( WC_Order $order, string $reason ): string {
+		if ( self::REASON_PAYMENT_METHOD_CANNOT_RENEW === $reason ) {
+			$method_id = $order->get_payment_method();
+			$title     = $order->get_payment_method_title();
+			$method    = '' === $title || $title === $method_id ? $method_id : sprintf( '%1$s (%2$s)', $title, $method_id );
+			$causes    = [
+				self::CAUSE_MISSING     => __( 'No subscription was created for this order: it has no payment method, so subscription renewals cannot be charged automatically.', 'woocommerce-subscriptions-lite' ),
+				/* translators: %s: payment method, as its title and id ("PayPal (ppcp-gateway)"), or its id alone. */
+				self::CAUSE_NOT_FOUND   => sprintf( __( 'No subscription was created for this order: its payment method, %s, was not found among this site\'s payment methods, so subscription renewals cannot be charged automatically.', 'woocommerce-subscriptions-lite' ), $method ),
+				/* translators: %s: payment method, as its title and id ("Cash on delivery (cod)"), or its id alone. */
+				self::CAUSE_UNSUPPORTED => sprintf( __( 'No subscription was created for this order: its payment method, %s, cannot charge subscription renewals automatically.', 'woocommerce-subscriptions-lite' ), $method ),
+			];
+			$next      = __( 'The order was paid as a one-time purchase. Refund it, or ask the customer to subscribe again with a payment method that supports subscriptions.', 'woocommerce-subscriptions-lite' );
+
+			/* translators: 1: why no subscription was created, 2: what the merchant can do. */
+			return sprintf( __( '%1$s %2$s', 'woocommerce-subscriptions-lite' ), $causes[ self::get_payment_method_problem( $order ) ], $next );
+		}
+
+		return sprintf(
+			/* translators: %s: machine-readable reason code (e.g. "divergent_plans"). */
+			__( 'No subscription was created automatically for this order (reason: %s). This order needs manual review.', 'woocommerce-subscriptions-lite' ),
+			$reason
+		);
 	}
 }

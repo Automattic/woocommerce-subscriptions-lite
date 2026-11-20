@@ -568,10 +568,24 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 	private $engine_charge_gateways = [];
 
 	/**
+	 * The deferral reason recorded on an order, read fresh, or '' when none.
+	 *
+	 * @param WC_Order $order The order.
+	 */
+	protected function deferral_reason( WC_Order $order ): string {
+		$fresh = wc_get_order( $order->get_id() );
+		$this->assertInstanceOf( WC_Order::class, $fresh );
+
+		return (string) $fresh->get_meta( ContractCreationHandler::CREATION_DEFERRED_META );
+	}
+
+	/**
 	 * Make `$gateway` support engine charges and automatic renewal payments (the engine
 	 * feature and {@see RenewalGateways::FEATURE}) and answer each charge
 	 * with `$outcome` (see {@see self::$charge_outcome}). Calling it again only changes the
-	 * outcome. The hooks are restored with the rest after the test.
+	 * outcome. The hooks are restored with the rest after the test. Use it when a test needs
+	 * renewal charges; the suite's default `dummy` gateway only passes the renewal check
+	 * (it is registered by the bootstrap and charges nothing).
 	 *
 	 * @param string $gateway Gateway id (a core gateway such as `cod`).
 	 * @param string $outcome Charge outcome.

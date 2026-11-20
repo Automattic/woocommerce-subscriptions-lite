@@ -11,10 +11,10 @@
  * subscription was intended but not created (see {@see ContractCreationHandler}),
  * it prints a warning notice instead.
  *
- * The classic order details template fires this hook; the block Order Confirmation
- * page renders order details as blocks, so on a block order-received the table
- * appears on the My Account view-order page rather than inline on the thank-you
- * page. The subscription is always available in the customer portal.
+ * The classic order details template and the block Order Confirmation page (its
+ * Totals block) both fire this hook, so the table or the notice shows on the
+ * thank-you page either way, and on the My Account view-order page. The
+ * subscription is always available in the customer portal.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Checkout
  */

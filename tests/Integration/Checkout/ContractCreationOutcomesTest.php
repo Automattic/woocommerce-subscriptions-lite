@@ -290,16 +290,4 @@ final class ContractCreationOutcomesTest extends LiteIntegrationTestCase {
 			}
 		}
 	}
-
-	/**
-	 * The order's deferral reason, read fresh.
-	 *
-	 * @param WC_Order $order The order.
-	 */
-	private function deferral_reason( WC_Order $order ): string {
-		$fresh = wc_get_order( $order->get_id() );
-		$this->assertInstanceOf( WC_Order::class, $fresh );
-
-		return (string) $fresh->get_meta( ContractCreationHandler::CREATION_DEFERRED_META );
-	}
 }
