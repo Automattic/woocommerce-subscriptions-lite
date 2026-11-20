@@ -763,8 +763,11 @@ final class ContractCreationHandler {
 	 */
 	private function record_deferral( WC_Order $order, string $reason ): void {
 		$order->add_order_note( self::get_deferral_note( $order, $reason ) );
+		$detail = self::REASON_PAYMENT_METHOD_CANNOT_RENEW === $reason
+			? sprintf( ': payment method "%s" is %s', $order->get_payment_method(), self::get_payment_method_problem( $order ) )
+			: '';
 		wc_get_logger()->warning(
-			sprintf( 'ContractCreationHandler: deferred contract creation for order %d (%s).', $order->get_id(), $reason ),
+			sprintf( 'ContractCreationHandler: deferred contract creation for order %d (%s%s).', $order->get_id(), $reason, $detail ),
 			[ 'source' => self::LOG_SOURCE ]
 		);
 		$order->update_meta_data( self::CREATION_DEFERRED_META, $reason );
@@ -772,8 +775,24 @@ final class ContractCreationHandler {
 	}
 
 	/**
+	 * Why the order's payment method cannot charge renewals: `missing` (none set),
+	 * `unavailable` (not a gateway registered on this site, such as a deactivated plugin's)
+	 * or `unsupported` (a registered gateway without automatic renewals).
+	 *
+	 * @param WC_Order $order The order.
+	 */
+	private static function get_payment_method_problem( WC_Order $order ): string {
+		$method_id = $order->get_payment_method();
+		if ( '' === $method_id ) {
+			return 'missing';
+		}
+
+		return RenewalGateways::is_registered( $method_id ) ? 'unsupported' : 'unavailable';
+	}
+
+	/**
 	 * The merchant's order note for a deferral: for a payment method that cannot renew it
-	 * names the method and the way forward, for every other reason the reason code.
+	 * names the method, why, and the way forward; for every other reason the reason code.
 	 *
 	 * @param WC_Order $order  The order.
 	 * @param string   $reason One of the REASON_* constants.
@@ -782,15 +801,24 @@ final class ContractCreationHandler {
 		if ( self::REASON_PAYMENT_METHOD_CANNOT_RENEW === $reason ) {
 			$method_id = $order->get_payment_method();
 			$title     = $order->get_payment_method_title();
-			if ( '' === $method_id ) {
-				return __( 'No subscription was created for this order: it has no payment method, so subscription renewals cannot be charged automatically. The order was paid as a one-time purchase. Refund it, or ask the customer to subscribe again with a payment method that supports subscriptions.', 'woocommerce-subscriptions-lite' );
+			$method    = '' === $title || $title === $method_id ? $method_id : sprintf( '%1$s (%2$s)', $title, $method_id );
+			$next      = __( 'The order was paid as a one-time purchase. Refund it, or ask the customer to subscribe again with a payment method that supports subscriptions.', 'woocommerce-subscriptions-lite' );
+			switch ( self::get_payment_method_problem( $order ) ) {
+				case 'missing':
+					$cause = __( 'No subscription was created for this order: it has no payment method, so subscription renewals cannot be charged automatically.', 'woocommerce-subscriptions-lite' );
+					break;
+				case 'unavailable':
+					/* translators: %s: payment method, as its title and id ("PayPal (ppcp-gateway)"), or its id alone. */
+					$cause = sprintf( __( 'No subscription was created for this order: its payment method, %s, is not available on this site, so subscription renewals cannot be charged automatically.', 'woocommerce-subscriptions-lite' ), $method );
+					break;
+				default:
+					/* translators: %s: payment method, as its title and id ("Cash on delivery (cod)"), or its id alone. */
+					$cause = sprintf( __( 'No subscription was created for this order: its payment method, %s, cannot charge subscription renewals automatically.', 'woocommerce-subscriptions-lite' ), $method );
+					break;
 			}
 
-			return sprintf(
-				/* translators: %s: payment method, as its title and id ("Cash on delivery (cod)"), or its id alone. */
-				__( 'No subscription was created for this order: its payment method, %s, cannot charge subscription renewals automatically. The order was paid as a one-time purchase. Refund it, or ask the customer to subscribe again with a payment method that supports subscriptions.', 'woocommerce-subscriptions-lite' ),
-				'' === $title || $title === $method_id ? $method_id : sprintf( '%1$s (%2$s)', $title, $method_id )
-			);
+			/* translators: 1: why no subscription was created, 2: what the merchant can do. */
+			return sprintf( __( '%1$s %2$s', 'woocommerce-subscriptions-lite' ), $cause, $next );
 		}
 
 		return sprintf(

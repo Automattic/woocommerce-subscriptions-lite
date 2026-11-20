@@ -39,6 +39,15 @@ final class RenewalGateways {
 	}
 
 	/**
+	 * Whether a gateway with this id is registered on the site, enabled or not.
+	 *
+	 * @param string $gateway_id Gateway id.
+	 */
+	public static function is_registered( string $gateway_id ): bool {
+		return isset( WC()->payment_gateways()->payment_gateways()[ $gateway_id ] );
+	}
+
+	/**
 	 * Whether an enabled gateway can charge Lite renewals automatically. Reads the enabled
 	 * setting the merchant controls, not checkout availability, which depends on the cart.
 	 */
