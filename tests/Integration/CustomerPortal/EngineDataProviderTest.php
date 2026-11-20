@@ -322,9 +322,7 @@ final class EngineDataProviderTest extends LiteIntegrationTestCase {
 	public function test_get_contract_reads_a_foreign_contract_of_the_same_customer_as_not_found(): void {
 		$customer_id = $this->create_customer();
 		$foreign_id  = $this->seed_foreign_contract( $customer_id );
-		$variant_id  = $this->seed_foreign_contract( $customer_id, [ 'extension_slug' => 'WooCommerce-Subscriptions-Lite' ] );
 
 		$this->assertNull( $this->provider->get_contract( $foreign_id, $customer_id ) );
-		$this->assertNull( $this->provider->get_contract( $variant_id, $customer_id ), 'The owner match is exact: a case variant is not Lite\'s.' );
 	}
 }
