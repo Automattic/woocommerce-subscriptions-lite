@@ -3,9 +3,10 @@
  * ContractCreationHandler - turns a paid checkout order into a subscription contract.
  *
  * On a paid status change (`is_paid()`, so offline payments count too), one clean plan group
- * becomes one active contract written through the engine facade; divergent plans or a mixed
- * cart are left uncreated with a note and a flag, and checkout is never blocked. A creation cut
- * short leaves a draft that the next paid change or the resume action finishes.
+ * becomes one active contract written through the engine facade; divergent plans, a mixed
+ * cart, or a payment method that cannot charge the renewals are left uncreated with a note and
+ * a flag, and checkout is never blocked. A creation cut short leaves a draft that the next paid
+ * change or the resume action finishes.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Checkout
  */
@@ -31,6 +32,7 @@ use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\CycleStatus;
 use Automattic\WooCommerce\SubscriptionsLite\Contracts\AddressFields;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\HeldLocks;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
+use Automattic\WooCommerce\SubscriptionsLite\Payments\RenewalGateways;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ProductPlanResolver;
 use Automattic\WooCommerce\SubscriptionsLite\Pricing\BillingDay;
 use Automattic\WooCommerce\SubscriptionsLite\Pricing\BillingTerms;
@@ -82,6 +84,13 @@ final class ContractCreationHandler {
 	 * for a reason that would repeat on every retry (an invalid field or billing).
 	 */
 	public const REASON_CREATION_FAILED = 'creation_failed';
+
+	/**
+	 * Deferral reason: the order was paid with a payment method that cannot charge the
+	 * subscription's renewals automatically, as when a gateway builds the order itself and
+	 * checkout's gateway filter never runs. Lite has no manual renewals to fall back on.
+	 */
+	public const REASON_PAYMENT_METHOD_CANNOT_RENEW = 'payment_method_cannot_renew';
 
 	/**
 	 * Operation label of the new contract's lock while checkout builds it.
@@ -210,6 +219,11 @@ final class ContractCreationHandler {
 
 		if ( null !== $outcome['reason'] ) {
 			$this->record_deferral( $order, $outcome['reason'] );
+			return true;
+		}
+
+		if ( ! $this->can_renew_with_payment_method( $order, $outcome['plan'] ) ) {
+			$this->record_deferral( $order, self::REASON_PAYMENT_METHOD_CANNOT_RENEW );
 			return true;
 		}
 
@@ -433,12 +447,7 @@ final class ContractCreationHandler {
 	 */
 	public function create_contract( WC_Order $order, PlanView $plan ): ?ContractView {
 		$plan_id    = $plan->get_id();
-		$plan_lines = [];
-		foreach ( $order->get_items() as $item ) {
-			if ( $item instanceof WC_Order_Item_Product && $plan_id === (int) $item->get_meta( self::SELLING_PLAN_META ) ) {
-				$plan_lines[] = $item;
-			}
-		}
+		$plan_lines = self::get_plan_lines( $order, $plan );
 
 		$terms = self::get_billing_terms( $plan );
 		$start = self::get_start( $order );
@@ -489,6 +498,43 @@ final class ContractCreationHandler {
 		}
 
 		return $activated;
+	}
+
+	/**
+	 * The order's lines on the selling plan.
+	 *
+	 * @param WC_Order $order The order.
+	 * @param PlanView $plan  The order's selling plan.
+	 * @return array<int, WC_Order_Item_Product>
+	 */
+	private static function get_plan_lines( WC_Order $order, PlanView $plan ): array {
+		$plan_id    = $plan->get_id();
+		$plan_lines = [];
+		foreach ( $order->get_items() as $item ) {
+			if ( $item instanceof WC_Order_Item_Product && $plan_id === (int) $item->get_meta( self::SELLING_PLAN_META ) ) {
+				$plan_lines[] = $item;
+			}
+		}
+
+		return $plan_lines;
+	}
+
+	/**
+	 * Whether the order's payment method can charge the subscription's renewals, with the
+	 * renewal path's own check: a free subscription needs no gateway (a free renewal is
+	 * completed without one), and a gateway that is no longer registered cannot charge.
+	 *
+	 * @param WC_Order $order The paid order.
+	 * @param PlanView $plan  The order's selling plan.
+	 */
+	private function can_renew_with_payment_method( WC_Order $order, PlanView $plan ): bool {
+		$totals = $this->get_recurring_totals( $order, self::get_plan_lines( $order, $plan ) );
+		// The renewal amount is the contract's billing total: 0 or less renews for free.
+		if ( (float) $totals['billing_total'] <= 0 ) {
+			return true;
+		}
+
+		return RenewalGateways::can_charge_renewals( $order->get_payment_method() );
 	}
 
 	/**
