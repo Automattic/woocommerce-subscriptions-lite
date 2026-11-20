@@ -87,7 +87,8 @@ class SubscriptionsLiteTestsBootstrap {
 	 *
 	 * The plugin file wires the Jetpack Autoloader (which resolves the vendored
 	 * engine) and boots the feature modules on `plugins_loaded`, exactly as in
-	 * production - no library-style shortcuts.
+	 * production - no library-style shortcuts. It also registers the suite's renewing
+	 * `dummy` gateway, a stand-in for the dev site's Dummy Payments gateway.
 	 */
 	public function load_plugins(): void {
 		$woocommerce = WP_PLUGIN_DIR . '/woocommerce/woocommerce.php';
@@ -96,6 +97,16 @@ class SubscriptionsLiteTestsBootstrap {
 		}
 
 		require_once $this->plugin_dir . '/woocommerce-subscriptions-lite.php';
+
+		// The `dummy` gateway the suite pays with; loaded once WooCommerce's gateway base exists.
+		add_filter(
+			'woocommerce_payment_gateways',
+			function ( $gateways ) {
+				require_once $this->tests_dir . '/Support/RenewingTestGateway.php';
+
+				return \Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Support\RenewingTestGateway::add( $gateways );
+			}
+		);
 	}
 
 	/**
