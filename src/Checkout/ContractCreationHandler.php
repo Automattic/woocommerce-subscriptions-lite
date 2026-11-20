@@ -762,18 +762,39 @@ final class ContractCreationHandler {
 	 * @param string   $reason One of the REASON_* constants.
 	 */
 	private function record_deferral( WC_Order $order, string $reason ): void {
-		$order->add_order_note(
-			sprintf(
-				/* translators: %s: machine-readable reason code (e.g. "divergent_plans"). */
-				__( 'No subscription was created automatically for this order (reason: %s). This order needs manual review.', 'woocommerce-subscriptions-lite' ),
-				$reason
-			)
-		);
+		$order->add_order_note( self::get_deferral_note( $order, $reason ) );
 		wc_get_logger()->warning(
 			sprintf( 'ContractCreationHandler: deferred contract creation for order %d (%s).', $order->get_id(), $reason ),
 			[ 'source' => self::LOG_SOURCE ]
 		);
 		$order->update_meta_data( self::CREATION_DEFERRED_META, $reason );
 		$order->save();
+	}
+
+	/**
+	 * The merchant's order note for a deferral: for a payment method that cannot renew it
+	 * names the method and the way forward, for every other reason the reason code.
+	 *
+	 * @param WC_Order $order  The order.
+	 * @param string   $reason One of the REASON_* constants.
+	 */
+	private static function get_deferral_note( WC_Order $order, string $reason ): string {
+		if ( self::REASON_PAYMENT_METHOD_CANNOT_RENEW === $reason ) {
+			$method_id = '' !== $order->get_payment_method() ? $order->get_payment_method() : _x( 'none', 'no payment method', 'woocommerce-subscriptions-lite' );
+			$title     = '' !== $order->get_payment_method_title() ? $order->get_payment_method_title() : $method_id;
+
+			return sprintf(
+				/* translators: 1: payment method title, 2: payment method id. */
+				__( 'No subscription was created for this order: its payment method, %1$s (%2$s), cannot charge subscription renewals automatically. The order was paid as a one-time purchase. Refund it, or ask the customer to subscribe again with a payment method that supports subscriptions.', 'woocommerce-subscriptions-lite' ),
+				$title,
+				$method_id
+			);
+		}
+
+		return sprintf(
+			/* translators: %s: machine-readable reason code (e.g. "divergent_plans"). */
+			__( 'No subscription was created automatically for this order (reason: %s). This order needs manual review.', 'woocommerce-subscriptions-lite' ),
+			$reason
+		);
 	}
 }

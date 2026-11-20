@@ -91,7 +91,11 @@ final class ContractCreationPaymentMethodTest extends LiteIntegrationTestCase {
 
 		$this->assertSame( [], Contracts::find_by_origin_order( $order->get_id() ) );
 		$this->assertSame( ContractCreationHandler::REASON_PAYMENT_METHOD_CANNOT_RENEW, $this->deferral_reason( $order ) );
-		$this->assertCount( 1, $this->get_order_notes_containing( $order->get_id(), 'No subscription was created' ) );
+		$this->assertSame(
+			[ 'No subscription was created for this order: its payment method, Cash on delivery (cod), cannot charge subscription renewals automatically. The order was paid as a one-time purchase. Refund it, or ask the customer to subscribe again with a payment method that supports subscriptions.' ],
+			$this->get_order_notes_containing( $order->get_id(), 'No subscription was created' ),
+			'One note naming the payment method and the way forward.'
+		);
 		$this->assertTrue( $this->has_logged( sprintf( 'deferred contract creation for order %d (payment_method_cannot_renew)', $order->get_id() ) ) );
 		$this->assertSame( [], $this->pending_resumes( $order ), 'Nothing to resume.' );
 	}
@@ -119,6 +123,22 @@ final class ContractCreationPaymentMethodTest extends LiteIntegrationTestCase {
 
 		$this->assertSame( [], Contracts::find_by_origin_order( $order->get_id() ) );
 		$this->assertSame( ContractCreationHandler::REASON_PAYMENT_METHOD_CANNOT_RENEW, $this->deferral_reason( $order ) );
+		$expected = '' === $payment_method ? 'its payment method, none (none),' : 'its payment method, ppcp-gateway (ppcp-gateway),';
+		$this->assertCount( 1, $this->get_order_notes_containing( $order->get_id(), $expected ) );
+	}
+
+	public function test_another_deferral_reason_keeps_the_generic_note(): void {
+		$order   = $this->plan_order( 'cod' );
+		$product = new WC_Product_Simple();
+		$product->set_name( 'One-time mug' );
+		$product->set_regular_price( '5.00' );
+		$product->save();
+		$order->add_product( $product, 1 );
+		$order->save();
+
+		$order->update_status( OrderStatus::PROCESSING );
+
+		$this->assertCount( 1, $this->get_order_notes_containing( $order->get_id(), 'No subscription was created automatically for this order (reason: mixed_cart). This order needs manual review.' ) );
 	}
 
 	public function test_a_disabled_gateway_that_can_renew_creates_the_contract(): void {

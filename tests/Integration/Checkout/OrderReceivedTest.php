@@ -163,6 +163,17 @@ final class OrderReceivedTest extends LiteIntegrationTestCase {
 		$this->assertStringContainsString( 'wc-subscriptions-lite-order-notice', $this->render( $order->get_id() ), 'The deferral warning renders.' );
 	}
 
+	public function test_renders_the_warning_for_an_order_paid_with_a_payment_method_that_cannot_renew(): void {
+		$order = $this->create_subscription_order( $this->create_customer(), [ 'payment_method' => 'cod' ] );
+		$this->stamp_plan( $order, $this->make_plan() );
+		$order->update_status( 'processing' ); // The real handler defers it.
+
+		$html = $this->render( $order->get_id() );
+
+		$this->assertStringContainsString( 'This order includes a subscription that could not be set up automatically.', $html );
+		$this->assertStringNotContainsString( 'Related subscriptions', $html );
+	}
+
 	public function test_renders_nothing_for_a_plain_order(): void {
 		$customer_id = $this->create_customer();
 		$order       = $this->create_subscription_order( $customer_id );
