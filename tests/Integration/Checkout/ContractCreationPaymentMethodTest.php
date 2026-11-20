@@ -108,9 +108,9 @@ final class ContractCreationPaymentMethodTest extends LiteIntegrationTestCase {
 		$this->assertStringContainsString( 'Cash on delivery (cod)', $notes[0], 'The note names the payment method.' );
 		$this->assertStringContainsString( 'cannot charge subscription renewals automatically', $notes[0], 'A registered gateway without renewal support.' );
 		$this->assertStringContainsString( 'Refund it', $notes[0], 'The way forward.' );
-		$this->assertStringNotContainsString( 'not available on this site', $notes[0] );
+		$this->assertStringNotContainsString( 'was not found', $notes[0] );
 		$this->assertStringNotContainsString( '(reason:', $notes[0], 'Not the generic note.' );
-		$this->assertTrue( $this->has_logged( sprintf( 'deferred contract creation for order %d (payment_method_cannot_renew: payment method "cod" is unsupported)', $order->get_id() ) ) );
+		$this->assertTrue( $this->has_logged( sprintf( 'deferred contract creation for order %d (payment_method_cannot_renew: payment method "cod" cannot charge renewals automatically)', $order->get_id() ) ) );
 		$this->assertSame( [], $this->pending_resumes( $order ), 'Nothing to resume.' );
 	}
 
@@ -134,12 +134,13 @@ final class ContractCreationPaymentMethodTest extends LiteIntegrationTestCase {
 		$this->assertSame( ContractCreationHandler::REASON_PAYMENT_METHOD_CANNOT_RENEW, $this->deferral_reason( $order ) );
 		$notes = $this->deferral_notes( $order );
 		$this->assertCount( 1, $notes );
-		$this->assertStringContainsString( 'its payment method, ppcp-gateway, is not available on this site', $notes[0], 'Not registered; a title equal to the id is printed once.' );
+		$this->assertStringContainsString( 'its payment method, ppcp-gateway, was not found among this site\'s payment methods', $notes[0], 'Not registered; a title equal to the id is printed once.' );
 		$this->assertStringNotContainsString( 'cannot charge subscription renewals', $notes[0] );
-		$this->assertTrue( $this->has_logged( sprintf( 'deferred contract creation for order %d (payment_method_cannot_renew: payment method "ppcp-gateway" is unavailable)', $order->get_id() ) ) );
+		$this->assertTrue( $this->has_logged( sprintf( 'deferred contract creation for order %d (payment_method_cannot_renew: payment method "ppcp-gateway" was not found among the site\'s payment gateways)', $order->get_id() ) ) );
 	}
 
 	public function test_an_order_without_a_payment_method_defers_with_its_own_wording(): void {
+		$this->capture_log();
 		$order = $this->plan_order( '' );
 
 		$order->update_status( OrderStatus::PROCESSING );
@@ -149,6 +150,7 @@ final class ContractCreationPaymentMethodTest extends LiteIntegrationTestCase {
 		$notes = $this->deferral_notes( $order );
 		$this->assertCount( 1, $notes );
 		$this->assertStringContainsString( 'it has no payment method', $notes[0] );
+		$this->assertTrue( $this->has_logged( sprintf( 'deferred contract creation for order %d (payment_method_cannot_renew: the order has no payment method)', $order->get_id() ) ) );
 	}
 
 	public function test_a_disabled_gateway_that_can_renew_creates_the_contract(): void {

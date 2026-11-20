@@ -93,6 +93,21 @@ final class ContractCreationHandler {
 	public const REASON_PAYMENT_METHOD_CANNOT_RENEW = 'payment_method_cannot_renew';
 
 	/**
+	 * Why a payment method cannot renew (note and log wording only): the order has none.
+	 */
+	private const CAUSE_MISSING = 'missing';
+
+	/**
+	 * Why a payment method cannot renew: it is not among this request's registered gateways.
+	 */
+	private const CAUSE_NOT_FOUND = 'not_found';
+
+	/**
+	 * Why a payment method cannot renew: a registered gateway without automatic renewals.
+	 */
+	private const CAUSE_UNSUPPORTED = 'unsupported';
+
+	/**
 	 * Operation label of the new contract's lock while checkout builds it.
 	 */
 	public const OPERATION = 'checkout';
@@ -763,9 +778,7 @@ final class ContractCreationHandler {
 	 */
 	private function record_deferral( WC_Order $order, string $reason ): void {
 		$order->add_order_note( self::get_deferral_note( $order, $reason ) );
-		$detail = self::REASON_PAYMENT_METHOD_CANNOT_RENEW === $reason
-			? sprintf( ': payment method "%s" is %s', $order->get_payment_method(), self::get_payment_method_problem( $order ) )
-			: '';
+		$detail = self::REASON_PAYMENT_METHOD_CANNOT_RENEW === $reason ? ': ' . self::get_payment_method_log_detail( $order ) : '';
 		wc_get_logger()->warning(
 			sprintf( 'ContractCreationHandler: deferred contract creation for order %d (%s%s).', $order->get_id(), $reason, $detail ),
 			[ 'source' => self::LOG_SOURCE ]
@@ -775,19 +788,34 @@ final class ContractCreationHandler {
 	}
 
 	/**
-	 * Why the order's payment method cannot charge renewals: `missing` (none set),
-	 * `unavailable` (not a gateway registered on this site, such as a deactivated plugin's)
-	 * or `unsupported` (a registered gateway without automatic renewals).
+	 * Why the order's payment method cannot charge renewals: one of the CAUSE_* constants.
+	 * A method missing from this request's gateway list is reported as not found, which is
+	 * all the check observes (its plugin may be inactive, or register only in some requests).
 	 *
 	 * @param WC_Order $order The order.
 	 */
 	private static function get_payment_method_problem( WC_Order $order ): string {
-		$method_id = $order->get_payment_method();
-		if ( '' === $method_id ) {
-			return 'missing';
+		if ( '' === $order->get_payment_method() ) {
+			return self::CAUSE_MISSING;
 		}
 
-		return RenewalGateways::is_registered( $method_id ) ? 'unsupported' : 'unavailable';
+		return false === wc_get_payment_gateway_by_order( $order ) ? self::CAUSE_NOT_FOUND : self::CAUSE_UNSUPPORTED;
+	}
+
+	/**
+	 * The log line's detail for a payment method that cannot renew.
+	 *
+	 * @param WC_Order $order The order.
+	 */
+	private static function get_payment_method_log_detail( WC_Order $order ): string {
+		$method_id = $order->get_payment_method();
+		$details   = [
+			self::CAUSE_MISSING     => 'the order has no payment method',
+			self::CAUSE_NOT_FOUND   => sprintf( 'payment method "%s" was not found among the site\'s payment gateways', $method_id ),
+			self::CAUSE_UNSUPPORTED => sprintf( 'payment method "%s" cannot charge renewals automatically', $method_id ),
+		];
+
+		return $details[ self::get_payment_method_problem( $order ) ];
 	}
 
 	/**
@@ -802,23 +830,17 @@ final class ContractCreationHandler {
 			$method_id = $order->get_payment_method();
 			$title     = $order->get_payment_method_title();
 			$method    = '' === $title || $title === $method_id ? $method_id : sprintf( '%1$s (%2$s)', $title, $method_id );
+			$causes    = [
+				self::CAUSE_MISSING     => __( 'No subscription was created for this order: it has no payment method, so subscription renewals cannot be charged automatically.', 'woocommerce-subscriptions-lite' ),
+				/* translators: %s: payment method, as its title and id ("PayPal (ppcp-gateway)"), or its id alone. */
+				self::CAUSE_NOT_FOUND   => sprintf( __( 'No subscription was created for this order: its payment method, %s, was not found among this site\'s payment methods, so subscription renewals cannot be charged automatically.', 'woocommerce-subscriptions-lite' ), $method ),
+				/* translators: %s: payment method, as its title and id ("Cash on delivery (cod)"), or its id alone. */
+				self::CAUSE_UNSUPPORTED => sprintf( __( 'No subscription was created for this order: its payment method, %s, cannot charge subscription renewals automatically.', 'woocommerce-subscriptions-lite' ), $method ),
+			];
 			$next      = __( 'The order was paid as a one-time purchase. Refund it, or ask the customer to subscribe again with a payment method that supports subscriptions.', 'woocommerce-subscriptions-lite' );
-			switch ( self::get_payment_method_problem( $order ) ) {
-				case 'missing':
-					$cause = __( 'No subscription was created for this order: it has no payment method, so subscription renewals cannot be charged automatically.', 'woocommerce-subscriptions-lite' );
-					break;
-				case 'unavailable':
-					/* translators: %s: payment method, as its title and id ("PayPal (ppcp-gateway)"), or its id alone. */
-					$cause = sprintf( __( 'No subscription was created for this order: its payment method, %s, is not available on this site, so subscription renewals cannot be charged automatically.', 'woocommerce-subscriptions-lite' ), $method );
-					break;
-				default:
-					/* translators: %s: payment method, as its title and id ("Cash on delivery (cod)"), or its id alone. */
-					$cause = sprintf( __( 'No subscription was created for this order: its payment method, %s, cannot charge subscription renewals automatically.', 'woocommerce-subscriptions-lite' ), $method );
-					break;
-			}
 
 			/* translators: 1: why no subscription was created, 2: what the merchant can do. */
-			return sprintf( __( '%1$s %2$s', 'woocommerce-subscriptions-lite' ), $cause, $next );
+			return sprintf( __( '%1$s %2$s', 'woocommerce-subscriptions-lite' ), $causes[ self::get_payment_method_problem( $order ) ], $next );
 		}
 
 		return sprintf(

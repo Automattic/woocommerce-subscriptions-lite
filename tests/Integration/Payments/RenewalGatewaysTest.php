@@ -56,18 +56,6 @@ final class RenewalGatewaysTest extends LiteIntegrationTestCase {
 		$this->assertFalse( RenewalGateways::can_charge_renewals( 'no-such-gateway' ) );
 	}
 
-	public function test_a_registered_gateway_is_registered_enabled_or_not(): void {
-		$this->enable_only_gateways( [ 'bacs' ] );
-
-		$this->assertTrue( RenewalGateways::is_registered( 'cod' ), 'Disabled, still registered.' );
-		$this->assertTrue( RenewalGateways::is_registered( 'bacs' ) );
-	}
-
-	public function test_an_unknown_or_empty_gateway_id_is_not_registered(): void {
-		$this->assertFalse( RenewalGateways::is_registered( 'no-such-gateway' ) );
-		$this->assertFalse( RenewalGateways::is_registered( '' ) );
-	}
-
 	public function test_an_enabled_gateway_that_can_charge_renewals_is_found(): void {
 		$this->declare_cod_features( [ Payments::GATEWAY_FEATURE, RenewalGateways::FEATURE ] );
 		$this->enable_only_gateways( [ 'bacs', 'cod' ] );

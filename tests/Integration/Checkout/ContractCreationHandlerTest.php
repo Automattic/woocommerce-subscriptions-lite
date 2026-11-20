@@ -94,7 +94,6 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 		$order->save();
 	}
 
-
 	public function test_creates_one_active_contract_when_the_order_reaches_a_paid_status(): void {
 		$customer_id = $this->create_customer();
 		$plan        = $this->make_plan();
