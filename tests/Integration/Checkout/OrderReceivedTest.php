@@ -13,6 +13,7 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Checkout;
 
+use Automattic\WooCommerce\Enums\OrderStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\PlanStatus;
 use Automattic\WooCommerce\SubscriptionsLite\Checkout\ContractCreationHandler;
@@ -166,7 +167,7 @@ final class OrderReceivedTest extends LiteIntegrationTestCase {
 	public function test_renders_the_warning_for_an_order_paid_with_a_payment_method_that_cannot_renew(): void {
 		$order = $this->create_subscription_order( $this->create_customer(), [ 'payment_method' => 'cod' ] );
 		$this->stamp_plan( $order, $this->make_plan() );
-		$order->update_status( 'processing' ); // The real handler defers it.
+		$order->update_status( OrderStatus::PROCESSING ); // The real handler defers it.
 
 		$html = $this->render( $order->get_id() );
 

@@ -94,14 +94,6 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 		$order->save();
 	}
 
-	/**
-	 * The deferral reason recorded on an order, or '' when none.
-	 *
-	 * @param WC_Order $order The order.
-	 */
-	private function deferral_reason( WC_Order $order ): string {
-		return (string) wc_get_order( $order->get_id() )->get_meta( ContractCreationHandler::CREATION_DEFERRED_META );
-	}
 
 	public function test_creates_one_active_contract_when_the_order_reaches_a_paid_status(): void {
 		$customer_id = $this->create_customer();

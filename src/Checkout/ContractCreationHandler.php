@@ -780,14 +780,16 @@ final class ContractCreationHandler {
 	 */
 	private static function get_deferral_note( WC_Order $order, string $reason ): string {
 		if ( self::REASON_PAYMENT_METHOD_CANNOT_RENEW === $reason ) {
-			$method_id = '' !== $order->get_payment_method() ? $order->get_payment_method() : _x( 'none', 'no payment method', 'woocommerce-subscriptions-lite' );
-			$title     = '' !== $order->get_payment_method_title() ? $order->get_payment_method_title() : $method_id;
+			$method_id = $order->get_payment_method();
+			$title     = $order->get_payment_method_title();
+			if ( '' === $method_id ) {
+				return __( 'No subscription was created for this order: it has no payment method, so subscription renewals cannot be charged automatically. The order was paid as a one-time purchase. Refund it, or ask the customer to subscribe again with a payment method that supports subscriptions.', 'woocommerce-subscriptions-lite' );
+			}
 
 			return sprintf(
-				/* translators: 1: payment method title, 2: payment method id. */
-				__( 'No subscription was created for this order: its payment method, %1$s (%2$s), cannot charge subscription renewals automatically. The order was paid as a one-time purchase. Refund it, or ask the customer to subscribe again with a payment method that supports subscriptions.', 'woocommerce-subscriptions-lite' ),
-				$title,
-				$method_id
+				/* translators: %s: payment method, as its title and id ("Cash on delivery (cod)"), or its id alone. */
+				__( 'No subscription was created for this order: its payment method, %s, cannot charge subscription renewals automatically. The order was paid as a one-time purchase. Refund it, or ask the customer to subscribe again with a payment method that supports subscriptions.', 'woocommerce-subscriptions-lite' ),
+				'' === $title || $title === $method_id ? $method_id : sprintf( '%1$s (%2$s)', $title, $method_id )
 			);
 		}
 

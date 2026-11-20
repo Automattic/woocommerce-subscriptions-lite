@@ -14,12 +14,14 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Checkout;
 
 use Automattic\WooCommerce\Enums\OrderStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\View\PlanView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
 use Automattic\WooCommerce\SubscriptionsLite\Checkout\ContractCreationHandler;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Support\RenewingTestGateway;
 use WC_Order;
+use WC_Order_Item_Fee;
 use WC_Product_Simple;
 
 /**
@@ -28,13 +30,21 @@ use WC_Product_Simple;
 final class ContractCreationPaymentMethodTest extends LiteIntegrationTestCase {
 
 	/**
+	 * The plan the last {@see self::plan_order()} stamped.
+	 *
+	 * @var PlanView|null
+	 */
+	private $plan;
+
+	/**
 	 * A plan order for a new customer, paid with `$payment_method` (not yet in a paid status).
+	 * The plan is kept in {@see self::$plan}.
 	 *
 	 * @param string $payment_method Gateway id.
 	 * @param string $price          Product price.
 	 */
 	private function plan_order( string $payment_method, string $price = '19.99' ): WC_Order {
-		$order = $this->create_subscription_order(
+		$order      = $this->create_subscription_order(
 			$this->create_customer(),
 			[
 				'payment_method'       => $payment_method,
@@ -42,18 +52,10 @@ final class ContractCreationPaymentMethodTest extends LiteIntegrationTestCase {
 				'price'                => $price,
 			]
 		);
-		$this->stamp_plan( $order, $this->make_plan() );
+		$this->plan = $this->make_plan();
+		$this->stamp_plan( $order, $this->plan );
 
 		return $order;
-	}
-
-	/**
-	 * The deferral reason recorded on an order, or '' when none.
-	 *
-	 * @param WC_Order $order The order.
-	 */
-	private function deferral_reason( WC_Order $order ): string {
-		return (string) wc_get_order( $order->get_id() )->get_meta( ContractCreationHandler::CREATION_DEFERRED_META );
 	}
 
 	/**
@@ -64,6 +66,16 @@ final class ContractCreationPaymentMethodTest extends LiteIntegrationTestCase {
 	 */
 	private function pending_resumes( WC_Order $order ): array {
 		return $this->get_pending_actions( 'woocommerce_subscriptions_lite_resume_checkout', [ 'order_id' => $order->get_id() ] );
+	}
+
+	/**
+	 * The order's deferral notes (both wordings start "No subscription was created").
+	 *
+	 * @param WC_Order $order The order.
+	 * @return array<int, string>
+	 */
+	private function deferral_notes( WC_Order $order ): array {
+		return $this->get_order_notes_containing( $order->get_id(), 'No subscription was created' );
 	}
 
 	/**
@@ -91,11 +103,11 @@ final class ContractCreationPaymentMethodTest extends LiteIntegrationTestCase {
 
 		$this->assertSame( [], Contracts::find_by_origin_order( $order->get_id() ) );
 		$this->assertSame( ContractCreationHandler::REASON_PAYMENT_METHOD_CANNOT_RENEW, $this->deferral_reason( $order ) );
-		$this->assertSame(
-			[ 'No subscription was created for this order: its payment method, Cash on delivery (cod), cannot charge subscription renewals automatically. The order was paid as a one-time purchase. Refund it, or ask the customer to subscribe again with a payment method that supports subscriptions.' ],
-			$this->get_order_notes_containing( $order->get_id(), 'No subscription was created' ),
-			'One note naming the payment method and the way forward.'
-		);
+		$notes = $this->deferral_notes( $order );
+		$this->assertCount( 1, $notes );
+		$this->assertStringContainsString( 'Cash on delivery (cod)', $notes[0], 'The note names the payment method.' );
+		$this->assertStringContainsString( 'cannot charge subscription renewals automatically', $notes[0] );
+		$this->assertStringNotContainsString( '(reason:', $notes[0], 'Not the generic note.' );
 		$this->assertTrue( $this->has_logged( sprintf( 'deferred contract creation for order %d (payment_method_cannot_renew)', $order->get_id() ) ) );
 		$this->assertSame( [], $this->pending_resumes( $order ), 'Nothing to resume.' );
 	}
@@ -107,38 +119,31 @@ final class ContractCreationPaymentMethodTest extends LiteIntegrationTestCase {
 		$order->update_status( OrderStatus::COMPLETED );
 
 		$this->assertSame( [], Contracts::find_by_origin_order( $order->get_id() ) );
-		$this->assertCount( 1, $this->get_order_notes_containing( $order->get_id(), 'No subscription was created' ) );
+		$this->assertCount( 1, $this->deferral_notes( $order ) );
 	}
 
-	/**
-	 * @testWith ["ppcp-gateway"]
-	 *           [""]
-	 *
-	 * @param string $payment_method A gateway id that is not registered, or none.
-	 */
-	public function test_an_unregistered_or_empty_payment_method_defers( string $payment_method ): void {
-		$order = $this->plan_order( $payment_method );
+	public function test_a_payment_method_that_is_not_a_registered_gateway_defers(): void {
+		$order = $this->plan_order( 'ppcp-gateway' );
 
 		$order->update_status( OrderStatus::PROCESSING );
 
 		$this->assertSame( [], Contracts::find_by_origin_order( $order->get_id() ) );
 		$this->assertSame( ContractCreationHandler::REASON_PAYMENT_METHOD_CANNOT_RENEW, $this->deferral_reason( $order ) );
-		$expected = '' === $payment_method ? 'its payment method, none (none),' : 'its payment method, ppcp-gateway (ppcp-gateway),';
-		$this->assertCount( 1, $this->get_order_notes_containing( $order->get_id(), $expected ) );
+		$notes = $this->deferral_notes( $order );
+		$this->assertCount( 1, $notes );
+		$this->assertStringContainsString( 'its payment method, ppcp-gateway, cannot charge', $notes[0], 'A title equal to the id is printed once.' );
 	}
 
-	public function test_another_deferral_reason_keeps_the_generic_note(): void {
-		$order   = $this->plan_order( 'cod' );
-		$product = new WC_Product_Simple();
-		$product->set_name( 'One-time mug' );
-		$product->set_regular_price( '5.00' );
-		$product->save();
-		$order->add_product( $product, 1 );
-		$order->save();
+	public function test_an_order_without_a_payment_method_defers_with_its_own_wording(): void {
+		$order = $this->plan_order( '' );
 
 		$order->update_status( OrderStatus::PROCESSING );
 
-		$this->assertCount( 1, $this->get_order_notes_containing( $order->get_id(), 'No subscription was created automatically for this order (reason: mixed_cart). This order needs manual review.' ) );
+		$this->assertSame( [], Contracts::find_by_origin_order( $order->get_id() ) );
+		$this->assertSame( ContractCreationHandler::REASON_PAYMENT_METHOD_CANNOT_RENEW, $this->deferral_reason( $order ) );
+		$notes = $this->deferral_notes( $order );
+		$this->assertCount( 1, $notes );
+		$this->assertStringContainsString( 'it has no payment method', $notes[0] );
 	}
 
 	public function test_a_disabled_gateway_that_can_renew_creates_the_contract(): void {
@@ -155,18 +160,48 @@ final class ContractCreationPaymentMethodTest extends LiteIntegrationTestCase {
 		$this->assertSame( '', $this->deferral_reason( $order ) );
 	}
 
-	public function test_a_free_subscription_without_a_payment_method_creates_the_contract(): void {
-		$order = $this->plan_order( '', '0' );
+	/**
+	 * A subscription that renews for 0 needs no gateway, whatever the order was paid with.
+	 *
+	 * @testWith [""]
+	 *           ["cod"]
+	 *
+	 * @param string $payment_method No payment method, or one that cannot renew.
+	 */
+	public function test_a_free_subscription_creates_the_contract_whatever_the_payment_method( string $payment_method ): void {
+		$order = $this->plan_order( $payment_method, '0' );
 
 		$order->update_status( OrderStatus::PROCESSING );
 
 		$contracts = Contracts::find_by_origin_order( $order->get_id() );
-		$this->assertCount( 1, $contracts, 'A subscription that renews for 0 needs no gateway.' );
-		$this->assertSame( '0.00000000', $contracts[0]->get_billing_total() );
+		$this->assertCount( 1, $contracts );
+		$this->assertEqualsWithDelta( 0.0, (float) $contracts[0]->get_billing_total(), 0.0001 );
 		$this->assertSame( '', $this->deferral_reason( $order ) );
 	}
 
-	public function test_a_mixed_cart_on_a_gateway_that_cannot_renew_keeps_the_mixed_cart_reason(): void {
+	/**
+	 * The rule reads the recurring total of the plan lines, not the order total: a fee is
+	 * charged once, so a free plan line plus a fee still renews for 0.
+	 */
+	public function test_a_free_plan_line_with_a_paid_fee_on_a_gateway_that_cannot_renew_creates_the_contract(): void {
+		$order = $this->plan_order( 'cod', '0' );
+		$fee   = new WC_Order_Item_Fee();
+		$fee->set_name( 'Delivery fee' );
+		$fee->set_total( '5.00' );
+		$order->add_item( $fee );
+		$order->calculate_totals( false );
+		$order->save();
+		$this->assertEqualsWithDelta( 5.0, (float) $order->get_total(), 0.0001, 'The order itself is paid.' );
+
+		$order->update_status( OrderStatus::PROCESSING );
+
+		$contracts = Contracts::find_by_origin_order( $order->get_id() );
+		$this->assertCount( 1, $contracts, 'Its renewals are free, so no gateway is needed.' );
+		$this->assertEqualsWithDelta( 0.0, (float) $contracts[0]->get_billing_total(), 0.0001 );
+		$this->assertSame( '', $this->deferral_reason( $order ) );
+	}
+
+	public function test_a_mixed_cart_on_a_gateway_that_cannot_renew_keeps_the_mixed_cart_reason_and_note(): void {
 		$order   = $this->plan_order( 'cod' );
 		$product = new WC_Product_Simple();
 		$product->set_name( 'One-time mug' );
@@ -179,6 +214,9 @@ final class ContractCreationPaymentMethodTest extends LiteIntegrationTestCase {
 		$order->update_status( OrderStatus::PROCESSING );
 
 		$this->assertSame( ContractCreationHandler::REASON_MIXED_CART, $this->deferral_reason( $order ) );
+		$notes = $this->deferral_notes( $order );
+		$this->assertCount( 1, $notes );
+		$this->assertStringContainsString( '(reason: mixed_cart)', $notes[0], 'The generic note, not the payment-method one.' );
 	}
 
 	public function test_the_resume_action_defers_once_without_counting_a_failed_run(): void {
@@ -190,14 +228,13 @@ final class ContractCreationPaymentMethodTest extends LiteIntegrationTestCase {
 
 		$this->assertSame( [], Contracts::find_by_origin_order( $order->get_id() ) );
 		$this->assertSame( ContractCreationHandler::REASON_PAYMENT_METHOD_CANNOT_RENEW, $this->deferral_reason( $order ) );
-		$this->assertCount( 1, $this->get_order_notes_containing( $order->get_id(), 'No subscription was created' ), 'The second run is a no-op.' );
+		$this->assertCount( 1, $this->deferral_notes( $order ), 'The second run is a no-op.' );
 		$this->assertSame( '', (string) wc_get_order( $order->get_id() )->get_meta( '_wcsl_resume_attempts' ), 'Not a failed run.' );
 		$this->assertSame( [], $this->pending_resumes( $order ), 'Not rescheduled.' );
 	}
 
 	public function test_a_draft_already_written_for_the_order_still_resumes(): void {
 		$order   = $this->plan_order( 'cod' );
-		$plan_id = (int) $order->get_items()[ array_key_first( $order->get_items() ) ]->get_meta( '_wcsl_selling_plan_id' );
 		$created = Contracts::create(
 			[
 				'extension_slug'  => Package::EXTENSION_SLUG,
@@ -205,7 +242,7 @@ final class ContractCreationPaymentMethodTest extends LiteIntegrationTestCase {
 				'status'          => ContractStatus::DRAFT,
 				'customer_id'     => $order->get_customer_id(),
 				'currency'        => 'USD',
-				'selling_plan_id' => $plan_id,
+				'selling_plan_id' => $this->plan->get_id(),
 				'origin_order_id' => $order->get_id(),
 				'billing_total'   => '19.99',
 			],
@@ -215,7 +252,7 @@ final class ContractCreationPaymentMethodTest extends LiteIntegrationTestCase {
 
 		$order->update_status( OrderStatus::PROCESSING );
 
-		$this->assertSame( ContractStatus::ACTIVE, $this->get_contract( $created['contract']->get_id() )->get_status(), 'The check ran before the draft was written.' );
+		$this->assertSame( ContractStatus::ACTIVE, $this->get_contract( $created['contract']->get_id() )->get_status(), 'A draft already written for the order resumes even though its payment method cannot renew.' );
 		$this->assertSame( '', $this->deferral_reason( $order ) );
 	}
 }
