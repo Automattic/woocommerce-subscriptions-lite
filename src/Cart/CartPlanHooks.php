@@ -22,6 +22,11 @@
  *  6. `woocommerce_checkout_create_order_line_item` - copy `_wcsl_selling_plan_id`
  *     onto the order line item; `Checkout\ContractCreationHandler`
  *     reads it. Fires for both classic and Blocks checkout.
+ *  7. `woocommerce_check_cart_items` / `woocommerce_store_api_validate_cart_item` -
+ *     refuse checkout while a line's plan could not be read for its pricing.
+ *
+ * A failed plan read fails closed where money is decided: the add is refused,
+ * checkout is refused or stopped, and the shopper never sees the database error.
  *
  * Mixed-cart guards are out of scope: this module keeps mixed
  * carts working, it does not police them.
@@ -33,9 +38,13 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Cart;
 
+use Exception;
+use RuntimeException;
 use WC_Cart;
 use WC_Product;
+use Automattic\WooCommerce\StoreApi\Exceptions\RouteException;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\PlanView;
+use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ProductPlanResolver;
 use Automattic\WooCommerce\SubscriptionsLite\Pricing\PriceCalculator;
 use Automattic\WooCommerce\SubscriptionsLite\ProductPage\PlanOptionFormatter;
@@ -43,8 +52,8 @@ use Automattic\WooCommerce\SubscriptionsLite\ProductPage\PlanOptionFormatter;
 defined( 'ABSPATH' ) || exit;
 
 /**
- * Cart-side selling-plan plumbing. Instance state is the two lookup seams; the
- * methods are pure over `( $_POST, $cart_item )`.
+ * Cart-side selling-plan plumbing. Instance state is the plan resolver and the
+ * lines whose plan could not be read for their pricing in this request.
  */
 final class CartPlanHooks {
 
@@ -61,6 +70,14 @@ final class CartPlanHooks {
 	 * @var ProductPlanResolver
 	 */
 	private $resolver;
+
+	/**
+	 * Keys of the cart items whose plan could not be read while pricing them in this request:
+	 * their price may not be the plan's, so checkout is refused.
+	 *
+	 * @var array<string, true>
+	 */
+	private $unpriced_cart_items = [];
 
 	/**
 	 * Construct the module with the applicability resolver it gates adds through.
@@ -83,6 +100,8 @@ final class CartPlanHooks {
 		add_filter( 'woocommerce_cart_item_price', [ $instance, 'cart_item_price' ], 10, 2 );
 		add_filter( 'woocommerce_cart_item_subtotal', [ $instance, 'cart_item_subtotal' ], 10, 2 );
 		add_action( 'woocommerce_checkout_create_order_line_item', [ $instance, 'copy_to_line_item_meta' ], 10, 3 );
+		add_action( 'woocommerce_check_cart_items', [ $instance, 'check_cart_items' ] );
+		add_action( 'woocommerce_store_api_validate_cart_item', [ $instance, 'validate_cart_item' ], 10, 2 );
 	}
 
 	/**
@@ -110,7 +129,14 @@ final class CartPlanHooks {
 		if ( null === $plan_id ) {
 			return $passed;
 		}
-		if ( ! $this->resolver->is_plan_applicable_to_product( $plan_id, $product_id ) ) {
+		try {
+			$applicable = $this->resolver->is_plan_applicable_to_product( $plan_id, $product_id );
+		} catch ( RuntimeException $e ) {
+			self::log_read_failure( sprintf( 'failed to read the plans of product %d on add to cart', $product_id ), $e );
+			wc_add_notice( self::get_add_failed_message(), 'error' );
+			return false;
+		}
+		if ( ! $applicable ) {
 			wc_add_notice(
 				__( 'The selected subscription plan is not available for this product.', 'woocommerce-subscriptions-lite' ),
 				'error'
@@ -136,11 +162,22 @@ final class CartPlanHooks {
 	 * @param array<string, mixed> $cart_item_data Cart item data accumulator.
 	 * @param int                  $product_id     Parent product id (plans attach to the parent).
 	 * @return array<string, mixed>
+	 * @throws Exception When the plans cannot be read: `WC_Cart::add_to_cart()` shows the message
+	 *                   and adds nothing, rather than adding the product as a one-time purchase.
 	 */
 	public function add_cart_item_data( array $cart_item_data, int $product_id ): array {
 		$plan_id = $this->get_candidate_plan_id_for_cart_item( $cart_item_data );
 		unset( $cart_item_data[ self::SELLING_PLAN_ID_KEY ] );
-		if ( null !== $plan_id && $this->resolver->is_plan_applicable_to_product( $plan_id, $product_id ) ) {
+		if ( null === $plan_id ) {
+			return $cart_item_data;
+		}
+		try {
+			$applicable = $this->resolver->is_plan_applicable_to_product( $plan_id, $product_id );
+		} catch ( RuntimeException $e ) {
+			self::log_read_failure( sprintf( 'failed to read the plans of product %d on add to cart', $product_id ), $e );
+			throw new Exception( esc_html( self::get_add_failed_message() ) );
+		}
+		if ( $applicable ) {
 			$cart_item_data[ self::SELLING_PLAN_ID_KEY ] = $plan_id;
 		}
 		return $cart_item_data;
@@ -153,13 +190,21 @@ final class CartPlanHooks {
 	 * `get_price()`) so the discount does not compound across the multiple
 	 * `woocommerce_before_calculate_totals` fires per request, and mutates only
 	 * the cart's product clone (`$cart_item['data']`) so plan state never smears
-	 * across rows. A plan that no longer resolves leaves the price untouched.
+	 * across rows. A plan that no longer resolves leaves the price untouched; one that
+	 * cannot be read does too, and the line is recorded so checkout is refused, while the
+	 * cart (and every page showing the mini-cart) still loads.
 	 *
 	 * @param WC_Cart $cart Current cart.
 	 */
 	public function apply_plan_pricing( WC_Cart $cart ): void {
-		foreach ( $cart->get_cart() as $cart_item ) {
-			$plan = $this->resolve_line_plan( $cart_item );
+		foreach ( $cart->get_cart() as $cart_item_key => $cart_item ) {
+			try {
+				$plan = $this->resolve_line_plan( $cart_item );
+			} catch ( RuntimeException $e ) {
+				self::log_read_failure( sprintf( 'failed to read the plan of cart item %s for its price', $cart_item_key ), $e );
+				$this->unpriced_cart_items[ (string) $cart_item_key ] = true;
+				continue;
+			}
 			if ( ! $plan instanceof PlanView ) {
 				continue;
 			}
@@ -235,15 +280,54 @@ final class CartPlanHooks {
 	 * agreement.
 	 *
 	 * @param \WC_Order_Item_Product $order_item    Order line item being created.
-	 * @param string                 $cart_item_key Cart item key (unused).
+	 * @param string                 $cart_item_key Cart item key, for the log.
 	 * @param array<string, mixed>   $values        Cart item row.
+	 * @throws Exception When the plan cannot be read: classic and Store API checkout stop and show
+	 *                   the message, so nothing is charged for an order without its plan.
 	 */
 	public function copy_to_line_item_meta( $order_item, string $cart_item_key, array $values ): void {
-		$plan = $this->resolve_line_plan( $values );
+		try {
+			$plan = $this->resolve_line_plan( $values );
+		} catch ( RuntimeException $e ) {
+			self::log_read_failure( sprintf( 'failed to read the plan of cart item %s at checkout', $cart_item_key ), $e );
+			throw new Exception( esc_html( self::get_checkout_failed_message() ) );
+		}
 		if ( ! $plan instanceof PlanView ) {
 			return;
 		}
 		$order_item->add_meta_data( self::SELLING_PLAN_ID_KEY, (int) $plan->get_id(), true );
+	}
+
+	/**
+	 * Refuse classic checkout (and show the cart error) while a line's plan could not be read
+	 * for its pricing in this request.
+	 */
+	public function check_cart_items(): void {
+		$cart = WC()->cart;
+		if ( ! $cart instanceof WC_Cart ) {
+			return;
+		}
+		foreach ( array_keys( $cart->get_cart() ) as $cart_item_key ) {
+			if ( isset( $this->unpriced_cart_items[ (string) $cart_item_key ] ) ) {
+				wc_add_notice( self::get_checkout_failed_message(), 'error' );
+				return;
+			}
+		}
+	}
+
+	/**
+	 * Refuse Store API (block) checkout for a line whose plan could not be read for its pricing
+	 * in this request.
+	 *
+	 * @param WC_Product           $product   Product of the cart item (unused).
+	 * @param array<string, mixed> $cart_item Cart item row.
+	 * @throws RouteException When the line's plan could not be read for its pricing.
+	 */
+	public function validate_cart_item( $product, array $cart_item ): void {
+		$cart_item_key = (string) ( $cart_item['key'] ?? '' );
+		if ( isset( $this->unpriced_cart_items[ $cart_item_key ] ) ) {
+			throw new RouteException( 'woocommerce_subscriptions_lite_plan_read_failed', esc_html( self::get_checkout_failed_message() ), 409 );
+		}
 	}
 
 	/**
@@ -264,10 +348,35 @@ final class CartPlanHooks {
 	}
 
 	/**
+	 * The notice for an add to cart refused because the plans could not be read.
+	 */
+	private static function get_add_failed_message(): string {
+		return __( 'The subscription could not be added right now. Please try again.', 'woocommerce-subscriptions-lite' );
+	}
+
+	/**
+	 * The error for a checkout refused because a line's plan could not be read.
+	 */
+	private static function get_checkout_failed_message(): string {
+		return __( 'Your subscription could not be processed right now. Please try again.', 'woocommerce-subscriptions-lite' );
+	}
+
+	/**
+	 * Log a failed plan read with the engine message, which customer-facing text never shows.
+	 *
+	 * @param string           $context What failed, without the class prefix.
+	 * @param RuntimeException $error   The read failure.
+	 */
+	private static function log_read_failure( string $context, RuntimeException $error ): void {
+		wc_get_logger()->error( sprintf( 'CartPlanHooks: %s: %s', $context, $error->getMessage() ), [ 'source' => Package::EXTENSION_SLUG ] );
+	}
+
+	/**
 	 * Resolve the plan for a cart item ({@see ProductPlanResolver::get_line_plan()}),
 	 * or null for a one-time line.
 	 *
 	 * @param array<string, mixed> $cart_item Cart item row.
+	 * @throws RuntimeException When the plan cannot be read.
 	 */
 	private function resolve_line_plan( array $cart_item ): ?PlanView {
 		$plan_id = isset( $cart_item[ self::SELLING_PLAN_ID_KEY ] ) ? (int) $cart_item[ self::SELLING_PLAN_ID_KEY ] : 0;
