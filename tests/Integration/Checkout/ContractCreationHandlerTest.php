@@ -958,13 +958,6 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 	}
 
 	/**
-	 * Regex for the order's plan read (`Plans::get()`).
-	 */
-	private static function plan_read(): string {
-		return '/FROM ' . preg_quote( SchemaInstaller::get_table_name( SchemaInstaller::TABLE_PLANS ), '/' ) . ' /';
-	}
-
-	/**
 	 * Regex for the order's contract lookup (`Contracts::find_by_origin_order()`).
 	 */
 	private static function origin_order_read(): string {
@@ -1010,6 +1003,24 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 		$this->assertCount( 1, $created, 'The resume creates the contract once the read works.' );
 		$this->assertSame( ContractStatus::ACTIVE, $created[0]->get_status() );
 		$this->assertSame( [], $this->pending_resumes( $order->get_id() ) );
+	}
+
+	public function test_a_failed_read_whose_resume_cannot_be_scheduled_notes_the_order_for_attention(): void {
+		$customer_id = $this->create_customer();
+		$plan        = $this->make_plan();
+		$order       = $this->create_subscription_order( $customer_id );
+		$this->apply_and_stamp( $order, $plan );
+		$this->capture_log();
+		add_filter( 'pre_as_schedule_single_action', '__return_zero' ); // Action Scheduler cannot store it.
+
+		$this->fail_next_query( self::plan_read() );
+		$order->update_status( OrderStatus::PROCESSING );
+
+		$this->assertSame( [], $this->pending_resumes( $order->get_id() ) );
+		$this->assertTrue( $this->has_logged( sprintf( 'could not schedule the resume of order %d', $order->get_id() ) ) );
+		$this->assertCount( 1, $this->get_order_notes_containing( $order->get_id(), 'no automatic retry could be scheduled. This order needs attention.' ) );
+		$this->assertSame( [], $this->get_order_notes_containing( $order->get_id(), 'retried automatically' ), 'No retry is promised.' );
+		$this->assertSame( '', $this->deferral_reason( $order ) );
 	}
 
 	/**

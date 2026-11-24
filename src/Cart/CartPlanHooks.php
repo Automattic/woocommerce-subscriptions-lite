@@ -191,8 +191,9 @@ final class CartPlanHooks {
 	 * `woocommerce_before_calculate_totals` fires per request, and mutates only
 	 * the cart's product clone (`$cart_item['data']`) so plan state never smears
 	 * across rows. A plan that no longer resolves leaves the price untouched; one that
-	 * cannot be read does too, and the line is recorded so checkout is refused, while the
-	 * cart (and every page showing the mini-cart) still loads.
+	 * cannot be read does too, without throwing, and the line is recorded so checkout is
+	 * refused. A later pass that reads the plan clears the record. The display filters
+	 * still read the plan themselves and throw while it cannot be read.
 	 *
 	 * @param WC_Cart $cart Current cart.
 	 */
@@ -205,6 +206,7 @@ final class CartPlanHooks {
 				$this->unpriced_cart_items[ (string) $cart_item_key ] = true;
 				continue;
 			}
+			unset( $this->unpriced_cart_items[ (string) $cart_item_key ] );
 			if ( ! $plan instanceof PlanView ) {
 				continue;
 			}
@@ -299,8 +301,9 @@ final class CartPlanHooks {
 	}
 
 	/**
-	 * Refuse classic checkout (and show the cart error) while a line's plan could not be read
-	 * for its pricing in this request.
+	 * Refuse classic checkout submission while a line's plan could not be read for its pricing
+	 * in this request: checkout calculates the totals before this check. The cart and checkout
+	 * pages run this check before their totals, so their render may show no notice.
 	 */
 	public function check_cart_items(): void {
 		$cart = WC()->cart;
@@ -323,7 +326,7 @@ final class CartPlanHooks {
 	 * @param array<string, mixed> $cart_item Cart item row.
 	 * @throws RouteException When the line's plan could not be read for its pricing.
 	 */
-	public function validate_cart_item( $product, array $cart_item ): void {
+	public function validate_cart_item( $product, array $cart_item = [] ): void {
 		$cart_item_key = (string) ( $cart_item['key'] ?? '' );
 		if ( isset( $this->unpriced_cart_items[ $cart_item_key ] ) ) {
 			throw new RouteException( 'woocommerce_subscriptions_lite_plan_read_failed', esc_html( self::get_checkout_failed_message() ), 409 );

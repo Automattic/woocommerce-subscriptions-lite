@@ -247,13 +247,43 @@ final class ContractCreationOutcomesTest extends LiteIntegrationTestCase {
 		$this->assertSame( [], $this->get_order_notes_containing( $order->get_id(), 'creation_failed' ) );
 		$this->assertCount( 1, $this->get_order_notes_containing( $order->get_id(), 'It will be retried automatically.' ), 'The merchant can see the failure.' );
 		$pending = $this->get_pending_actions( 'woocommerce_subscriptions_lite_resume_checkout', [ 'order_id' => $order->get_id() ] );
-		$this->assertCount( 1, $pending, 'The creation is resumed later.' );
+		$this->assertCount( 1, $pending, 'The resume scheduled before the insert survives its failure.' );
 
 		// The next paid transition retries and, with the database back, creates the contract.
 		$order->update_status( 'completed' );
 
 		$this->assertCount( 1, Contracts::find_by_origin_order( $order->get_id() ) );
 		$this->assertSame( '', $this->deferral_reason( $order ) );
+	}
+
+	public function test_a_failed_contract_insert_with_no_resume_scheduled_notes_the_order_for_attention(): void {
+		global $wpdb;
+
+		$order = $this->create_subscription_order( $this->create_customer() );
+		$this->stamp_plan( $order, $this->make_plan() );
+		$this->make_lines_applicable( $order );
+		$this->capture_log();
+		add_filter( 'pre_as_schedule_single_action', '__return_zero' ); // Action Scheduler cannot store it.
+
+		$table = SchemaInstaller::get_table_name( SchemaInstaller::TABLE_CONTRACTS );
+		$break = static function ( string $query ) use ( $table ): string {
+			return 0 === strpos( ltrim( $query ), "INSERT INTO `{$table}`" ) ? 'SELECT broken syntax (' : $query;
+		};
+		add_filter( 'query', $break );
+		$suppressed = $wpdb->suppress_errors( true );
+
+		try {
+			$order->update_status( 'processing' );
+		} finally {
+			$wpdb->suppress_errors( $suppressed );
+			remove_filter( 'query', $break );
+		}
+
+		$this->assertSame( [], Contracts::find_by_origin_order( $order->get_id() ) );
+		$this->assertSame( [], $this->get_pending_actions( 'woocommerce_subscriptions_lite_resume_checkout', [ 'order_id' => $order->get_id() ] ) );
+		$this->assertTrue( $this->has_logged( sprintf( 'no resume is pending for order %d', $order->get_id() ) ) );
+		$this->assertCount( 1, $this->get_order_notes_containing( $order->get_id(), 'This order needs attention.' ) );
+		$this->assertSame( [], $this->get_order_notes_containing( $order->get_id(), 'retried automatically' ), 'No retry is promised.' );
 	}
 
 	public function test_a_refused_contract_field_defers_the_order_and_is_not_retried(): void {

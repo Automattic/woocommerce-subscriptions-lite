@@ -39,8 +39,9 @@ final class ScheduledActions {
 	 * @param string               $hook          Action hook.
 	 * @param array<string, mixed> $args          Action arguments.
 	 * @param int                  $delay_seconds Seconds from now.
+	 * @return bool False when no action is pending and Action Scheduler could not create one.
 	 */
-	public static function schedule_once( string $hook, array $args, int $delay_seconds ): void {
+	public static function schedule_once( string $hook, array $args, int $delay_seconds ): bool {
 		$run_at  = time() + $delay_seconds;
 		$pending = as_get_scheduled_actions(
 			[
@@ -54,9 +55,34 @@ final class ScheduledActions {
 			],
 			'ids'
 		);
-		if ( [] === $pending ) {
-			as_schedule_single_action( $run_at, $hook, $args, self::GROUP );
+		if ( [] !== $pending ) {
+			return true;
 		}
+		$action_id = as_schedule_single_action( $run_at, $hook, $args, self::GROUP );
+
+		// Action Scheduler returns 0, rather than throwing, when it cannot store the action.
+		return $action_id > 0;
+	}
+
+	/**
+	 * Whether a `$hook` action with `$args` is pending.
+	 *
+	 * @param string               $hook Action hook.
+	 * @param array<string, mixed> $args Action arguments.
+	 */
+	public static function is_pending( string $hook, array $args ): bool {
+		$pending = as_get_scheduled_actions(
+			[
+				'hook'     => $hook,
+				'args'     => $args,
+				'group'    => self::GROUP,
+				'status'   => ActionScheduler_Store::STATUS_PENDING,
+				'per_page' => 1,
+			],
+			'ids'
+		);
+
+		return [] !== $pending;
 	}
 
 	/**

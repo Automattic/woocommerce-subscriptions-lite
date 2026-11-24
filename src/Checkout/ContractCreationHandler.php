@@ -129,6 +129,11 @@ final class ContractCreationHandler {
 	private const LOG_SOURCE = 'woocommerce-subscriptions-lite';
 
 	/**
+	 * Delay of a resume that must run once a contract lock taken now has expired.
+	 */
+	private const RESUME_AFTER_LOCK_EXPIRY_SECONDS = ContractLock::TTL_SECONDS + ScheduledActions::LOCK_RETRY_DELAY_SECONDS;
+
+	/**
 	 * Create the contract on every order status change (`is_paid()` filters it down to paid
 	 * ones; `woocommerce_payment_complete` never fires for offline gateways), and resume a
 	 * creation cut short on the resume action, whose argument is the order id.
@@ -255,15 +260,17 @@ final class ContractCreationHandler {
 					// A draft blocks retries through the idempotency check. Without one, a refused
 					// input (a LogicException: the engine rejected a field, or the billing does not
 					// parse) fails the same way every time, so the deferral flag stops the retries;
-					// any other failure (a database error) may be transient: it gets a note and a
-					// resume within the attempt cap, and no flag.
+					// any other failure (a database error) may be transient: it gets a note and no
+					// flag, and the resume `create_contract()` scheduled before its insert retries it.
 					$has_contract = $this->note_stuck_draft( $order );
 					if ( ! $has_contract ) {
 						if ( $e instanceof LogicException ) {
 							$this->record_deferral( $order, self::REASON_CREATION_FAILED );
-						} else {
-							self::schedule_resume( $order_id, ContractLock::TTL_SECONDS + ScheduledActions::LOCK_RETRY_DELAY_SECONDS );
+						} elseif ( ScheduledActions::is_pending( 'woocommerce_subscriptions_lite_resume_checkout', [ 'order_id' => $order_id ] ) ) {
 							$order->add_order_note( __( 'The subscription for this order could not be created. It will be retried automatically. If it keeps failing, this order needs manual review.', 'woocommerce-subscriptions-lite' ) );
+						} else {
+							$this->log_error( sprintf( 'no resume is pending for order %d, so its failed creation is not retried.', $order_id ) );
+							self::note_unretried_creation( $order );
 						}
 					}
 				} catch ( Throwable $note_error ) {
@@ -284,7 +291,14 @@ final class ContractCreationHandler {
 			return true;
 		} catch ( RuntimeException $read_error ) {
 			$this->log_error( sprintf( 'failed to read the subscription data of order %d: %s', $order_id, $read_error->getMessage() ) );
-			self::schedule_resume( $order_id, ContractLock::TTL_SECONDS + ScheduledActions::LOCK_RETRY_DELAY_SECONDS );
+			$scheduled = self::schedule_resume( $order_id, self::RESUME_AFTER_LOCK_EXPIRY_SECONDS );
+			if ( ! $scheduled ) {
+				try {
+					self::note_unretried_creation( $order );
+				} catch ( Throwable $note_error ) {
+					$this->log_error( sprintf( 'failed to note the unretried creation on order %d: %s', $order_id, $note_error->getMessage() ) );
+				}
+			}
 			return false;
 		}
 	}
@@ -311,7 +325,7 @@ final class ContractCreationHandler {
 				if ( null === $plan ) {
 					$resumed = false;
 					$this->log_error( sprintf( 'draft contract %d of order %d cannot be resumed: its plan no longer resolves.', $contract->get_id(), $order->get_id() ) );
-					self::schedule_resume( $order->get_id(), ContractLock::TTL_SECONDS + ScheduledActions::LOCK_RETRY_DELAY_SECONDS );
+					self::schedule_resume( $order->get_id(), self::RESUME_AFTER_LOCK_EXPIRY_SECONDS );
 					continue;
 				}
 
@@ -324,7 +338,7 @@ final class ContractCreationHandler {
 			} catch ( Throwable $e ) {
 				$resumed = false;
 				$this->log_error( sprintf( 'failed to resume draft contract %d of order %d: %s', $contract->get_id(), $order->get_id(), $e->getMessage() ) );
-				self::schedule_resume( $order->get_id(), ContractLock::TTL_SECONDS + ScheduledActions::LOCK_RETRY_DELAY_SECONDS );
+				self::schedule_resume( $order->get_id(), self::RESUME_AFTER_LOCK_EXPIRY_SECONDS );
 				continue;
 			}
 
@@ -396,9 +410,27 @@ final class ContractCreationHandler {
 	 *
 	 * @param int $order_id      Order id.
 	 * @param int $delay_seconds Seconds from now.
+	 * @return bool False, logged, when no resume is pending and none could be scheduled.
 	 */
-	private static function schedule_resume( int $order_id, int $delay_seconds ): void {
-		ScheduledActions::schedule_once( 'woocommerce_subscriptions_lite_resume_checkout', [ 'order_id' => $order_id ], $delay_seconds );
+	private static function schedule_resume( int $order_id, int $delay_seconds ): bool {
+		$scheduled = ScheduledActions::schedule_once( 'woocommerce_subscriptions_lite_resume_checkout', [ 'order_id' => $order_id ], $delay_seconds );
+		if ( ! $scheduled ) {
+			wc_get_logger()->error(
+				sprintf( 'ContractCreationHandler: could not schedule the resume of order %d.', $order_id ),
+				[ 'source' => self::LOG_SOURCE ]
+			);
+		}
+
+		return $scheduled;
+	}
+
+	/**
+	 * Note on the order that its subscription was not created and no automatic retry is pending.
+	 *
+	 * @param WC_Order $order The order.
+	 */
+	private static function note_unretried_creation( WC_Order $order ): void {
+		$order->add_order_note( __( 'The subscription for this order could not be created, and no automatic retry could be scheduled. This order needs attention.', 'woocommerce-subscriptions-lite' ) );
 	}
 
 	/**
@@ -480,7 +512,7 @@ final class ContractCreationHandler {
 
 		$totals = $this->get_recurring_totals( $order, $plan_lines );
 
-		self::schedule_resume( $order->get_id(), ContractLock::TTL_SECONDS + ScheduledActions::LOCK_RETRY_DELAY_SECONDS );
+		self::schedule_resume( $order->get_id(), self::RESUME_AFTER_LOCK_EXPIRY_SECONDS );
 		$created = Contracts::create(
 			[
 				'extension_slug'       => Package::EXTENSION_SLUG,
