@@ -1,10 +1,11 @@
 /**
- * PlanManager status-change error tests.
+ * PlanManager status-change and duplicate-check tests.
  *
  * Renders the real manager, hooks and notices store against a mocked REST
- * client, rejects an archive or restore request with a refusal, and asserts
- * the snackbar shows the refusal's reasons. The table is a stub exposing the
- * row actions.
+ * client that rejects every PATCH with a refusal. Asserts the snackbar shows
+ * the refusal's reasons, and that the duplicate check skips archived plans on
+ * save and refuses a restore that would duplicate an active plan. The table
+ * and modal are stubs exposing the row actions and a save button.
  */
 
 // React.act is test-only and not re-exported by @wordpress/element; react
@@ -23,20 +24,84 @@ global.IS_REACT_ACT_ENVIRONMENT = true;
 jest.mock( '@wordpress/api-fetch', () => jest.fn() );
 
 jest.mock( '../components/plans-table', () => ( {
-	PlansTable: ( { plans, onArchive, onRestore } ) =>
+	PlansTable: ( { plans, onEdit, onArchive, onRestore } ) =>
 		plans.map( ( plan ) => (
 			<div key={ plan.id }>
-				<button type="button" onClick={ () => onArchive( plan ) }>
+				<button
+					type="button"
+					data-plan-id={ plan.id }
+					onClick={ () => onEdit( plan ) }
+				>
+					Edit
+				</button>
+				<button
+					type="button"
+					data-plan-id={ plan.id }
+					onClick={ () => onArchive( plan ) }
+				>
 					Archive
 				</button>
-				<button type="button" onClick={ () => onRestore( plan ) }>
+				<button
+					type="button"
+					data-plan-id={ plan.id }
+					onClick={ () => onRestore( plan ) }
+				>
 					Restore
 				</button>
 			</div>
 		) ),
 } ) );
 
+jest.mock( '../components/plan-modal', () => ( {
+	PlanModal: ( { plan, onSave } ) => (
+		<button
+			type="button"
+			onClick={ () =>
+				onSave( {
+					name: 'Renamed',
+					billing_policy: plan.billing_policy,
+					pricing_policy: plan.pricing_policy,
+				} )
+			}
+		>
+			Save
+		</button>
+	),
+} ) );
+
 const PLAN = { id: 7, name: 'Monthly', status: 'archived' };
+
+const POLICIES = {
+	billing_policy: { period: 'month', interval: 1 },
+	pricing_policy: { policies: [], one_time_fees: [] },
+};
+
+const ARCHIVED_TWIN = {
+	id: 7,
+	name: 'Monthly',
+	status: 'archived',
+	...POLICIES,
+};
+
+const ACTIVE_TWIN = {
+	id: 8,
+	name: 'Monthly again',
+	status: 'active',
+	...POLICIES,
+};
+
+const ACTIVE_OTHER = {
+	id: 9,
+	name: 'Weekly',
+	status: 'active',
+	...POLICIES,
+	billing_policy: { period: 'week', interval: 1 },
+};
+
+const RESTORE_REFUSAL =
+	'This plan matches an active plan. Archive or change that plan first.';
+
+let listedPlans = [ PLAN ];
 
 const REFUSAL = {
 	code: 'rest_invalid_param',
@@ -67,7 +132,7 @@ const REFUSAL = {
 };
 
 /**
- * Answer the list request with one plan and reject every status change.
+ * Answer the list request with the listed plans and reject every PATCH.
  *
  * @param {Object} options apiFetch options.
  * @return {Promise} The mocked response.
@@ -78,10 +143,15 @@ const respond = ( options ) => {
 	}
 
 	return Promise.resolve( {
-		json: async () => [ PLAN ],
+		json: async () => listedPlans,
 		headers: { get: () => '1' },
 	} );
 };
+
+const getPatches = () =>
+	apiFetch.mock.calls
+		.map( ( [ options ] ) => options )
+		.filter( ( options ) => options.method === 'PATCH' );
 
 const getErrorNotices = () =>
 	select( noticesStore )
@@ -93,16 +163,20 @@ describe( 'PlanManager status changes', () => {
 	let container;
 	let root;
 
-	beforeEach( async () => {
-		jest.useFakeTimers();
-		apiFetch.mockImplementation( respond );
-		container = document.createElement( 'div' );
-		document.body.appendChild( container );
-
+	const render = async ( plans ) => {
+		listedPlans = plans;
 		await act( async () => {
 			root = createRoot( container );
 			root.render( <PlanManager /> );
 		} );
+	};
+
+	beforeEach( () => {
+		jest.useFakeTimers();
+		apiFetch.mockReset();
+		apiFetch.mockImplementation( respond );
+		container = document.createElement( 'div' );
+		document.body.appendChild( container );
 	} );
 
 	afterEach( () => {
@@ -116,9 +190,12 @@ describe( 'PlanManager status changes', () => {
 		jest.useRealTimers();
 	} );
 
-	const click = async ( label ) => {
+	const click = async ( label, planId = null ) => {
 		const button = [ ...container.querySelectorAll( 'button' ) ].find(
-			( candidate ) => candidate.textContent === label
+			( candidate ) =>
+				candidate.textContent === label &&
+				( planId === null ||
+					candidate.dataset.planId === String( planId ) )
 		);
 
 		await act( async () => {
@@ -129,6 +206,7 @@ describe( 'PlanManager status changes', () => {
 	it.each( [ 'Archive', 'Restore' ] )(
 		'shows every reason when %s is refused',
 		async ( label ) => {
+			await render( [ PLAN ] );
 			await click( label );
 
 			expect( apiFetch ).toHaveBeenCalledWith(
@@ -144,4 +222,46 @@ describe( 'PlanManager status changes', () => {
 			] );
 		}
 	);
+
+	it( 'refuses to restore a plan whose active twin is loaded', async () => {
+		await render( [ ARCHIVED_TWIN, ACTIVE_TWIN ] );
+		await click( 'Restore', ARCHIVED_TWIN.id );
+
+		expect( getPatches() ).toEqual( [] );
+		expect( getErrorNotices() ).toEqual( [ RESTORE_REFUSAL ] );
+	} );
+
+	it( 'sends the restore when no active plan matches', async () => {
+		await render( [ ARCHIVED_TWIN, ACTIVE_OTHER ] );
+		await click( 'Restore', ARCHIVED_TWIN.id );
+
+		expect( getPatches() ).toEqual( [
+			expect.objectContaining( {
+				path: expect.stringMatching( /\/7$/ ),
+				data: expect.objectContaining( { status: 'active' } ),
+			} ),
+		] );
+		expect( getErrorNotices() ).not.toContain( RESTORE_REFUSAL );
+	} );
+
+	it( 'saves an edit to an archived plan whose active twin is loaded', async () => {
+		await render( [ ARCHIVED_TWIN, ACTIVE_TWIN ] );
+		await click( 'Edit', ARCHIVED_TWIN.id );
+		await click( 'Save' );
+
+		expect( getPatches() ).toEqual( [
+			expect.objectContaining( {
+				path: expect.stringMatching( /\/7$/ ),
+				data: expect.objectContaining( { name: 'Renamed' } ),
+			} ),
+		] );
+	} );
+
+	it( 'does not save an edit to an active plan that matches another', async () => {
+		await render( [ { ...ARCHIVED_TWIN, status: 'active' }, ACTIVE_TWIN ] );
+		await click( 'Edit', ARCHIVED_TWIN.id );
+		await click( 'Save' );
+
+		expect( getPatches() ).toEqual( [] );
+	} );
 } );
