@@ -30,6 +30,7 @@ declare( strict_types=1 );
 namespace Automattic\WooCommerce\SubscriptionsLite\CustomerPortal;
 
 use Automattic\WooCommerce\SubscriptionsLite\Package;
+use RuntimeException;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -175,7 +176,8 @@ final class Endpoints {
 	}
 
 	/**
-	 * Render the subscriptions list for the current customer.
+	 * Render the subscriptions list for the current customer, or an error notice when the
+	 * subscriptions cannot be read.
 	 *
 	 * @param int|string $endpoint_value Page number from the URL (or empty for page 1).
 	 */
@@ -186,9 +188,15 @@ final class Endpoints {
 
 		// The +1 probe answers "is there a next page" without a count read; the
 		// extra row never renders.
-		$contracts = $customer_id > 0
-			? $this->provider->get_contracts_for_customer( $customer_id, self::LIST_PER_PAGE + 1, ( $current_page - 1 ) * self::LIST_PER_PAGE )
-			: [];
+		try {
+			$contracts = $customer_id > 0
+				? $this->provider->get_contracts_for_customer( $customer_id, self::LIST_PER_PAGE + 1, ( $current_page - 1 ) * self::LIST_PER_PAGE )
+				: [];
+		} catch ( RuntimeException $e ) {
+			self::log_read_failure( sprintf( 'failed to read the subscriptions of customer %d', $customer_id ), $e );
+			self::print_read_failure_notice();
+			return;
+		}
 
 		$has_next  = count( $contracts ) > self::LIST_PER_PAGE;
 		$contracts = array_slice( $contracts, 0, self::LIST_PER_PAGE );
@@ -217,7 +225,7 @@ final class Endpoints {
 	}
 
 	/**
-	 * Render the detail page for a single contract.
+	 * Render the detail page for a single contract, or an error notice when it cannot be read.
 	 *
 	 * @param int|string $endpoint_value Contract id from the URL (or empty).
 	 */
@@ -225,9 +233,23 @@ final class Endpoints {
 		$contract_id = absint( $endpoint_value );
 		$customer_id = get_current_user_id();
 
-		$contract = ( $contract_id > 0 && $customer_id > 0 )
-			? $this->provider->get_contract( $contract_id, $customer_id )
-			: null;
+		// Read-only pagination arg; nothing state-changing happens on this read.
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended
+		$orders_page = isset( $_GET[ self::ORDERS_PAGE_QUERY_ARG ] ) ? max( 1, absint( wp_unslash( $_GET[ self::ORDERS_PAGE_QUERY_ARG ] ) ) ) : 1;
+
+		try {
+			$contract       = ( $contract_id > 0 && $customer_id > 0 )
+				? $this->provider->get_contract( $contract_id, $customer_id )
+				: null;
+			$related_orders = null !== $contract
+				? $this->provider->get_related_orders( $contract_id, self::RELATED_ORDERS_PER_PAGE, ( $orders_page - 1 ) * self::RELATED_ORDERS_PER_PAGE )
+				: null;
+		} catch ( RuntimeException $e ) {
+			// A read failure is not "not yours": the error notice, not the not-found template.
+			self::log_read_failure( sprintf( 'failed to read subscription %d', $contract_id ), $e, $contract_id );
+			self::print_read_failure_notice();
+			return;
+		}
 
 		// Asymmetric not-found: an unknown id, another customer's contract and
 		// another extension's contract all land here, indistinguishable to the
@@ -242,11 +264,6 @@ final class Endpoints {
 			return;
 		}
 
-		// Read-only pagination arg; nothing state-changing happens on this read.
-		// phpcs:ignore WordPress.Security.NonceVerification.Recommended
-		$orders_page = isset( $_GET[ self::ORDERS_PAGE_QUERY_ARG ] ) ? max( 1, absint( wp_unslash( $_GET[ self::ORDERS_PAGE_QUERY_ARG ] ) ) ) : 1;
-
-		$related_orders   = $this->provider->get_related_orders( $contract_id, self::RELATED_ORDERS_PER_PAGE, ( $orders_page - 1 ) * self::RELATED_ORDERS_PER_PAGE );
 		$orders_have_next = $related_orders['has_more'];
 		$related_orders   = $related_orders['orders'];
 
@@ -309,6 +326,28 @@ final class Endpoints {
 			(string) $contract_id,
 			wc_get_page_permalink( 'myaccount' )
 		);
+	}
+
+	/**
+	 * Print the error notice that replaces a portal page whose subscriptions could not be read.
+	 */
+	private static function print_read_failure_notice(): void {
+		wc_print_notice( __( 'Your subscriptions could not be loaded. Please try again later.', 'woocommerce-subscriptions-lite' ), 'error' );
+	}
+
+	/**
+	 * Log a failed portal read with the engine message, which the customer never sees.
+	 *
+	 * @param string           $context     What failed, without the class prefix.
+	 * @param RuntimeException $error       The read failure.
+	 * @param int              $contract_id The contract read, or 0 for the list.
+	 */
+	private static function log_read_failure( string $context, RuntimeException $error, int $contract_id = 0 ): void {
+		$log_context = [ 'source' => Package::EXTENSION_SLUG ];
+		if ( $contract_id > 0 ) {
+			$log_context['contract_id'] = $contract_id;
+		}
+		wc_get_logger()->error( sprintf( 'Endpoints: %s: %s', $context, $error->getMessage() ), $log_context );
 	}
 
 	/**

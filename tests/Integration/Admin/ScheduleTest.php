@@ -113,4 +113,21 @@ final class ScheduleTest extends LiteIntegrationTestCase {
 		Schedule::output( $contract );
 		return (string) ob_get_clean();
 	}
+
+	public function test_a_plan_that_cannot_be_read_shows_a_billing_row_that_says_so(): void {
+		$contract = Contracts::get( $this->create_contract( $this->create_customer() ) );
+		$this->assertNotNull( $contract );
+		$this->capture_log();
+
+		$this->fail_next_query( self::plan_read() );
+		ob_start();
+		Schedule::output( $contract );
+		$html = (string) ob_get_clean();
+
+		$this->assertStringContainsString( 'Billing', $html );
+		$this->assertStringContainsString( 'Could not be loaded.', $html );
+		$this->assertStringContainsString( 'Start date', $html, 'The dates still render.' );
+		$this->assertStringNotContainsString( 'table_that_does_not_exist', $html );
+		$this->assertTrue( $this->has_logged( 'table_that_does_not_exist' ), 'The engine message is logged.' );
+	}
 }

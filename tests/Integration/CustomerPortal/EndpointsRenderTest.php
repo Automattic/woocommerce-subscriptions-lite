@@ -15,6 +15,7 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\CustomerPor
 
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\CycleStatus;
+use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\SchemaInstaller;
 use Automattic\WooCommerce\SubscriptionsLite\CustomerPortal\Endpoints;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
@@ -450,5 +451,67 @@ final class EndpointsRenderTest extends LiteIntegrationTestCase {
 		$html = $this->capture( [ new Endpoints(), 'render_list' ] );
 
 		$this->assertStringContainsString( 'You have no subscriptions yet.', $html );
+	}
+
+	public function test_a_failed_list_read_renders_the_error_notice_not_the_empty_state(): void {
+		$this->create_contract( $this->customer_id );
+		$this->capture_log();
+
+		$this->fail_next_query( '/FROM ' . preg_quote( SchemaInstaller::get_table_name( SchemaInstaller::TABLE_CONTRACTS ), '/' ) . '\s+WHERE customer_id/' );
+		$html = $this->capture( [ new Endpoints(), 'render_list' ] );
+
+		$this->assertStringContainsString( 'Your subscriptions could not be loaded. Please try again later.', $html );
+		$this->assertStringNotContainsString( 'table_that_does_not_exist', $html );
+		$this->assertStringNotContainsString( 'wc-subs-lite-status-badge', $html, 'No list rows.' );
+		$this->assertStringNotContainsString( 'No subscriptions', $html, 'Not the empty state.' );
+		$this->assertTrue( $this->has_logged( 'table_that_does_not_exist' ), 'The engine message is logged.' );
+	}
+
+	public function test_a_failed_detail_read_renders_the_error_notice_not_not_found(): void {
+		$contract_id = $this->create_contract( $this->customer_id );
+		$endpoints   = new Endpoints();
+		$this->capture_log();
+
+		$this->fail_next_query( '/FROM ' . preg_quote( SchemaInstaller::get_table_name( SchemaInstaller::TABLE_CONTRACTS ), '/' ) . ' /' );
+		$html = $this->capture(
+			static function () use ( $endpoints, $contract_id ): void {
+				$endpoints->render_detail( $contract_id );
+			}
+		);
+
+		$this->assertStringContainsString( 'Your subscriptions could not be loaded. Please try again later.', $html );
+		$this->assertStringNotContainsString( 'Subscription not found.', $html );
+		$this->assertStringNotContainsString( 'table_that_does_not_exist', $html );
+		$this->assertTrue( $this->has_logged( 'table_that_does_not_exist' ), 'The engine message is logged.' );
+	}
+
+	public function test_a_failed_plan_read_on_the_detail_page_renders_the_error_notice(): void {
+		$contract_id = $this->create_contract( $this->customer_id );
+		$endpoints   = new Endpoints();
+
+		$this->fail_next_query( self::plan_read() );
+		$html = $this->capture(
+			static function () use ( $endpoints, $contract_id ): void {
+				$endpoints->render_detail( $contract_id );
+			}
+		);
+
+		$this->assertStringContainsString( 'Your subscriptions could not be loaded. Please try again later.', $html );
+		$this->assertStringNotContainsString( 'subscription-detail-block', $html );
+	}
+
+	public function test_a_failed_related_orders_read_renders_the_error_notice(): void {
+		$contract_id = $this->create_contract( $this->customer_id );
+		$endpoints   = new Endpoints();
+
+		$this->fail_next_query( '/FROM ' . preg_quote( SchemaInstaller::get_table_name( SchemaInstaller::TABLE_CYCLES ), '/' ) . ' WHERE contract_id/', 1 );
+		$html = $this->capture(
+			static function () use ( $endpoints, $contract_id ): void {
+				$endpoints->render_detail( $contract_id );
+			}
+		);
+
+		$this->assertStringContainsString( 'Your subscriptions could not be loaded. Please try again later.', $html );
+		$this->assertStringNotContainsString( 'subscription-detail-block', $html );
 	}
 }

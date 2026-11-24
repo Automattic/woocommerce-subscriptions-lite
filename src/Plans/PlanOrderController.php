@@ -4,7 +4,8 @@
  *
  * `POST wc/v3/subscriptions-lite/plans/reorder` with `{ ids: [ ... ] }` writes
  * the {@see PlanOrder} option. Every id must be a Lite-owned plan (any status);
- * the response echoes the saved ids. The engine's plans REST carries no order.
+ * the response echoes the saved ids, and plans that cannot be read answer a 500.
+ * The engine's plans REST carries no order.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Plans
  */
@@ -15,6 +16,7 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Plans;
 
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Plans;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
+use RuntimeException;
 use WP_Error;
 use WP_REST_Request;
 use WP_REST_Response;
@@ -83,13 +85,18 @@ final class PlanOrderController {
 		if ( count( $ids ) !== count( array_unique( $ids ) ) ) {
 			return self::invalid( __( 'Plan ids must not repeat.', 'woocommerce-subscriptions-lite' ) );
 		}
-		$owned_plans = [] === $ids ? [] : Plans::list(
-			[
-				'extension_slug' => Package::EXTENSION_SLUG,
-				'ids'            => $ids,
-				'limit'          => count( $ids ),
-			]
-		);
+		try {
+			$owned_plans = [] === $ids ? [] : Plans::list(
+				[
+					'extension_slug' => Package::EXTENSION_SLUG,
+					'ids'            => $ids,
+					'limit'          => count( $ids ),
+				]
+			);
+		} catch ( RuntimeException $e ) {
+			wc_get_logger()->error( 'PlanOrderController: failed to read the plans to reorder: ' . $e->getMessage(), [ 'source' => Package::EXTENSION_SLUG ] );
+			return new WP_Error( 'woocommerce_subscriptions_lite_plans_read_failed', __( 'The plans could not be read.', 'woocommerce-subscriptions-lite' ), [ 'status' => 500 ] );
+		}
 		if ( count( $owned_plans ) !== count( $ids ) ) {
 			return self::invalid( __( 'Every id must be an existing subscription plan of this store.', 'woocommerce-subscriptions-lite' ) );
 		}

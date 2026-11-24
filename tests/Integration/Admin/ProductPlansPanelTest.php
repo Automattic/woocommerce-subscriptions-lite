@@ -711,4 +711,44 @@ final class ProductPlansPanelTest extends LiteIntegrationTestCase {
 
 		return (string) ob_get_clean();
 	}
+
+	public function test_the_panel_shows_an_inline_error_when_the_plans_cannot_be_read(): void {
+		$product = $this->simple_product();
+		$this->named_plan( 'Monthly' );
+		$this->capture_log();
+
+		$this->fail_next_query( self::plan_read() );
+		$html = $this->render_panel_for( $product );
+
+		$this->assertStringContainsString( 'The subscription plans could not be loaded.', $html );
+		$this->assertStringNotContainsString( 'No storewide subscription plans yet.', $html );
+		$this->assertStringNotContainsString( 'data-wcsl-plan-checkbox', $html );
+		$this->assertStringNotContainsString( 'table_that_does_not_exist', $html );
+		$this->assertTrue( $this->has_logged( 'table_that_does_not_exist' ), 'The engine message is logged.' );
+	}
+
+	public function test_a_save_whose_plans_cannot_be_read_records_a_metabox_error_and_writes_nothing(): void {
+		$product = $this->simple_product();
+		$plan    = $this->named_plan( 'Monthly' );
+		$this->preset_inherit_all( $product );
+		$this->seed_post(
+			[
+				ProductPlansPanel::POST_PURCHASE_MODE => ProductPlansPanel::MODE_PLANS,
+				ProductPlansPanel::POST_PLANS_SCOPE   => ProductPlansPanel::SCOPE_SELECT,
+				ProductPlansPanel::POST_PLAN_IDS      => [ (string) $plan->get_id() ],
+			]
+		);
+		$this->capture_log();
+
+		$this->fail_next_query( self::plan_read() );
+		( new ProductPlansPanel() )->save( $product );
+
+		$this->assertSame( [ 'The subscription plans could not be saved right now. Please try again.' ], WC_Admin_Meta_Boxes::$meta_box_errors );
+		$this->assertSame(
+			ProductApplicability::MODE_INHERIT_ALL,
+			( new ApplicabilityStore() )->get( $product->get_id() )->get_mode(),
+			'The stored applicability is untouched.'
+		);
+		$this->assertTrue( $this->has_logged( 'table_that_does_not_exist' ), 'The engine message is logged.' );
+	}
 }

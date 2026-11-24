@@ -799,4 +799,33 @@ final class PlanWriteValidationTest extends LiteIntegrationTestCase {
 			$this->assertSame( $args, $actual_args, "Each top-level arg has a `$key` entry." );
 		}
 	}
+
+	public function test_a_failed_stored_plan_read_refuses_the_write(): void {
+		$id = $this->plan_id( $this->create_plan( [ 'policies' => [] ] ) );
+		$this->set_plan_status( $id, 'archived' );
+		// Break the stored-plan read the validation makes, not the engine's own reads before it.
+		add_action(
+			'woocommerce_subscriptions_engine_validate_plan',
+			function (): void {
+				$this->fail_next_query( self::plan_read() );
+			},
+			1
+		);
+
+		$response = $this->patch_plan(
+			$id,
+			[
+				'policies' => [
+					[
+						'type'  => 'percentage',
+						'value' => 5,
+					],
+				],
+			]
+		);
+
+		$this->assertSame( 500, $response->get_status() );
+		$this->assertSame( 'woocommerce_subscriptions_engine_plan_validation_failed', $response->get_data()['code'] );
+		$this->assertSame( [], $this->fetch_pricing_policy( $id )['policies'], 'The plan is not written.' );
+	}
 }
