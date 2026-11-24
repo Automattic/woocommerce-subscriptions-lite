@@ -379,4 +379,24 @@ final class DeadRenewalOrderTest extends LiteIntegrationTestCase {
 		$this->assertSame( CycleStatus::FAILED, $head->get_status() );
 		$this->assert_lock_released( $contract_id );
 	}
+
+	/**
+	 * A replaced order paid late whose renewal read fails must not read as "renewal gone" and be
+	 * flagged for a refund: the failure is logged and the renewal left as it was.
+	 */
+	public function test_a_replaced_order_paid_late_whose_renewal_read_fails_is_not_flagged_for_a_refund(): void {
+		[ $contract_id, $order ] = $this->replace_a_cancelled_renewal( 'failed' );
+		$this->capture_log();
+
+		$this->fail_next_query( '/FROM ' . preg_quote( SchemaInstaller::get_table_name( SchemaInstaller::TABLE_CYCLES ), '/' ) . ' WHERE contract_id/' );
+		wc_get_order( $order->get_id() )->payment_complete();
+
+		$this->assertTrue( $this->has_logged( sprintf( 'settling renewal order %d failed', $order->get_id() ) ) );
+		$this->assertSame( '', (string) wc_get_order( $order->get_id() )->get_meta( '_wcsl_refund_flagged' ) );
+		$this->assertSame( [], $this->get_order_notes_containing( $order->get_id(), 'Refund this payment' ) );
+		$head = $this->head( $contract_id );
+		$this->assertSame( CycleStatus::FAILED, $head->get_status() );
+		$this->assertNotSame( $order->get_id(), $head->get_order_id(), 'Not relinked.' );
+		$this->assert_lock_released( $contract_id );
+	}
 }

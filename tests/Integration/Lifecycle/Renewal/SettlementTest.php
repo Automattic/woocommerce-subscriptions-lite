@@ -777,4 +777,23 @@ final class SettlementTest extends LiteIntegrationTestCase {
 		$this->assertSame( ContractStatus::ACTIVE, $this->get_contract( $contract_id )->get_status(), 'The contract is not held.' );
 		$this->assertTrue( $this->has_logged( 'was paid and then deleted before its settlement' ) );
 	}
+
+	/**
+	 * A failed cycle lookup must not read as "no cycle linked" (a replaced order): the failure is
+	 * logged and the order left unsettled, never flagged for a refund.
+	 */
+	public function test_a_failed_cycle_lookup_on_a_paid_order_is_logged_and_settles_nothing(): void {
+		[ $contract_id, $order ] = $this->seed_renewal();
+		$order->payment_complete();
+		$this->capture_log();
+
+		$this->fail_next_query( '/FROM ' . preg_quote( SchemaInstaller::get_table_name( SchemaInstaller::TABLE_CYCLES ), '/' ) . ' WHERE order_id/' );
+		( new Settlement() )->handle_order( $order->get_id() );
+
+		$this->assertTrue( $this->has_logged( sprintf( 'settling renewal order %d failed', $order->get_id() ) ) );
+		$this->assertSame( CycleStatus::PENDING, $this->head( $contract_id )->get_status() );
+		$this->assertSame( '', (string) wc_get_order( $order->get_id() )->get_meta( '_wcsl_refund_flagged' ) );
+		$this->assertSame( [], $this->get_order_notes_containing( $order->get_id(), 'Refund this payment' ) );
+		$this->assertSame( [], $this->fired );
+	}
 }

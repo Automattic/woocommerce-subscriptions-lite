@@ -14,6 +14,8 @@ use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\CycleStatus;
+use Automattic\WooCommerce\SubscriptionsEngine\Integration\Dispatch\DueDispatcher;
+use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\SchemaInstaller;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\ContractDueHandler;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\HeldLocks;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
@@ -141,5 +143,48 @@ final class ContractDueHandlerTest extends LiteIntegrationTestCase {
 		}
 
 		$this->assertTrue( $this->has_logged( 'renewing contract ' . $contract_id . ' failed' ) );
+	}
+
+	/**
+	 * The renewal's reads: the plan list (billing terms) and the cycle chain.
+	 *
+	 * @return array<string, array{0: string}>
+	 */
+	public function provide_renewal_reads(): array {
+		return [
+			'the plan read'  => [ SchemaInstaller::TABLE_PLANS ],
+			'the cycle read' => [ SchemaInstaller::TABLE_CYCLES ],
+		];
+	}
+
+	/**
+	 * A failed read must never read as "no terms" or "no chain", which would clear the schedule:
+	 * the failure reaches the dispatcher, which keeps its lock, so a later tick renews.
+	 *
+	 * @dataProvider provide_renewal_reads
+	 * @param string $table Engine table whose read fails.
+	 */
+	public function test_a_failed_read_in_the_renewal_keeps_the_schedule_and_the_dispatchers_lock( string $table ): void {
+		$this->support_engine_charges( 'cod' );
+		$contract_id = $this->create_contract( $this->create_customer(), [ 'payment_method' => 'cod' ] );
+		$now         = new DateTimeImmutable( '2026-02-16 00:00:00', new DateTimeZone( 'UTC' ) );
+		$this->capture_log();
+
+		$this->fail_next_query( '/FROM ' . preg_quote( SchemaInstaller::get_table_name( $table ), '/' ) . ' WHERE /' );
+		$this->run_due_dispatch( $now );
+
+		$contract = $this->get_contract( $contract_id );
+		$this->assertSame( '2026-02-15 00:00:00', $contract->get_next_payment_gmt(), 'The schedule is kept.' );
+		$this->assertSame( ContractStatus::ACTIVE, $contract->get_status() );
+		$this->assertSame( DueDispatcher::LOCK_OPERATION, $contract->get_lock_state()['operation'] ?? null, 'The dispatcher keeps the lock until it expires.' );
+		$this->assertSame( 0, $this->charge_count() );
+		$this->assertCount( 1, Contracts::get_cycles( $contract_id ) );
+		$this->assertTrue( $this->has_logged( 'ContractDueHandler' ), 'The handler logs the failure.' );
+
+		$this->run_due_dispatch_after_locks_expire( $now );
+
+		$this->assertSame( 1, $this->charge_count(), 'A later tick renews.' );
+		$this->assertCount( 2, Contracts::get_cycles( $contract_id ) );
+		$this->assertNotSame( '2026-02-15 00:00:00', $this->get_contract( $contract_id )->get_next_payment_gmt(), 'The schedule moves on.' );
 	}
 }
