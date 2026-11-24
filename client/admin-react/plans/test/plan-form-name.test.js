@@ -39,7 +39,14 @@ const storedPlan = {
 	name: 'Lite monthly coffee refill',
 	billing_policy: { period: 'month', interval: 1 },
 	pricing_policy: {
-		policies: [ { type: 'percentage', value: 10, starting_cycle: 2 } ],
+		policies: [
+			{
+				field: 'discount',
+				type: 'percentage',
+				value: 10,
+				starting_cycle: 2,
+			},
+		],
 		one_time_fees: [],
 	},
 	status: 'active',
@@ -137,9 +144,9 @@ describe( 'PlanForm name field', () => {
 		const payload = onSave.mock.calls[ 0 ][ 0 ];
 		expect( payload.name ).toBe( 'Lite monthly coffee refill' );
 		expect( payload.billing_policy.interval ).toBe( 3 );
-		expect( payload.pricing_policy.policies ).toEqual( [
-			{ type: 'percentage', value: 10, starting_cycle: 2 },
-		] );
+		expect( payload.pricing_policy.policies ).toEqual(
+			storedPlan.pricing_policy.policies
+		);
 	} );
 
 	it( 'saves a renamed plan', () => {

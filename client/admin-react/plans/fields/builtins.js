@@ -26,15 +26,18 @@
  * also calls it while rendering an unnamed new plan, on unvalidated data, to
  * suggest the name.
  *
- * Pricing: the discount field creates `pricing_policy` and owns
- * `policies[0]`. On edit it passes on the stored entries after the first, so
- * another pricing field registers AFTER discount and replaces its own entry
- * by key. Registering a pricing field before discount is unsupported. After
- * the discount is cleared, `policies` is empty.
- *
- * Known limitation: the discount entry is found by position. When a plan has
- * no discount, an injected field's entry can sit at `policies[0]`, and the
- * form then treats it as the discount.
+ * Pricing: the discount field creates `pricing_policy` and edits the first
+ * `policies` entry that carries its marker (`field: 'discount'`, see
+ * isDiscountEntry() in ./discount-marker.js); position plays no part, and
+ * an unmarked entry is never the discount. It writes the marker on its entry, keeps an edited entry in
+ * its stored position, inserts a new one first, and passes on every other
+ * stored entry unchanged. Clearing the discount removes only the marked
+ * entry and keeps every other entry in place. Another pricing field
+ * registers AFTER discount, finds its own entry by its own key and replaces
+ * it; it never writes the discount marker. Registering a pricing field
+ * before discount is unsupported: discount appends every stored entry after
+ * the entries already in the payload, so such a field's stored entry is
+ * duplicated on every save and the price compounds.
  */
 
 import { __ } from '@wordpress/i18n';
@@ -43,6 +46,11 @@ import { FrequencyEdit } from '../components/fields/frequency-field';
 import { ExpirationEdit } from '../components/fields/expiration-field';
 import { DiscountEdit } from '../components/fields/discount-field';
 import { formatFrequency, formatDiscount, formatExpiration } from '../format';
+import {
+	DISCOUNT_MARKER_KEY,
+	DISCOUNT_MARKER_VALUE,
+	isDiscountEntry,
+} from './discount-marker';
 
 /**
  * The built-in field descriptors, in render order.
@@ -118,12 +126,12 @@ export function builtInFields() {
 			},
 			Edit: DiscountEdit,
 			fromPlan: ( plan ) => {
-				const firstPolicy = Array.isArray(
+				const discountEntry = Array.isArray(
 					plan.pricing_policy?.policies
 				)
-					? plan.pricing_policy.policies[ 0 ]
+					? plan.pricing_policy.policies.find( isDiscountEntry )
 					: null;
-				const durationCycles = firstPolicy?.duration_cycles || '';
+				const durationCycles = discountEntry?.duration_cycles || '';
 				let pricingScope = 'all';
 				if ( Number( durationCycles ) === 1 ) {
 					pricingScope = 'first';
@@ -132,25 +140,25 @@ export function builtInFields() {
 				}
 				// BOGO entries are value-less; a stored value is ignored, so the
 				// value field stays empty rather than surfacing a stray "0".
-				const isBogo = firstPolicy?.type === 'bogo';
+				const isBogo = discountEntry?.type === 'bogo';
 				return {
-					pricingType: firstPolicy?.type || 'percentage',
-					pricingValue: isBogo ? '' : firstPolicy?.value ?? '',
+					pricingType: discountEntry?.type || 'percentage',
+					pricingValue: isBogo ? '' : discountEntry?.value ?? '',
 					pricingScope,
 					durationCycles,
 				};
 			},
 			toPayload: ( formData, payload, plan ) => {
 				// A PATCH replaces the whole pricing_policy, so an edit starts
-				// from the stored payload: top-level keys, the keys of the first
-				// entry this field does not edit (e.g. starting_cycle), and the
-				// entries after the first, which this field does not show.
+				// from the stored payload: top-level keys, the keys of the
+				// discount entry this field does not edit (e.g. starting_cycle),
+				// and every other entry, which this field does not show.
 				const existing = plan?.pricing_policy || {};
-				const [ storedEntry = {}, ...otherEntries ] = Array.isArray(
-					existing.policies
-				)
+				const storedEntries = Array.isArray( existing.policies )
 					? existing.policies
 					: [];
+				const discountIndex =
+					storedEntries.findIndex( isDiscountEntry );
 				const pricing = payload.pricing_policy || {
 					...existing,
 					policies: [],
@@ -161,13 +169,12 @@ export function builtInFields() {
 
 				// BOGO is a value-less policy, so it is written even though the
 				// value field is empty; every other type needs a value to apply.
-				// Clearing the discount removes every entry, hidden ones too:
-				// the plan then has no discount at all.
 				const isBogo = formData.pricingType === 'bogo';
-				const entries = [];
+				let entries = storedEntries;
 				if ( isBogo || formData.pricingValue !== '' ) {
 					const entry = {
-						...storedEntry,
+						...( storedEntries[ discountIndex ] || {} ),
+						[ DISCOUNT_MARKER_KEY ]: DISCOUNT_MARKER_VALUE,
 						type: formData.pricingType,
 					};
 					if ( isBogo ) {
@@ -184,7 +191,20 @@ export function builtInFields() {
 					} else {
 						delete entry.duration_cycles;
 					}
-					entries.push( entry, ...otherEntries );
+					// An edited discount keeps its stored position, as entries
+					// apply in order; a new one goes first.
+					entries =
+						discountIndex === -1
+							? [ entry, ...storedEntries ]
+							: storedEntries.map( ( stored, index ) =>
+									index === discountIndex ? entry : stored
+							  );
+				} else if ( discountIndex !== -1 ) {
+					// Clearing the discount removes only its entry; the
+					// entries this field does not show stay in place.
+					entries = storedEntries.filter(
+						( stored, index ) => index !== discountIndex
+					);
 				}
 
 				return {

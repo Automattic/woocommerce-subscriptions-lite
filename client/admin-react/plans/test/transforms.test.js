@@ -18,7 +18,14 @@ const samplePlan = {
 	description: 'A monthly plan',
 	billing_policy: { period: 'month', interval: 2, max_cycles: 6 },
 	pricing_policy: {
-		policies: [ { type: 'percentage', value: 10, duration_cycles: 3 } ],
+		policies: [
+			{
+				field: 'discount',
+				type: 'percentage',
+				value: 10,
+				duration_cycles: 3,
+			},
+		],
 		one_time_fees: [
 			{ kind: 'signup_fee', amount: 5, taxable: false, tax_class: null },
 		],
@@ -71,9 +78,9 @@ describe( 'registry transforms', () => {
 			interval: 2,
 			max_cycles: 6,
 		} );
-		expect( payload.pricing_policy.policies ).toEqual( [
-			{ type: 'percentage', value: 10, duration_cycles: 3 },
-		] );
+		expect( payload.pricing_policy.policies ).toEqual(
+			samplePlan.pricing_policy.policies
+		);
 		// No status key when editing.
 		expect( payload.status ).toBeUndefined();
 	} );
@@ -132,9 +139,9 @@ describe( 'registry transforms', () => {
 		).pricing_policy;
 
 		expect( pricing.custom_key ).toEqual( { kept: true } );
-		expect( pricing.policies ).toEqual( [
-			{ type: 'percentage', value: 10, duration_cycles: 3 },
-		] );
+		expect( pricing.policies ).toEqual(
+			samplePlan.pricing_policy.policies
+		);
 		expect( pricing.one_time_fees ).toEqual(
 			samplePlan.pricing_policy.one_time_fees
 		);
@@ -254,6 +261,7 @@ describe( 'registry transforms', () => {
 
 		it( 'keeps starting_cycle and unknown keys through an edit', () => {
 			const plan = planWithEntry( {
+				field: 'discount',
 				type: 'percentage',
 				value: 10,
 				starting_cycle: 3,
@@ -265,6 +273,7 @@ describe( 'registry transforms', () => {
 				payloadFor( plan, { pricingValue: 15, interval: 1 } )
 			).toEqual( [
 				{
+					field: 'discount',
 					type: 'percentage',
 					value: 15,
 					starting_cycle: 3,
@@ -276,6 +285,7 @@ describe( 'registry transforms', () => {
 
 		it( 'keeps starting_cycle when the scope drops duration_cycles', () => {
 			const plan = planWithEntry( {
+				field: 'discount',
 				type: 'percentage',
 				value: 10,
 				starting_cycle: 2,
@@ -283,12 +293,18 @@ describe( 'registry transforms', () => {
 			} );
 
 			expect( payloadFor( plan, { pricingScope: 'all' } ) ).toEqual( [
-				{ type: 'percentage', value: 10, starting_cycle: 2 },
+				{
+					field: 'discount',
+					type: 'percentage',
+					value: 10,
+					starting_cycle: 2,
+				},
 			] );
 		} );
 
 		it( 'keeps starting_cycle and drops the value when switching to BOGO', () => {
 			const plan = planWithEntry( {
+				field: 'discount',
 				type: 'fixed_amount',
 				value: 5,
 				starting_cycle: 2,
@@ -296,31 +312,100 @@ describe( 'registry transforms', () => {
 
 			expect(
 				payloadFor( plan, { pricingType: 'bogo', pricingValue: '' } )
-			).toEqual( [ { type: 'bogo', starting_cycle: 2 } ] );
+			).toEqual( [
+				{ field: 'discount', type: 'bogo', starting_cycle: 2 },
+			] );
 		} );
 
-		it( 'keeps the entries after the first, which the form does not show', () => {
+		it( 'keeps the entries after the discount, which the form does not show', () => {
 			const second = {
 				type: 'fixed_amount',
 				value: 2,
 				starting_cycle: 6,
 			};
 			const plan = planWithEntry(
-				{ type: 'percentage', value: 10, duration_cycles: 3 },
+				{
+					field: 'discount',
+					type: 'percentage',
+					value: 10,
+					duration_cycles: 3,
+				},
 				second
 			);
 
 			expect( payloadFor( plan, { pricingValue: 20 } ) ).toEqual( [
-				{ type: 'percentage', value: 20, duration_cycles: 3 },
+				{
+					field: 'discount',
+					type: 'percentage',
+					value: 20,
+					duration_cycles: 3,
+				},
 				second,
 			] );
 		} );
 
-		it( 'removes every entry when the discount is cleared, and reloads with none', () => {
+		it( 'does not show an unmarked entry at index 0 as the discount', () => {
+			const registry = buildFieldRegistry();
+			const unmarked = { type: 'percentage', value: 10 };
+			const plan = planWithEntry( unmarked );
+
+			expect( planToFormData( registry, plan ) ).toMatchObject( {
+				pricingType: 'percentage',
+				pricingValue: '',
+				pricingScope: 'all',
+			} );
+		} );
+
+		it( 'finds a marked discount that is not the first entry', () => {
 			const registry = buildFieldRegistry();
 			const plan = planWithEntry(
-				{ type: 'percentage', value: 10, starting_cycle: 2 },
-				{ type: 'fixed_amount', value: 2, starting_cycle: 6 }
+				{ type: 'fixed_amount', value: 2 },
+				{ field: 'discount', type: 'percentage', value: 15 }
+			);
+
+			expect( planToFormData( registry, plan ) ).toMatchObject( {
+				pricingType: 'percentage',
+				pricingValue: 15,
+			} );
+		} );
+
+		it( 'keeps an edited discount at its stored position', () => {
+			const first = { type: 'fixed_amount', value: 2 };
+			const last = { type: 'price', value: 8, starting_cycle: 4 };
+			const plan = planWithEntry(
+				first,
+				{ field: 'discount', type: 'percentage', value: 15 },
+				last
+			);
+
+			expect( payloadFor( plan, { pricingValue: 25 } ) ).toEqual( [
+				first,
+				{ field: 'discount', type: 'percentage', value: 25 },
+				last,
+			] );
+		} );
+
+		it( 'inserts a new discount before the stored entries', () => {
+			const unmarked = { type: 'fixed_amount', value: 2 };
+			const plan = planWithEntry( unmarked );
+
+			expect( payloadFor( plan, { pricingValue: 10 } ) ).toEqual( [
+				{ field: 'discount', type: 'percentage', value: 10 },
+				unmarked,
+			] );
+		} );
+
+		it( 'removes only the discount entry when it is cleared, and reloads with none', () => {
+			const registry = buildFieldRegistry();
+			const other = { type: 'fixed_amount', value: 2, starting_cycle: 6 };
+			const plan = planWithEntry(
+				{
+					field: 'discount',
+					type: 'percentage',
+					value: 10,
+					starting_cycle: 2,
+				},
+				other
 			);
 			const formData = {
 				...planToFormData( registry, plan ),
@@ -331,11 +416,36 @@ describe( 'registry transforms', () => {
 				...formDataToPayload( registry, formData, plan ),
 			};
 
-			expect( saved.pricing_policy.policies ).toEqual( [] );
+			expect( saved.pricing_policy.policies ).toEqual( [ other ] );
 			expect( saved.pricing_policy.one_time_fees ).toEqual(
 				samplePlan.pricing_policy.one_time_fees
 			);
 			expect( planToFormData( registry, saved ).pricingValue ).toBe( '' );
+		} );
+
+		it( 'keeps the other entries in order when a discount between them is cleared', () => {
+			const first = { type: 'fixed_amount', value: 2 };
+			const last = { type: 'percentage', value: 5, starting_cycle: 3 };
+			const plan = planWithEntry(
+				first,
+				{ field: 'discount', type: 'percentage', value: 10 },
+				last
+			);
+
+			expect( payloadFor( plan, { pricingValue: '' } ) ).toEqual( [
+				first,
+				last,
+			] );
+		} );
+
+		it( 'keeps every entry of a plan with no discount when the discount stays empty', () => {
+			const entries = [
+				{ type: 'percentage', value: 10, starting_cycle: 2 },
+				{ type: 'fixed_amount', value: 2, starting_cycle: 6 },
+			];
+			const plan = planWithEntry( ...entries );
+
+			expect( payloadFor( plan, { interval: 3 } ) ).toEqual( entries );
 		} );
 
 		it( 'keeps the hidden entries across a save and reload', () => {
@@ -346,7 +456,12 @@ describe( 'registry transforms', () => {
 				starting_cycle: 6,
 			};
 			const plan = planWithEntry(
-				{ type: 'percentage', value: 10, starting_cycle: 2 },
+				{
+					field: 'discount',
+					type: 'percentage',
+					value: 10,
+					starting_cycle: 2,
+				},
 				second
 			);
 			const saved = {
@@ -364,7 +479,12 @@ describe( 'registry transforms', () => {
 			);
 
 			expect( resaved.pricing_policy.policies ).toEqual( [
-				{ type: 'percentage', value: 20, starting_cycle: 2 },
+				{
+					field: 'discount',
+					type: 'percentage',
+					value: 20,
+					starting_cycle: 2,
+				},
 				second,
 			] );
 		} );
@@ -377,7 +497,14 @@ describe( 'registry transforms', () => {
 			billing_policy: { period: 'month', interval: 1 },
 			pricing_policy: {
 				// BOGO entries are value-less; a stored value is ignored.
-				policies: [ { type: 'bogo', value: 0, duration_cycles: 1 } ],
+				policies: [
+					{
+						field: 'discount',
+						type: 'bogo',
+						value: 0,
+						duration_cycles: 1,
+					},
+				],
 				one_time_fees: [],
 			},
 			status: 'active',
@@ -398,7 +525,7 @@ describe( 'registry transforms', () => {
 			const formData = planToFormData( registry, bogoPlan );
 			const payload = formDataToPayload( registry, formData, bogoPlan );
 			expect( payload.pricing_policy.policies ).toEqual( [
-				{ type: 'bogo', duration_cycles: 1 },
+				{ field: 'discount', type: 'bogo', duration_cycles: 1 },
 			] );
 			// BOGO carries no numeric amount.
 			expect( payload.pricing_policy.policies[ 0 ] ).not.toHaveProperty(
@@ -419,7 +546,7 @@ describe( 'registry transforms', () => {
 				null
 			);
 			expect( payload.pricing_policy.policies ).toEqual( [
-				{ type: 'bogo' },
+				{ field: 'discount', type: 'bogo' },
 			] );
 		} );
 	} );
@@ -520,6 +647,7 @@ describe( 'registry transforms', () => {
 		it( 'sees its stored entry once, with the hidden entries, across two saves', () => {
 			const registry = buildFieldRegistry();
 			const discount = {
+				field: 'discount',
 				type: 'percentage',
 				value: 10,
 				duration_cycles: 3,
@@ -557,6 +685,148 @@ describe( 'registry transforms', () => {
 			seen.forEach( ( policies ) =>
 				expect( policies.filter( isLoyalty ) ).toHaveLength( 1 )
 			);
+		} );
+
+		it( 'keeps its entry when a discount is set on a plan with none', () => {
+			const registry = buildFieldRegistry();
+			const storedLoyalty = { ...loyaltyEntry, value: 4 };
+			const plan = {
+				...samplePlan,
+				pricing_policy: {
+					...samplePlan.pricing_policy,
+					policies: [ storedLoyalty ],
+				},
+			};
+
+			expect( planToFormData( registry, plan ).pricingValue ).toBe( '' );
+
+			const saved = {
+				...plan,
+				...formDataToPayload(
+					registry,
+					{
+						...planToFormData( registry, plan ),
+						pricingType: 'percentage',
+						pricingValue: 10,
+						pricingScope: 'all',
+					},
+					plan
+				),
+			};
+			const discount = {
+				field: 'discount',
+				type: 'percentage',
+				value: 10,
+			};
+
+			// The discount field passes the stored entry on untouched.
+			expect( seen[ 0 ] ).toEqual( [ discount, storedLoyalty ] );
+			expect( saved.pricing_policy.policies ).toEqual( [
+				discount,
+				loyaltyEntry,
+			] );
+			expect( planToFormData( registry, saved ) ).toMatchObject( {
+				pricingType: 'percentage',
+				pricingValue: 10,
+			} );
+			expect( saved.pricing_policy.policies[ 1 ] ).not.toHaveProperty(
+				'field'
+			);
+		} );
+
+		it( 'keeps every entry of a plan with no discount on a frequency-only save', () => {
+			const registry = buildFieldRegistry();
+			const hidden = {
+				type: 'fixed_amount',
+				value: 2,
+				starting_cycle: 6,
+			};
+			const plan = {
+				...samplePlan,
+				pricing_policy: {
+					...samplePlan.pricing_policy,
+					policies: [ loyaltyEntry, hidden ],
+				},
+			};
+			const payload = formDataToPayload(
+				registry,
+				{ ...planToFormData( registry, plan ), interval: 3 },
+				plan
+			);
+
+			expect( payload.billing_policy.interval ).toBe( 3 );
+			expect( payload.pricing_policy.policies ).toEqual( [
+				loyaltyEntry,
+				hidden,
+			] );
+		} );
+	} );
+
+	describe( 'injected field registered before discount', () => {
+		const NAMESPACE = 'test/loyalty-before-discount';
+		const loyaltyEntry = {
+			type: 'fixed_amount',
+			value: 3,
+			source: 'loyalty',
+		};
+
+		beforeEach( () => {
+			// Shows its stored entry and writes no pricing, so the discount
+			// field passes the entry on.
+			addFilter( PLAN_FIELDS_FILTER, NAMESPACE, ( fields ) => [
+				{
+					id: 'loyalty',
+					fromPlan: ( plan ) => ( {
+						loyaltyValue:
+							plan.pricing_policy?.policies?.find(
+								( entry ) => entry.source === 'loyalty'
+							)?.value ?? '',
+					} ),
+					toPayload: ( formData, payload ) => payload,
+				},
+				...fields,
+			] );
+		} );
+
+		afterEach( () => {
+			removeFilter( PLAN_FIELDS_FILTER, NAMESPACE );
+		} );
+
+		it( 'still finds the discount and keeps its position across two saves', () => {
+			const registry = buildFieldRegistry();
+			const plan = {
+				...samplePlan,
+				pricing_policy: {
+					...samplePlan.pricing_policy,
+					policies: [
+						loyaltyEntry,
+						{ field: 'discount', type: 'percentage', value: 10 },
+					],
+				},
+			};
+
+			expect( planToFormData( registry, plan ) ).toMatchObject( {
+				loyaltyValue: 3,
+				pricingValue: 10,
+			} );
+
+			const save = ( stored, patch ) => ( {
+				...stored,
+				...formDataToPayload(
+					registry,
+					{ ...planToFormData( registry, stored ), ...patch },
+					stored
+				),
+			} );
+			const once = save( plan, { pricingValue: 12 } );
+			const twice = save( once, { interval: 4 } );
+
+			const expected = [
+				loyaltyEntry,
+				{ field: 'discount', type: 'percentage', value: 12 },
+			];
+			expect( once.pricing_policy.policies ).toEqual( expected );
+			expect( twice.pricing_policy.policies ).toEqual( expected );
 		} );
 	} );
 

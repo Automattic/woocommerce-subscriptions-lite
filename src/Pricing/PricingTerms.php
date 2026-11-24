@@ -5,9 +5,13 @@
  * The engine stores `pricing_policy` as an opaque extension payload; Lite owns
  * its meaning. Shape:
  *   {
- *     policies: [ { type: percentage|fixed_amount|price|bogo, value: float, starting_cycle?: int, duration_cycles?: int }, ... ],
+ *     policies: [ { type: percentage|fixed_amount|price|bogo, value: float, starting_cycle?: int, duration_cycles?: int, field?: string }, ... ],
  *     one_time_fees: [ { kind: string, amount: float, taxable: bool, tax_class: string|null }, ... ]
  *   }
+ *
+ * `field: 'discount'` marks the entry the plans editor's discount field edits;
+ * other writers must not set `field` to `discount`. PHP ignores the key:
+ * writes accept it and reads drop it.
  *
  * Reads are tolerant and never throw ({@see self::from_array()}): entries that
  * break the type or range rules are dropped, but structure is coerced rather

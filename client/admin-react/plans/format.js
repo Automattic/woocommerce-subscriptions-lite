@@ -6,6 +6,7 @@
 
 import { __, _n, sprintf } from '@wordpress/i18n';
 import { config } from './config';
+import { isDiscountEntry } from './fields/discount-marker';
 
 /**
  * Placeholder rendered in list cells with no value (em dash).
@@ -80,7 +81,8 @@ export function formatCurrency( value, currency = config.currency ) {
 }
 
 /**
- * Format a plan's first pricing policy as a discount label.
+ * Format a plan's discount entry (the pricing entry that carries the discount
+ * marker) as a discount label.
  *
  * @param {Object} plan     Engine plan object.
  * @param {Object} currency Currency settings for monetary discount types.
@@ -88,36 +90,39 @@ export function formatCurrency( value, currency = config.currency ) {
  *                  placeholder when no discount applies.
  */
 export function formatDiscount( plan, currency = config.currency ) {
-	const firstPolicy = plan.pricing_policy?.policies?.[ 0 ];
-	if ( ! firstPolicy ) {
+	const policies = plan.pricing_policy?.policies;
+	const discountEntry = Array.isArray( policies )
+		? policies.find( isDiscountEntry )
+		: null;
+	if ( ! discountEntry ) {
 		return EMPTY_VALUE;
 	}
 
-	const value = Number( firstPolicy.value || 0 );
+	const value = Number( discountEntry.value || 0 );
 	let label = EMPTY_VALUE;
-	if ( firstPolicy.type === 'percentage' ) {
+	if ( discountEntry.type === 'percentage' ) {
 		label = sprintf(
 			/* translators: %s: discount percentage value, e.g. '14' for "14%". */
 			__( '%s%%', 'woocommerce-subscriptions-lite' ),
 			value
 		);
 	} else if (
-		firstPolicy.type === 'fixed_amount' ||
-		firstPolicy.type === 'price'
+		discountEntry.type === 'fixed_amount' ||
+		discountEntry.type === 'price'
 	) {
 		label = formatCurrency( value, currency );
-	} else if ( firstPolicy.type === 'bogo' ) {
+	} else if ( discountEntry.type === 'bogo' ) {
 		label = __( 'Buy one, get one', 'woocommerce-subscriptions-lite' );
 	}
 
-	if ( Number( firstPolicy.duration_cycles ) === 1 ) {
+	if ( Number( discountEntry.duration_cycles ) === 1 ) {
 		return `${ label } (${ __(
 			'first cycle',
 			'woocommerce-subscriptions-lite'
 		) })`;
 	}
-	if ( Number( firstPolicy.duration_cycles ) > 1 ) {
-		return `${ label } (${ firstPolicy.duration_cycles } ${ __(
+	if ( Number( discountEntry.duration_cycles ) > 1 ) {
+		return `${ label } (${ discountEntry.duration_cycles } ${ __(
 			'cycles',
 			'woocommerce-subscriptions-lite'
 		) })`;

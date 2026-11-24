@@ -37,6 +37,7 @@ try {
 			'pricing_policy' => [
 				'policies' => [
 					[
+						'field' => 'discount',
 						'type'  => 'percentage',
 						'value' => 10,
 					],
