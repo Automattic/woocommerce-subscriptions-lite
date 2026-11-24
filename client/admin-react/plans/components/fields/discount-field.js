@@ -4,9 +4,9 @@
  * Maps to the plan's discount entry: the pricing_policy.policies entry that
  * carries the discount marker (see isDiscountEntry()). The value input
  * carries a type-driven affix: "%" for percentage discounts, the store
- * currency symbol (on its configured side) for monetary ones. The unit is also reflected in
- * the input's accessible name ("Discount (%)" / "Discount (USD)"), since the
- * visual affix is not part of the label.
+ * currency symbol (on its configured side) for monetary ones. The unit is
+ * also reflected in the input's accessible name ("Discount (%)" /
+ * "Discount (USD)"), since the visual affix is not part of the label.
  */
 
 import {

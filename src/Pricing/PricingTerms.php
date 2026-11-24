@@ -10,8 +10,8 @@
  *   }
  *
  * `field: 'discount'` marks the entry the plans editor's discount field edits;
- * other writers must not set it. PHP ignores the key: writes accept it and
- * reads drop it.
+ * other writers must not set `field` to `discount`. PHP ignores the key:
+ * writes accept it and reads drop it.
  *
  * Reads are tolerant and never throw ({@see self::from_array()}): entries that
  * break the type or range rules are dropped, but structure is coerced rather

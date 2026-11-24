@@ -395,8 +395,9 @@ describe( 'registry transforms', () => {
 			] );
 		} );
 
-		it( 'removes every entry when the discount is cleared, and reloads with none', () => {
+		it( 'removes only the discount entry when it is cleared, and reloads with none', () => {
 			const registry = buildFieldRegistry();
+			const other = { type: 'fixed_amount', value: 2, starting_cycle: 6 };
 			const plan = planWithEntry(
 				{
 					field: 'discount',
@@ -404,7 +405,7 @@ describe( 'registry transforms', () => {
 					value: 10,
 					starting_cycle: 2,
 				},
-				{ type: 'fixed_amount', value: 2, starting_cycle: 6 }
+				other
 			);
 			const formData = {
 				...planToFormData( registry, plan ),
@@ -415,11 +416,26 @@ describe( 'registry transforms', () => {
 				...formDataToPayload( registry, formData, plan ),
 			};
 
-			expect( saved.pricing_policy.policies ).toEqual( [] );
+			expect( saved.pricing_policy.policies ).toEqual( [ other ] );
 			expect( saved.pricing_policy.one_time_fees ).toEqual(
 				samplePlan.pricing_policy.one_time_fees
 			);
 			expect( planToFormData( registry, saved ).pricingValue ).toBe( '' );
+		} );
+
+		it( 'keeps the other entries in order when a discount between them is cleared', () => {
+			const first = { type: 'fixed_amount', value: 2 };
+			const last = { type: 'percentage', value: 5, starting_cycle: 3 };
+			const plan = planWithEntry(
+				first,
+				{ field: 'discount', type: 'percentage', value: 10 },
+				last
+			);
+
+			expect( payloadFor( plan, { pricingValue: '' } ) ).toEqual( [
+				first,
+				last,
+			] );
 		} );
 
 		it( 'keeps every entry of a plan with no discount when the discount stays empty', () => {

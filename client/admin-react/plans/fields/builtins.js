@@ -28,14 +28,16 @@
  *
  * Pricing: the discount field creates `pricing_policy` and edits the first
  * `policies` entry that carries its marker (`field: 'discount'`, see
- * isDiscountEntry()); position plays no part, and an unmarked entry is never
- * the discount. It writes the marker on its entry, keeps an edited entry in
+ * isDiscountEntry() in ./discount-marker.js); position plays no part, and
+ * an unmarked entry is never the discount. It writes the marker on its entry, keeps an edited entry in
  * its stored position, inserts a new one first, and passes on every other
- * stored entry unchanged. Another pricing field registers AFTER discount,
- * finds its own entry by its own key and replaces it; it never writes the
- * discount marker. Registering a pricing field before discount is
- * unsupported. Clearing a stored discount empties `policies`; a plan stored
- * with no discount keeps its entries when the discount stays empty.
+ * stored entry unchanged. Clearing the discount removes only the marked
+ * entry and keeps every other entry in place. Another pricing field
+ * registers AFTER discount, finds its own entry by its own key and replaces
+ * it; it never writes the discount marker. Registering a pricing field
+ * before discount is unsupported: discount appends every stored entry after
+ * the entries already in the payload, so such a field's stored entry is
+ * duplicated on every save and the price compounds.
  */
 
 import { __ } from '@wordpress/i18n';
@@ -44,27 +46,11 @@ import { FrequencyEdit } from '../components/fields/frequency-field';
 import { ExpirationEdit } from '../components/fields/expiration-field';
 import { DiscountEdit } from '../components/fields/discount-field';
 import { formatFrequency, formatDiscount, formatExpiration } from '../format';
-
-/**
- * The key and value that mark a `pricing_policy.policies` entry as the one the
- * discount field edits. The value is the discount descriptor's id.
- */
-export const DISCOUNT_MARKER_KEY = 'field';
-export const DISCOUNT_MARKER_VALUE = 'discount';
-
-/**
- * Whether a pricing entry is the discount field's entry, by its marker.
- *
- * @param {Object} entry A `pricing_policy.policies` entry.
- * @return {boolean} True when the entry carries the discount marker.
- */
-export function isDiscountEntry( entry ) {
-	return (
-		!! entry &&
-		typeof entry === 'object' &&
-		entry[ DISCOUNT_MARKER_KEY ] === DISCOUNT_MARKER_VALUE
-	);
-}
+import {
+	DISCOUNT_MARKER_KEY,
+	DISCOUNT_MARKER_VALUE,
+	isDiscountEntry,
+} from './discount-marker';
 
 /**
  * The built-in field descriptors, in render order.
@@ -214,10 +200,11 @@ export function builtInFields() {
 									index === discountIndex ? entry : stored
 							  );
 				} else if ( discountIndex !== -1 ) {
-					// Clearing a stored discount removes every entry, hidden
-					// ones too: the plan then has no discount at all. A plan
-					// with no discount keeps its entries as stored.
-					entries = [];
+					// Clearing the discount removes only its entry; the
+					// entries this field does not show stay in place.
+					entries = storedEntries.filter(
+						( stored, index ) => index !== discountIndex
+					);
 				}
 
 				return {

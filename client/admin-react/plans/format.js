@@ -6,7 +6,7 @@
 
 import { __, _n, sprintf } from '@wordpress/i18n';
 import { config } from './config';
-import { isDiscountEntry } from './fields/builtins';
+import { isDiscountEntry } from './fields/discount-marker';
 
 /**
  * Placeholder rendered in list cells with no value (em dash).
