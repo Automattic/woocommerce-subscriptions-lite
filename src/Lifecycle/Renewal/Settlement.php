@@ -5,7 +5,8 @@
  * Moves the cycle of a Lite renewal order by compare-and-set under the contract lock when the
  * order's status changes: paid bills it, failed or dead (cancelled, trashed or deleted unpaid)
  * fails it and puts the contract on the system hold, on-hold awaits the charge. A settlement
- * refused by another lock is retried (`woocommerce_subscriptions_lite_settle_order`).
+ * refused by another lock, or cut short by a storage failure, is retried
+ * (`woocommerce_subscriptions_lite_settle_order`); failed retry runs are capped per order.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal
  */
@@ -31,6 +32,7 @@ use Automattic\WooCommerce\SubscriptionsLite\Pricing\BillingDay;
 use Automattic\WooCommerce\SubscriptionsLite\Utilities\ScheduledActions;
 use DateTimeImmutable;
 use DateTimeZone;
+use RuntimeException;
 use Throwable;
 use WC_Order;
 use WP_Error;
@@ -78,6 +80,21 @@ final class Settlement {
 	private const CYCLE_PAGE_SIZE = 50;
 
 	/**
+	 * Order meta counting failed settlement retry runs; cleared on a completed run and at the cap.
+	 */
+	private const SETTLE_ATTEMPTS_META = '_wcsl_settle_attempts';
+
+	/**
+	 * Failed retry runs after which the settlement is no longer rescheduled.
+	 */
+	private const MAX_SETTLE_ATTEMPTS = 3;
+
+	/**
+	 * Delay of a settlement that must run once a contract lock taken now has expired.
+	 */
+	private const SETTLE_AFTER_LOCK_EXPIRY_SECONDS = ContractLock::TTL_SECONDS + ScheduledActions::LOCK_RETRY_DELAY_SECONDS;
+
+	/**
 	 * Cycle statuses a paid order settles from.
 	 */
 	private const PAYABLE_CYCLE_STATUSES = [ CycleStatus::PENDING, CycleStatus::PROCESSING, CycleStatus::FAILED ];
@@ -103,15 +120,18 @@ final class Settlement {
 		add_action( 'wp_trash_post', [ $instance, 'handle_removed_post' ] );
 		add_action( 'before_delete_post', [ $instance, 'handle_removed_post' ] );
 		add_filter( 'woocommerce_valid_order_statuses_for_cancel', [ $instance, 'statuses_for_customer_cancel' ], 10, 2 );
-		// Retries a settlement refused by another operation's lock, and settles a charge cut short.
+		// Retries a settlement refused by another operation's lock or cut short by a storage
+		// failure, and settles a charge cut short.
 		add_action( 'woocommerce_subscriptions_lite_settle_order', [ $instance, 'retry' ], 10, 2 );
 	}
 
 	/**
-	 * Action Scheduler entry point for a refused settlement: settle the order when it still
-	 * exists, else fail the cycle still linked to its id as dead (it was deleted unpaid). An
+	 * Action Scheduler entry point for a refused or failed settlement: settle the order when it
+	 * still exists, else fail the cycle still linked to its id as dead (it was deleted unpaid). An
 	 * order that was paid and then deleted fails nothing: a warning is logged. A retry refused
-	 * again schedules the next one; the lock it waits for expires on its own.
+	 * again schedules the next one; the lock it waits for expires on its own. A storage failure
+	 * counts against {@see self::MAX_SETTLE_ATTEMPTS}; at the cap the retry is dropped and the
+	 * order noted.
 	 *
 	 * @param mixed $order_id Order id.
 	 * @param mixed $paid     Whether the order was paid when the retry was scheduled.
@@ -124,7 +144,10 @@ final class Settlement {
 		$order_id = (int) $order_id;
 		$order    = wc_get_order( $order_id );
 		if ( $order instanceof WC_Order ) {
-			$this->settle_or_schedule_retry( $order );
+			$settled = $this->settle_or_schedule_retry( $order );
+			if ( ! $settled ) {
+				$this->record_failed_settlement( $order );
+			}
 			return;
 		}
 
@@ -143,14 +166,97 @@ final class Settlement {
 	}
 
 	/**
-	 * Schedule a retry of the order's settlement, once: an action already pending for it covers
-	 * this conflict too.
+	 * Count a failed retry run on the order; at {@see self::MAX_SETTLE_ATTEMPTS} drop the pending
+	 * retry, note the order and clear the count, so a later failure gets its own attempts and
+	 * note. A failure to record it is logged.
+	 *
+	 * @param WC_Order $order The order.
+	 */
+	private function record_failed_settlement( WC_Order $order ): void {
+		$order_id = $order->get_id();
+		try {
+			// The count is read from the database: a parallel retry run may have counted since.
+			$order->read_meta_data( true );
+			$attempts = (int) $order->get_meta( self::SETTLE_ATTEMPTS_META ) + 1;
+			if ( $attempts < self::MAX_SETTLE_ATTEMPTS ) {
+				$order->update_meta_data( self::SETTLE_ATTEMPTS_META, (string) $attempts );
+				$order->save_meta_data();
+				return;
+			}
+
+			ScheduledActions::unschedule(
+				'woocommerce_subscriptions_lite_settle_order',
+				[
+					'order_id' => $order_id,
+					'paid'     => $order->is_paid(),
+				]
+			);
+			$this->log_failure( sprintf( 'Settlement: gave up settling renewal order %d after %d failed attempts.', $order_id, $attempts ), $order_id );
+			$order->add_order_note( __( 'The subscription for this renewal order still could not be updated after several automatic attempts, so they have stopped. Please check this order and its subscription.', 'woocommerce-subscriptions-lite' ) );
+			$order->delete_meta_data( self::SETTLE_ATTEMPTS_META );
+			$order->save_meta_data();
+		} catch ( Throwable $e ) {
+			$this->log_failure( sprintf( 'Settlement: failed to record a failed settlement on renewal order %d: %s', $order_id, $e->getMessage() ), $order_id );
+		}
+	}
+
+	/**
+	 * Drop the order's failed-attempt count after a completed settlement run.
+	 *
+	 * @param WC_Order $order The order.
+	 */
+	private static function clear_settle_attempts( WC_Order $order ): void {
+		if ( '' !== (string) $order->get_meta( self::SETTLE_ATTEMPTS_META ) ) {
+			$order->delete_meta_data( self::SETTLE_ATTEMPTS_META );
+			$order->save_meta_data();
+		}
+	}
+
+	/**
+	 * Schedule a retry of the order's settlement unless one is pending to run by then.
+	 *
+	 * @param int  $order_id      Order id.
+	 * @param bool $paid          Whether the order is paid.
+	 * @param int  $delay_seconds Seconds from now.
+	 * @return bool False, logged, when no retry is pending and none could be scheduled.
+	 */
+	private function schedule_retry( int $order_id, bool $paid, int $delay_seconds ): bool {
+		$scheduled = ScheduledActions::schedule_once(
+			'woocommerce_subscriptions_lite_settle_order',
+			[
+				'order_id' => $order_id,
+				'paid'     => $paid,
+			],
+			$delay_seconds
+		);
+		if ( ! $scheduled ) {
+			$this->log_failure( sprintf( 'Settlement: could not schedule the settlement retry of renewal order %d.', $order_id ), $order_id );
+		}
+
+		return $scheduled;
+	}
+
+	/**
+	 * Note on the order that its settlement failed and no automatic retry is pending. A failure
+	 * to add the note is logged.
+	 *
+	 * @param WC_Order $order The order.
+	 */
+	private function note_unretried_settlement( WC_Order $order ): void {
+		try {
+			$order->add_order_note( __( 'The subscription for this renewal order could not be updated, and no automatic retry could be scheduled. This order needs attention.', 'woocommerce-subscriptions-lite' ) );
+		} catch ( Throwable $e ) {
+			$this->log_failure( sprintf( 'Settlement: failed to note the unretried settlement on renewal order %d: %s', $order->get_id(), $e->getMessage() ), $order->get_id() );
+		}
+	}
+
+	/**
+	 * Log that the order's settlement waits for another operation's lock.
 	 *
 	 * @param int      $order_id Order id.
 	 * @param WP_Error $conflict The lock conflict.
-	 * @param bool     $paid     Whether the order is paid.
 	 */
-	private function schedule_retry( int $order_id, WP_Error $conflict, bool $paid ): void {
+	private function log_conflict( int $order_id, WP_Error $conflict ): void {
 		$data = (array) $conflict->get_error_data();
 		wc_get_logger()->info(
 			sprintf( 'Settlement: renewal order %d waits for the %s operation on contract %d; its settlement is retried.', $order_id, (string) ( $data['operation'] ?? '' ), (int) ( $data['contract_id'] ?? 0 ) ),
@@ -159,15 +265,6 @@ final class Settlement {
 				'contract_id' => $data['contract_id'] ?? null,
 				'order_id'    => $order_id,
 			]
-		);
-
-		ScheduledActions::schedule_once(
-			'woocommerce_subscriptions_lite_settle_order',
-			[
-				'order_id' => $order_id,
-				'paid'     => $paid,
-			],
-			ScheduledActions::LOCK_RETRY_DELAY_SECONDS
 		);
 	}
 
@@ -185,7 +282,7 @@ final class Settlement {
 				'order_id' => $order_id,
 				'paid'     => false,
 			],
-			ContractLock::TTL_SECONDS + ScheduledActions::LOCK_RETRY_DELAY_SECONDS
+			self::SETTLE_AFTER_LOCK_EXPIRY_SECONDS
 		);
 	}
 
@@ -288,15 +385,16 @@ final class Settlement {
 		}
 
 		if ( null !== $conflict ) {
-			$this->schedule_retry( $order_id, $conflict, false );
+			$this->log_conflict( $order_id, $conflict );
+			$this->schedule_retry( $order_id, false, ScheduledActions::LOCK_RETRY_DELAY_SECONDS );
 		}
 	}
 
 	/**
 	 * Hook entry point: settle the order with this id. Another operation holding the
-	 * contract's lock schedules a retry; any other failure is logged, not rethrown, so the
-	 * order status change that triggered it still completes; a due renewal that finds the
-	 * cycle settled re-applies the contract write ({@see RenewalProcessor}).
+	 * contract's lock, or a storage failure, schedules a retry; any other failure is logged, not
+	 * rethrown, so the order status change that triggered it still completes; a due renewal that
+	 * finds the cycle settled re-applies the contract write ({@see RenewalProcessor}).
 	 *
 	 * @param mixed $order_id Order id.
 	 */
@@ -308,23 +406,43 @@ final class Settlement {
 	}
 
 	/**
-	 * Settle the order; a lock conflict schedules a retry, any other failure is logged.
+	 * Settle the order. A lock conflict schedules a retry; a storage failure (a `RuntimeException`
+	 * other than the lock's) schedules one for after the lock expires; any other failure is only
+	 * logged, so a bug is not retried. A completed run clears the failed-attempt count.
 	 *
 	 * @param WC_Order $order The order.
+	 * @return bool False when a storage failure cut the settlement short (a lock conflict is not a failure).
 	 */
-	private function settle_or_schedule_retry( WC_Order $order ): void {
+	private function settle_or_schedule_retry( WC_Order $order ): bool {
+		$order_id = $order->get_id();
 		try {
 			$conflict = $this->settle( $order );
+			if ( null === $conflict ) {
+				self::clear_settle_attempts( $order );
+			}
 		} catch ( ContractLockedException $e ) {
 			$conflict = HeldLocks::get_refused_conflict( $e );
+		} catch ( RuntimeException $e ) {
+			$this->log_failure( sprintf( 'Settlement: settling renewal order %d failed: %s; it is retried.', $order_id, $e->getMessage() ), $order_id );
+			$scheduled = $this->schedule_retry( $order_id, $order->is_paid(), self::SETTLE_AFTER_LOCK_EXPIRY_SECONDS );
+			if ( ! $scheduled ) {
+				$this->note_unretried_settlement( $order );
+			}
+			return false;
 		} catch ( Throwable $e ) {
-			$this->log_failure( sprintf( 'Settlement: settling renewal order %d failed: %s', $order->get_id(), $e->getMessage() ), $order->get_id() );
-			return;
+			$this->log_failure( sprintf( 'Settlement: settling renewal order %d failed: %s', $order_id, $e->getMessage() ), $order_id );
+			return true;
 		}
 
 		if ( null !== $conflict ) {
-			$this->schedule_retry( $order->get_id(), $conflict, $order->is_paid() );
+			$this->log_conflict( $order_id, $conflict );
+			$scheduled = $this->schedule_retry( $order_id, $order->is_paid(), ScheduledActions::LOCK_RETRY_DELAY_SECONDS );
+			if ( ! $scheduled ) {
+				$this->note_unretried_settlement( $order );
+			}
 		}
+
+		return true;
 	}
 
 	/**

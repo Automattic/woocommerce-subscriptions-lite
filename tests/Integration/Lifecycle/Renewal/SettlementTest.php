@@ -517,6 +517,7 @@ final class SettlementTest extends LiteIntegrationTestCase {
 		$this->assertTrue( $this->has_logged( 'settling renewal order' ) );
 		$this->assertSame( CycleStatus::BILLED, $this->head( $contract_id )->get_status() );
 		$this->assert_lock_released( $contract_id );
+		$this->assertSame( [], $this->pending_retries( $order->get_id() ), 'A non-storage failure is not retried.' );
 	}
 
 	/**
@@ -779,21 +780,316 @@ final class SettlementTest extends LiteIntegrationTestCase {
 	}
 
 	/**
-	 * A failed cycle lookup must not read as "no cycle linked" (a replaced order): the failure is
-	 * logged and the order left unsettled, never flagged for a refund.
+	 * Regex for the engine's cycle-by-order read (`Contracts::find_cycles_by_order()`).
 	 */
-	public function test_a_failed_cycle_lookup_on_a_paid_order_is_logged_and_settles_nothing(): void {
+	private static function cycle_lookup(): string {
+		return '/FROM ' . preg_quote( SchemaInstaller::get_table_name( SchemaInstaller::TABLE_CYCLES ), '/' ) . ' WHERE order_id/';
+	}
+
+	/**
+	 * The order's failed settlement attempt count, read from the database.
+	 *
+	 * @param int $order_id Order id.
+	 */
+	private function settle_attempts( int $order_id ): string {
+		$order = wc_get_order( $order_id );
+		$order->read_meta_data( true );
+
+		return (string) $order->get_meta( '_wcsl_settle_attempts' );
+	}
+
+	/**
+	 * Run the order's pending retry as Action Scheduler would (no longer pending once it runs),
+	 * with the cycle lookup failing.
+	 *
+	 * @param int  $order_id Order id.
+	 * @param bool $paid     The retry's paid argument.
+	 */
+	private function run_failing_retry( int $order_id, bool $paid ): void {
+		foreach ( $this->pending_retries( $order_id ) as $action_id ) {
+			\ActionScheduler::store()->mark_complete( $action_id );
+		}
+		$this->fail_next_query( self::cycle_lookup() );
+		( new Settlement() )->retry( $order_id, $paid );
+	}
+
+	/**
+	 * A failed cycle lookup must not read as "no cycle linked" (a replaced order): the failure is
+	 * logged and a retry scheduled for after the lock expires; nothing is written or flagged.
+	 */
+	public function test_a_failed_cycle_lookup_on_a_paid_order_schedules_a_retry_and_settles_nothing(): void {
 		[ $contract_id, $order ] = $this->seed_renewal();
 		$order->payment_complete();
 		$this->capture_log();
 
-		$this->fail_next_query( '/FROM ' . preg_quote( SchemaInstaller::get_table_name( SchemaInstaller::TABLE_CYCLES ), '/' ) . ' WHERE order_id/' );
+		$this->fail_next_query( self::cycle_lookup() );
 		( new Settlement() )->handle_order( $order->get_id() );
 
 		$this->assertTrue( $this->has_logged( sprintf( 'settling renewal order %d failed', $order->get_id() ) ) );
+		$actions = $this->get_pending_actions(
+			'woocommerce_subscriptions_lite_settle_order',
+			[
+				'order_id' => $order->get_id(),
+				'paid'     => true,
+			]
+		);
+		$this->assertCount( 1, $actions );
+		$run_at = reset( $actions )->get_schedule()->get_date()->getTimestamp();
+		$this->assertEqualsWithDelta( time() + 660, $run_at, 10, 'Retried once the lock has expired.' );
+		$this->assertSame( '', $this->settle_attempts( $order->get_id() ), 'The hook signal is not a counted retry run.' );
+		$this->assertSame( [], $this->get_order_notes_containing( $order->get_id(), 'The subscription for this renewal order' ) );
 		$this->assertSame( CycleStatus::PENDING, $this->head( $contract_id )->get_status() );
 		$this->assertSame( '', (string) wc_get_order( $order->get_id() )->get_meta( '_wcsl_refund_flagged' ) );
 		$this->assertSame( [], $this->get_order_notes_containing( $order->get_id(), 'Refund this payment' ) );
 		$this->assertSame( [], $this->fired );
+	}
+
+	public function test_the_retry_after_a_failed_cycle_lookup_settles_the_paid_order(): void {
+		[ $contract_id, $order ] = $this->seed_renewal();
+		$order->payment_complete();
+		$this->fail_next_query( self::cycle_lookup() );
+		( new Settlement() )->handle_order( $order->get_id() );
+		$this->assertCount( 1, $this->pending_retries( $order->get_id() ) );
+
+		( new Settlement() )->retry( $order->get_id(), true );
+
+		$contract = $this->get_contract( $contract_id );
+		$this->assertSame( CycleStatus::BILLED, $this->head( $contract_id )->get_status() );
+		$this->assertSame( ContractStatus::ACTIVE, $contract->get_status() );
+		$this->assertGreaterThan( gmdate( 'Y-m-d H:i:s' ), (string) $contract->get_next_payment_gmt() );
+		$this->assertSame( [ 'woocommerce_subscriptions_lite_renewal_paid' => 1 ], $this->fired );
+		$this->assertSame( '', $this->settle_attempts( $order->get_id() ) );
+		$this->assert_lock_released( $contract_id );
+	}
+
+	/**
+	 * A customer pays a failed renewal late (the My Account pay link completes the payment) while
+	 * the cycle lookup fails: the contract stays on the system hold until the retry resumes it.
+	 */
+	public function test_a_late_payment_of_a_failed_renewal_whose_lookup_fails_is_settled_by_the_retry(): void {
+		[ $contract_id, $order ] = $this->seed_renewal( 'failed', CycleStatus::FAILED );
+		Contracts::update(
+			$contract_id,
+			[
+				'extension_slug'   => Package::EXTENSION_SLUG,
+				'status'           => ContractStatus::ON_HOLD,
+				'next_payment_gmt' => null,
+			]
+		);
+		Settlement::register();
+
+		$this->fail_next_query( self::cycle_lookup() );
+		$order->payment_complete();
+
+		$this->assertCount(
+			1,
+			$this->get_pending_actions(
+				'woocommerce_subscriptions_lite_settle_order',
+				[
+					'order_id' => $order->get_id(),
+					'paid'     => true,
+				]
+			)
+		);
+		$this->assertSame( CycleStatus::FAILED, $this->head( $contract_id )->get_status() );
+		$this->assertSame( ContractStatus::ON_HOLD, $this->get_contract( $contract_id )->get_status() );
+
+		do_action( 'woocommerce_subscriptions_lite_settle_order', $order->get_id(), true );
+
+		$contract = $this->get_contract( $contract_id );
+		$this->assertSame( CycleStatus::BILLED, $this->head( $contract_id )->get_status() );
+		$this->assertSame( ContractStatus::ACTIVE, $contract->get_status() );
+		$this->assertGreaterThan( gmdate( 'Y-m-d H:i:s' ), (string) $contract->get_next_payment_gmt(), 'Rolled past now.' );
+		$this->assertSame( [ 'woocommerce_subscriptions_lite_renewal_paid' => 1 ], $this->fired );
+	}
+
+	public function test_retry_runs_that_keep_failing_stop_at_the_cap_with_one_note(): void {
+		[ $contract_id, $order ] = $this->seed_renewal();
+		$order_id                = $order->get_id();
+		$order->payment_complete();
+		$this->fail_next_query( self::cycle_lookup() );
+		( new Settlement() )->handle_order( $order_id );
+		$this->capture_log();
+
+		$this->run_failing_retry( $order_id, true );
+		$this->assertSame( '1', $this->settle_attempts( $order_id ) );
+		$this->assertCount( 1, $this->pending_retries( $order_id ) );
+
+		$this->run_failing_retry( $order_id, true );
+		$this->assertSame( '2', $this->settle_attempts( $order_id ) );
+		$this->assertCount( 1, $this->pending_retries( $order_id ) );
+		$this->assertFalse( $this->has_logged( 'gave up settling' ) );
+
+		$this->run_failing_retry( $order_id, true );
+		$this->assertSame( [], $this->pending_retries( $order_id ), 'No retry after the cap.' );
+		$this->assertTrue( $this->has_logged( sprintf( 'gave up settling renewal order %d after 3 failed attempts', $order_id ) ) );
+		$this->assertCount( 1, $this->get_order_notes_containing( $order_id, 'still could not be updated after several automatic attempts' ) );
+		$this->assertSame( '', $this->settle_attempts( $order_id ), 'Cleared, so a later failure gets its own attempts.' );
+		$this->assertSame( CycleStatus::PENDING, $this->head( $contract_id )->get_status() );
+	}
+
+	public function test_a_failure_after_the_cap_gets_its_own_attempts_and_note(): void {
+		[ , $order ] = $this->seed_renewal();
+		$order_id    = $order->get_id();
+		$order->payment_complete();
+		$this->fail_next_query( self::cycle_lookup() );
+		( new Settlement() )->handle_order( $order_id );
+		for ( $run = 1; $run <= 3; $run++ ) {
+			$this->run_failing_retry( $order_id, true );
+		}
+
+		$this->fail_next_query( self::cycle_lookup() );
+		( new Settlement() )->handle_order( $order_id );
+		$this->assertCount( 1, $this->pending_retries( $order_id ) );
+		$this->assertSame( '', $this->settle_attempts( $order_id ) );
+
+		$this->run_failing_retry( $order_id, true );
+		$this->assertSame( '1', $this->settle_attempts( $order_id ), 'Counted from zero again.' );
+		$this->run_failing_retry( $order_id, true );
+		$this->run_failing_retry( $order_id, true );
+
+		$this->assertSame( [], $this->pending_retries( $order_id ) );
+		$this->assertCount( 2, $this->get_order_notes_containing( $order_id, 'still could not be updated after several automatic attempts' ), 'One note per episode.' );
+	}
+
+	public function test_a_pending_lock_retry_absorbs_a_failure_retry_and_a_refused_run_is_not_counted(): void {
+		[ $contract_id, $order ] = $this->seed_renewal();
+		$order_id                = $order->get_id();
+		$lock                    = $this->hold_lock( $contract_id, 'hold' );
+		$order->payment_complete();
+		( new Settlement() )->handle_order( $order_id );
+		$lock->release();
+
+		$this->fail_next_query( self::cycle_lookup() );
+		( new Settlement() )->handle_order( $order_id );
+		$this->assertCount( 1, $this->pending_retries( $order_id ), 'The 60 s lock retry covers the failure retry.' );
+
+		$this->run_failing_retry( $order_id, true );
+		$this->assertSame( '1', $this->settle_attempts( $order_id ) );
+
+		$this->hold_lock( $contract_id, 'hold' );
+		foreach ( $this->pending_retries( $order_id ) as $action_id ) {
+			\ActionScheduler::store()->mark_complete( $action_id );
+		}
+		( new Settlement() )->retry( $order_id, true );
+
+		$this->assertSame( '1', $this->settle_attempts( $order_id ), 'A lock conflict neither counts nor clears.' );
+		$this->assertCount( 1, $this->pending_retries( $order_id ) );
+		$this->assertSame( CycleStatus::PENDING, $this->head( $contract_id )->get_status() );
+	}
+
+	public function test_a_failed_order_whose_lookup_fails_is_failed_and_held_by_the_retry(): void {
+		[ $contract_id, $order ] = $this->seed_renewal();
+		$order->update_status( OrderStatus::FAILED );
+		$this->fail_next_query( self::cycle_lookup() );
+		( new Settlement() )->handle_order( $order->get_id() );
+
+		$this->assertCount(
+			1,
+			$this->get_pending_actions(
+				'woocommerce_subscriptions_lite_settle_order',
+				[
+					'order_id' => $order->get_id(),
+					'paid'     => false,
+				]
+			)
+		);
+		$this->assertSame( CycleStatus::PENDING, $this->head( $contract_id )->get_status() );
+
+		( new Settlement() )->retry( $order->get_id(), false );
+
+		$this->assertSame( CycleStatus::FAILED, $this->head( $contract_id )->get_status() );
+		$this->assertSame( ContractStatus::ON_HOLD, $this->get_contract( $contract_id )->get_status() );
+		$this->assertSame( [ 'woocommerce_subscriptions_lite_renewal_failed' => 1 ], $this->fired );
+	}
+
+	/**
+	 * The contract write fails after the cycle was billed: the retry takes the billed-cycle
+	 * branch and completes the contract write.
+	 */
+	public function test_a_contract_write_failure_after_billing_is_completed_by_the_retry(): void {
+		[ $contract_id, $order ] = $this->seed_renewal();
+		$order->payment_complete();
+		$this->fail_next_query( '/^UPDATE `' . preg_quote( SchemaInstaller::get_table_name( SchemaInstaller::TABLE_CONTRACTS ), '/' ) . '`/' );
+		( new Settlement() )->handle_order( $order->get_id() );
+
+		$this->assertSame( CycleStatus::BILLED, $this->head( $contract_id )->get_status() );
+		$this->assertSame( [], $this->fired );
+		$this->assertCount( 1, $this->pending_retries( $order->get_id() ) );
+
+		( new Settlement() )->retry( $order->get_id(), true );
+
+		$contract = $this->get_contract( $contract_id );
+		$this->assertSame( ContractStatus::ACTIVE, $contract->get_status() );
+		$this->assertGreaterThanOrEqual( (string) $this->head( $contract_id )->get_ends_at_gmt(), (string) $contract->get_next_payment_gmt() );
+		$this->assertSame( [ 'woocommerce_subscriptions_lite_renewal_paid' => 1 ], $this->fired );
+	}
+
+	public function test_a_failed_charge_backstop_run_counts_and_reschedules(): void {
+		[ , $order ] = $this->seed_renewal();
+		$order_id    = $order->get_id();
+		Settlement::schedule_charge_settlement( $order_id );
+
+		$this->run_failing_retry( $order_id, false );
+
+		$this->assertSame( '1', $this->settle_attempts( $order_id ) );
+		$this->assertCount(
+			1,
+			$this->get_pending_actions(
+				'woocommerce_subscriptions_lite_settle_order',
+				[
+					'order_id' => $order_id,
+					'paid'     => false,
+				]
+			)
+		);
+	}
+
+	public function test_a_retry_that_cannot_be_scheduled_is_logged_and_noted(): void {
+		[ , $order ] = $this->seed_renewal();
+		$order->payment_complete();
+		add_filter( 'pre_as_schedule_single_action', '__return_zero' ); // Action Scheduler cannot store it.
+		$this->capture_log();
+
+		$this->fail_next_query( self::cycle_lookup() );
+		( new Settlement() )->handle_order( $order->get_id() );
+
+		$this->assertSame( [], $this->pending_retries( $order->get_id() ) );
+		$this->assertTrue( $this->has_logged( sprintf( 'could not schedule the settlement retry of renewal order %d', $order->get_id() ) ) );
+		$this->assertCount( 1, $this->get_order_notes_containing( $order->get_id(), 'no automatic retry could be scheduled' ) );
+	}
+
+	public function test_a_lock_retry_that_cannot_be_scheduled_is_logged_and_noted(): void {
+		[ $contract_id, $order ] = $this->seed_renewal();
+		$this->hold_lock( $contract_id, 'hold' );
+		$order->payment_complete();
+		add_filter( 'pre_as_schedule_single_action', '__return_zero' ); // Action Scheduler cannot store it.
+		$this->capture_log();
+
+		( new Settlement() )->handle_order( $order->get_id() );
+
+		$this->assertSame( [], $this->pending_retries( $order->get_id() ) );
+		$this->assertTrue( $this->has_logged( sprintf( 'could not schedule the settlement retry of renewal order %d', $order->get_id() ) ) );
+		$this->assertCount( 1, $this->get_order_notes_containing( $order->get_id(), 'no automatic retry could be scheduled' ) );
+	}
+
+	public function test_a_retry_after_another_signal_settled_the_order_writes_nothing_and_clears_the_count(): void {
+		[ $contract_id, $order ] = $this->seed_renewal();
+		$this->pay( $order );
+		( new Settlement() )->settle( $order, $this->utc( '2026-02-16 12:00:00' ) );
+		$before = $this->get_contract( $contract_id );
+		$order->update_meta_data( '_wcsl_settle_attempts', '2' ); // Earlier retry runs failed.
+		$order->save_meta_data();
+
+		( new Settlement() )->retry( $order->get_id(), true );
+
+		$after = $this->get_contract( $contract_id );
+		$this->assertSame( CycleStatus::BILLED, $this->head( $contract_id )->get_status() );
+		$this->assertSame( $before->get_status(), $after->get_status() );
+		$this->assertSame( $before->get_next_payment_gmt(), $after->get_next_payment_gmt() );
+		$this->assertSame( $before->get_last_payment_gmt(), $after->get_last_payment_gmt() );
+		$this->assertSame( [ 'woocommerce_subscriptions_lite_renewal_paid' => 1 ], $this->fired, 'Not fired again.' );
+		$this->assertSame( [], $this->pending_retries( $order->get_id() ) );
+		$this->assertSame( '', $this->settle_attempts( $order->get_id() ), 'A completed run clears the count.' );
 	}
 }
