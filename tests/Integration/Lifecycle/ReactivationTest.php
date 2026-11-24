@@ -12,6 +12,7 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Lifecycle;
 
 use DateTimeImmutable;
 use DateTimeZone;
+use RuntimeException;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
@@ -430,6 +431,40 @@ final class ReactivationTest extends LiteIntegrationTestCase {
 		$stored = $this->get_contract( $contract_id );
 		$this->assertSame( ContractStatus::CANCELLED, $stored->get_status() );
 		$this->assertNull( $stored->get_next_payment_gmt() );
+		$this->assert_lock_released( $contract_id );
+	}
+
+	/**
+	 * A failed read of the renewal chain must not read as "no unpaid renewal" and reactivate for
+	 * free: the failure propagates and the contract stays on hold.
+	 */
+	public function test_a_failed_cycle_read_does_not_reactivate(): void {
+		$customer_id = $this->create_customer();
+		$contract_id = $this->create_contract(
+			$customer_id,
+			[
+				'payment_method' => 'cod',
+				'status'         => 'on-hold',
+			]
+		);
+		$this->create_renewal_order(
+			$contract_id,
+			$customer_id,
+			[
+				'status'       => 'failed',
+				'cycle_status' => CycleStatus::FAILED,
+			]
+		);
+
+		$this->fail_next_query( '/FROM ' . preg_quote( SchemaInstaller::get_table_name( SchemaInstaller::TABLE_CYCLES ), '/' ) . ' WHERE contract_id/' );
+		try {
+			( new Reactivation() )->reactivate( $contract_id );
+			$this->fail( 'A failed read must not reactivate the contract.' );
+		} catch ( RuntimeException $e ) {
+			$this->assertStringContainsString( 'Failed to read', $e->getMessage() );
+		}
+
+		$this->assertSame( ContractStatus::ON_HOLD, $this->get_contract( $contract_id )->get_status() );
 		$this->assert_lock_released( $contract_id );
 	}
 }

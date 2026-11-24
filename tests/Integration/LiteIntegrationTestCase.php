@@ -871,6 +871,49 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 	}
 
 	/**
+	 * `$wpdb->suppress_errors()` before {@see self::fail_next_query()} first suppressed them.
+	 *
+	 * @var bool|null
+	 */
+	private $suppressed_errors = null;
+
+	/**
+	 * Patterns passed to {@see self::fail_next_query()} that have not broken a statement yet.
+	 *
+	 * @var array<int, string>
+	 */
+	private $unfired_query_failures = [];
+
+	/**
+	 * Replace the next statement matching `$pattern` (after `$skip` matches) with invalid SQL, so
+	 * it fails with a database error. Error output is suppressed until the test ends, and the test
+	 * fails if no statement was broken by then.
+	 *
+	 * @param string $pattern Regex the statement to break must match.
+	 * @param int    $skip    Matching statements to let through first.
+	 */
+	protected function fail_next_query( string $pattern, int $skip = 0 ): void {
+		global $wpdb;
+
+		$this->unfired_query_failures[] = $pattern;
+		$failure                        = array_key_last( $this->unfired_query_failures );
+
+		$break = function ( $query ) use ( $pattern, $failure, &$skip, &$break ) {
+			if ( is_string( $query ) && 1 === preg_match( $pattern, $query ) && 0 === $skip-- ) {
+				remove_filter( 'query', $break );
+				unset( $this->unfired_query_failures[ $failure ] );
+				return 'SELECT * FROM table_that_does_not_exist_for_tests';
+			}
+			return $query;
+		};
+		add_filter( 'query', $break );
+
+		if ( null === $this->suppressed_errors ) {
+			$this->suppressed_errors = $wpdb->suppress_errors( true );
+		}
+	}
+
+	/**
 	 * The store's `timezone_string` and `gmt_offset` before this test pinned them.
 	 *
 	 * @var array{0: mixed, 1: mixed}|null
@@ -901,11 +944,19 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 	}
 
 	/**
-	 * Restore the database clock after a test that pinned it, the store time zone, and the
-	 * gateways' enabled values after a test that changed them.
+	 * Restore error output after a test that broke a query, the database clock after a test that
+	 * pinned it, the store time zone, and the gateways' enabled values after a test that changed them.
 	 */
 	public function tear_down(): void {
 		global $wpdb;
+
+		$unfired_query_failures       = $this->unfired_query_failures;
+		$this->unfired_query_failures = [];
+
+		if ( null !== $this->suppressed_errors ) {
+			$wpdb->suppress_errors( $this->suppressed_errors );
+			$this->suppressed_errors = null;
+		}
 
 		if ( null !== $this->timezone_before ) {
 			update_option( 'timezone_string', $this->timezone_before[0] );
@@ -922,5 +973,17 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 
 		$wpdb->query( 'SET timestamp = DEFAULT' ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 		parent::tear_down();
+
+		// After the parent tear-down, so the test's database changes are still rolled back.
+		if ( [] !== $unfired_query_failures ) {
+			$this->fail( 'fail_next_query() never broke a statement matching: ' . implode( ', ', $unfired_query_failures ) );
+		}
+	}
+
+	/**
+	 * Regex for the engine's plan reads (`Plans::get()`, `Plans::list()`), for {@see self::fail_next_query()}.
+	 */
+	protected static function plan_read(): string {
+		return '/FROM ' . preg_quote( SchemaInstaller::get_table_name( SchemaInstaller::TABLE_PLANS ), '/' ) . ' /';
 	}
 }

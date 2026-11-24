@@ -22,6 +22,9 @@ use Automattic\WooCommerce\SubscriptionsLite\Cart\CartPlanHooks;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ApplicabilityStore;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ProductApplicability;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
+use Automattic\WooCommerce\StoreApi\Exceptions\RouteException;
+use Error;
+use Exception;
 use WC_Order;
 use WC_Order_Item_Product;
 use WC_Product_Simple;
@@ -486,5 +489,249 @@ final class CartPlanHooksTest extends LiteIntegrationTestCase {
 			(int) $item->get_meta( '_wcsl_selling_plan_id' ),
 			'The order line item carries the key the contract handler reads.'
 		);
+	}
+
+	/**
+	 * Every error notice, as one string.
+	 */
+	private static function error_notices(): string {
+		return implode( ' ', wp_list_pluck( wc_get_notices( 'error' ), 'notice' ) );
+	}
+
+	/**
+	 * Make a saved product virtual, so checkout needs no shipping.
+	 *
+	 * @param int $product_id Product id.
+	 */
+	private function make_virtual( int $product_id ): void {
+		$product = wc_get_product( $product_id );
+		$product->set_virtual( true );
+		$product->save();
+	}
+
+	/**
+	 * Submit the classic checkout form as its AJAX request does, paying by cash on delivery.
+	 *
+	 * @return array<string, mixed> The JSON response.
+	 */
+	private function submit_classic_checkout(): array {
+		// phpcs:disable WordPress.Security.NonceVerification -- The test builds the request; checkout verifies its nonce.
+		$post_before    = $_POST;
+		$request_before = $_REQUEST;
+		$_POST          = [
+			'payment_method'                     => 'cod',
+			'woocommerce-process-checkout-nonce' => wp_create_nonce( 'woocommerce-process_checkout' ),
+		];
+		foreach ( self::BILLING_ADDRESS as $field => $value ) {
+			$_POST[ 'billing_' . $field ] = $value;
+		}
+		$_REQUEST = $_POST;
+		// phpcs:enable WordPress.Security.NonceVerification
+
+		// wp_send_json() ends the request through wp_die(); an Error escapes checkout's catch.
+		$stop = static function (): callable {
+			return static function (): void {
+				throw new Error( 'wp_die' );
+			};
+		};
+		add_filter( 'wp_doing_ajax', '__return_true' );
+		add_filter( 'wp_die_ajax_handler', $stop );
+		ob_start();
+		try {
+			WC()->checkout()->process_checkout();
+			$this->fail( 'Checkout must answer with JSON.' );
+		} catch ( Error $e ) {
+			$this->assertSame( 'wp_die', $e->getMessage() );
+		} finally {
+			$output = (string) ob_get_clean();
+			remove_filter( 'wp_doing_ajax', '__return_true' );
+			remove_filter( 'wp_die_ajax_handler', $stop );
+			$_POST    = $post_before;
+			$_REQUEST = $request_before;
+		}
+
+		return (array) json_decode( $output, true );
+	}
+
+	/**
+	 * A product with a plan that applies to it, and the plan id.
+	 *
+	 * @return array{0: int, 1: int} Product id, plan id.
+	 */
+	private function make_product_on_plan(): array {
+		$product_id = $this->make_product( '20.00' );
+		$plan_id    = (int) $this->make_percentage_plan( 10.0 )->get_id();
+		( new ApplicabilityStore() )->set( $product_id, new ProductApplicability( ProductApplicability::MODE_INHERIT_ALL ) );
+
+		return [ $product_id, $plan_id ];
+	}
+
+	public function test_validation_refuses_the_add_when_the_plans_cannot_be_read(): void {
+		[ $product_id, $plan_id ] = $this->make_product_on_plan();
+
+		$_POST[ CartPlanHooks::SELLING_PLAN_ID_KEY ] = (string) $plan_id;
+		$this->fail_next_query( self::plan_read() );
+		$passed = apply_filters( 'woocommerce_add_to_cart_validation', true, $product_id, 1 );
+
+		$this->assertFalse( $passed );
+		$this->assertStringContainsString( 'The subscription could not be added right now.', self::error_notices() );
+		$this->assertStringNotContainsString( 'table_that_does_not_exist', self::error_notices(), 'The database error is not shown.' );
+	}
+
+	public function test_an_add_whose_plans_cannot_be_read_adds_nothing(): void {
+		[ $product_id, $plan_id ] = $this->make_product_on_plan();
+
+		$this->fail_next_query( self::plan_read() );
+		$key = $this->add_to_cart( $product_id, $plan_id );
+
+		$this->assertSame( '', $key, 'Not added as a one-time purchase either.' );
+		$this->assertSame( [], WC()->cart->get_cart() );
+		$this->assertStringContainsString( 'The subscription could not be added right now.', self::error_notices() );
+		$this->assertStringNotContainsString( 'table_that_does_not_exist', self::error_notices() );
+	}
+
+	public function test_checkout_line_item_creation_stops_when_the_plan_cannot_be_read(): void {
+		$plan = $this->make_plan();
+		$item = new WC_Order_Item_Product();
+		$this->capture_log();
+
+		$this->fail_next_query( self::plan_read() );
+		try {
+			( new CartPlanHooks() )->copy_to_line_item_meta( $item, 'cart-key', [ CartPlanHooks::SELLING_PLAN_ID_KEY => (int) $plan->get_id() ] );
+			$this->fail( 'Checkout must stop.' );
+		} catch ( Exception $e ) {
+			$this->assertSame( 'Your subscription could not be processed right now. Please try again.', $e->getMessage() );
+		}
+
+		$this->assertSame( '', $item->get_meta( CartPlanHooks::SELLING_PLAN_ID_KEY ) );
+		$this->assertTrue( $this->has_logged( 'table_that_does_not_exist' ), 'The engine message is logged.' );
+	}
+
+	/**
+	 * Classic checkout submission calculates the totals before it runs the cart check, which
+	 * then refuses it. The cart and checkout page render run the check before their totals.
+	 */
+	public function test_a_failed_pricing_read_fails_the_cart_check_run_after_the_totals(): void {
+		[ $product_id, $plan_id ] = $this->make_product_on_plan();
+		$this->add_to_cart( $product_id, $plan_id );
+		wc_clear_notices();
+
+		$this->fail_next_query( self::plan_read() );
+		WC()->cart->calculate_totals(); // The pricing pass does not throw.
+
+		$this->assertCount( 1, WC()->cart->get_cart() );
+
+		do_action( 'woocommerce_check_cart_items' );
+
+		$this->assertStringContainsString( 'Your subscription could not be processed right now.', self::error_notices() );
+	}
+
+	public function test_a_cart_priced_without_a_failure_passes_the_cart_check(): void {
+		[ $product_id, $plan_id ] = $this->make_product_on_plan();
+		$this->add_to_cart( $product_id, $plan_id );
+		WC()->cart->calculate_totals();
+		wc_clear_notices();
+
+		do_action( 'woocommerce_check_cart_items' );
+
+		$this->assertStringNotContainsString( 'could not be processed', self::error_notices() );
+	}
+
+	public function test_a_later_pricing_pass_that_reads_the_plan_clears_the_refusal(): void {
+		[ $product_id, $plan_id ] = $this->make_product_on_plan();
+		$key                      = $this->add_to_cart( $product_id, $plan_id );
+		wc_clear_notices();
+
+		$this->fail_next_query( self::plan_read() );
+		WC()->cart->calculate_totals();
+		WC()->cart->calculate_totals(); // The plan reads again in the same request.
+
+		do_action( 'woocommerce_check_cart_items' );
+
+		$this->assertStringNotContainsString( 'could not be processed', self::error_notices() );
+		$this->assertSame( 18.0, (float) WC()->cart->get_cart()[ $key ]['data']->get_price(), 'Priced at the plan price.' );
+	}
+
+	public function test_a_failed_pricing_read_flags_only_its_own_line(): void {
+		[ $failed_product_id, $failed_plan_id ]   = $this->make_product_on_plan();
+		[ $healthy_product_id, $healthy_plan_id ] = $this->make_product_on_plan();
+		$failed_key                               = $this->add_to_cart( $failed_product_id, $failed_plan_id );
+		$healthy_key                              = $this->add_to_cart( $healthy_product_id, $healthy_plan_id );
+		$this->assertSame( [ $failed_key, $healthy_key ], array_keys( WC()->cart->get_cart() ), 'The failing line is priced first.' );
+
+		$this->fail_next_query( self::plan_read() );
+		WC()->cart->calculate_totals();
+		$cart = WC()->cart->get_cart();
+
+		do_action( 'woocommerce_store_api_validate_cart_item', $cart[ $healthy_key ]['data'], $cart[ $healthy_key ] );
+		$this->assertSame( 18.0, (float) $cart[ $healthy_key ]['data']->get_price(), 'The healthy line is priced.' );
+
+		$this->expectException( RouteException::class );
+		do_action( 'woocommerce_store_api_validate_cart_item', $cart[ $failed_key ]['data'], $cart[ $failed_key ] );
+	}
+
+	public function test_classic_checkout_is_refused_while_a_plan_cannot_be_read_and_goes_through_once_it_can(): void {
+		$this->enable_only_gateways( [ 'cod' ] );
+		$this->support_engine_charges( 'cod' );
+		wp_set_current_user( $this->create_customer() );
+		[ $product_id, $plan_id ] = $this->make_product_on_plan();
+		$this->make_virtual( $product_id );
+		$this->add_to_cart( $product_id, $plan_id );
+		wc_clear_notices();
+		$created = [];
+		add_action(
+			'woocommerce_checkout_order_created',
+			static function ( $order ) use ( &$created ): void {
+				$created[] = $order->get_id();
+			}
+		);
+
+		$this->fail_next_query( self::plan_read() );
+		$refused = $this->submit_classic_checkout();
+
+		$this->assertSame( 'failure', $refused['result'] ?? null, (string) wp_json_encode( $refused ) );
+		$this->assertStringContainsString( 'Your subscription could not be processed right now.', (string) ( $refused['messages'] ?? '' ) );
+		$this->assertStringNotContainsString( 'table_that_does_not_exist', (string) ( $refused['messages'] ?? '' ) );
+		$this->assertSame( [], $created, 'No order is created, so nothing is charged.' );
+
+		wc_clear_notices();
+		$accepted = $this->submit_classic_checkout();
+
+		$this->assertSame( 'success', $accepted['result'] ?? null, (string) wp_json_encode( $accepted ) );
+		$this->assertCount( 1, $created );
+		$order = wc_get_order( $created[0] );
+		$this->assertSame( 18.0, (float) $order->get_total(), 'The order carries the plan price.' );
+
+		// Checkout saved the session, which the test's rollback undoes: start the next test afresh.
+		WC()->session->forget_session();
+	}
+
+	public function test_a_failed_pricing_read_refuses_store_api_checkout(): void {
+		$this->enable_only_gateways( [ 'cod' ] );
+		$this->support_engine_charges( 'cod' );
+		wp_set_current_user( $this->create_customer() );
+		[ $product_id, $plan_id ] = $this->make_product_on_plan();
+		$this->add_to_cart( $product_id, $plan_id );
+		$address = self::BILLING_ADDRESS + [
+			'company'   => '',
+			'address_2' => '',
+			'state'     => '',
+		];
+
+		$this->fail_next_query( self::plan_read() );
+		$response = $this->dispatch_store_api(
+			'POST',
+			'/checkout',
+			[
+				'billing_address'  => (object) $address,
+				'shipping_address' => (object) array_diff_key( $address, [ 'email' => true ] ),
+				'payment_method'   => 'cod',
+			]
+		);
+
+		$this->assertSame( 409, $response->get_status(), (string) wp_json_encode( $response->get_data() ) );
+		$this->assertStringContainsString( 'woocommerce_subscriptions_lite_plan_read_failed', (string) wp_json_encode( $response->get_data() ), 'Refused by the cart item validation.' );
+		$this->assertStringContainsString( 'Your subscription could not be processed right now.', (string) wp_json_encode( $response->get_data() ) );
+		$this->assertStringNotContainsString( 'table_that_does_not_exist', (string) wp_json_encode( $response->get_data() ) );
 	}
 }

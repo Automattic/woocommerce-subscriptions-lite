@@ -956,4 +956,143 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 		$this->assertCount( 1, $this->pending_resumes( $order->get_id() ), 'Resumed again later.' );
 		$this->assertSame( '', (string) wc_get_order( $order->get_id() )->get_meta( '_wcsl_resume_attempts' ), 'Not counted as a failed run.' );
 	}
+
+	/**
+	 * Regex for the order's contract lookup (`Contracts::find_by_origin_order()`).
+	 */
+	private static function origin_order_read(): string {
+		return '/' . preg_quote( SchemaInstaller::get_table_name( SchemaInstaller::TABLE_CONTRACTS ), '/' ) . '`? WHERE origin_order_id/';
+	}
+
+	/**
+	 * The reads that decide whether and how the order's contract is created.
+	 *
+	 * @return array<string, array{0: string}>
+	 */
+	public function provide_creation_reads(): array {
+		return [
+			'the plan read'       => [ 'plan' ],
+			'the contract lookup' => [ 'origin_order' ],
+		];
+	}
+
+	/**
+	 * @dataProvider provide_creation_reads
+	 * @param string $read Which read fails.
+	 */
+	public function test_a_failed_read_on_the_paid_transition_schedules_a_resume_without_a_deferral( string $read ): void {
+		$customer_id = $this->create_customer();
+		$plan        = $this->make_plan();
+		$order       = $this->create_subscription_order( $customer_id );
+		$this->apply_and_stamp( $order, $plan );
+		$this->capture_log();
+
+		$this->fail_next_query( 'plan' === $read ? self::plan_read() : self::origin_order_read() );
+		$order->update_status( OrderStatus::PROCESSING ); // Must not throw out of the hook.
+
+		$this->assertSame( [], Contracts::find_by_origin_order( $order->get_id() ) );
+		$this->assertTrue( $this->has_logged( sprintf( 'failed to read the subscription data of order %d', $order->get_id() ) ) );
+		$this->assertCount( 1, $this->pending_resumes( $order->get_id() ), 'Resumed later.' );
+		$this->assertSame( '', $this->deferral_reason( $order ), 'A read failure is transient: no deferral.' );
+		$this->assertSame( [], $this->get_order_notes_containing( $order->get_id(), 'Error during status transition' ), 'Nothing escaped the hook.' );
+		$this->assertSame( '', (string) wc_get_order( $order->get_id() )->get_meta( '_wcsl_resume_attempts' ), 'The hook path counts no attempt.' );
+
+		do_action( 'woocommerce_subscriptions_lite_resume_checkout', $order->get_id() );
+
+		$created = Contracts::find_by_origin_order( $order->get_id() );
+		$this->assertCount( 1, $created, 'The resume creates the contract once the read works.' );
+		$this->assertSame( ContractStatus::ACTIVE, $created[0]->get_status() );
+		$this->assertSame( [], $this->pending_resumes( $order->get_id() ) );
+	}
+
+	public function test_a_failed_read_whose_resume_cannot_be_scheduled_notes_the_order_for_attention(): void {
+		$customer_id = $this->create_customer();
+		$plan        = $this->make_plan();
+		$order       = $this->create_subscription_order( $customer_id );
+		$this->apply_and_stamp( $order, $plan );
+		$this->capture_log();
+		add_filter( 'pre_as_schedule_single_action', '__return_zero' ); // Action Scheduler cannot store it.
+
+		$this->fail_next_query( self::plan_read() );
+		$order->update_status( OrderStatus::PROCESSING );
+
+		$this->assertSame( [], $this->pending_resumes( $order->get_id() ) );
+		$this->assertTrue( $this->has_logged( sprintf( 'could not schedule the resume of order %d', $order->get_id() ) ) );
+		$this->assertCount( 1, $this->get_order_notes_containing( $order->get_id(), 'no automatic retry could be scheduled. This order needs attention.' ) );
+		$this->assertSame( [], $this->get_order_notes_containing( $order->get_id(), 'retried automatically' ), 'No retry is promised.' );
+		$this->assertSame( '', $this->deferral_reason( $order ) );
+	}
+
+	/**
+	 * Mark the order paid while its plan read fails, so the paid transition creates nothing, and
+	 * drop the resume it scheduled: only a resume run's own reschedule is pending afterwards.
+	 *
+	 * @param WC_Order $order The stamped order.
+	 */
+	private function pay_with_a_failed_read( WC_Order $order ): void {
+		$this->fail_next_query( self::plan_read() );
+		$order->update_status( OrderStatus::PROCESSING );
+		ScheduledActions::unschedule( 'woocommerce_subscriptions_lite_resume_checkout', [ 'order_id' => $order->get_id() ] );
+		$this->assertSame( [], Contracts::find_by_origin_order( $order->get_id() ) );
+	}
+
+	public function test_a_failed_read_on_the_resume_counts_the_attempt_and_schedules_the_next(): void {
+		$customer_id = $this->create_customer();
+		$plan        = $this->make_plan();
+		$order       = $this->create_subscription_order( $customer_id );
+		$this->apply_and_stamp( $order, $plan );
+		$this->pay_with_a_failed_read( $order );
+
+		$this->fail_next_query( self::plan_read() );
+		do_action( 'woocommerce_subscriptions_lite_resume_checkout', $order->get_id() );
+
+		$this->assertSame( [], Contracts::find_by_origin_order( $order->get_id() ) );
+		$this->assertSame( '1', (string) wc_get_order( $order->get_id() )->get_meta( '_wcsl_resume_attempts' ), 'Counted as a failed run.' );
+		$this->assertCount( 1, $this->pending_resumes( $order->get_id() ), 'Resumed again later.' );
+		$this->assertSame( '', $this->deferral_reason( $order ) );
+	}
+
+	public function test_a_read_that_keeps_failing_on_the_resume_stops_at_the_cap(): void {
+		$customer_id = $this->create_customer();
+		$plan        = $this->make_plan();
+		$order       = $this->create_subscription_order( $customer_id );
+		$this->apply_and_stamp( $order, $plan );
+		$this->pay_with_a_failed_read( $order );
+
+		for ( $run = 1; $run <= 3; $run++ ) {
+			$this->fail_next_query( self::plan_read() );
+			do_action( 'woocommerce_subscriptions_lite_resume_checkout', $order->get_id() );
+		}
+
+		$this->assertSame( [], Contracts::find_by_origin_order( $order->get_id() ) );
+		$this->assertSame( [], $this->pending_resumes( $order->get_id() ), 'Not rescheduled past the cap.' );
+		$this->assertCount( 1, $this->get_order_notes_containing( $order->get_id(), 'still could not be created after several automatic attempts' ) );
+		$this->assertSame( '', $this->deferral_reason( $order ) );
+	}
+
+	/**
+	 * The draft's own plan read fails after the order's plans were classified: handled per draft
+	 * like any other failed resume, not thrown out of the resume.
+	 */
+	public function test_a_failed_plan_read_while_resuming_a_draft_is_a_failed_resume(): void {
+		$customer_id = $this->create_customer();
+		$plan        = $this->make_plan();
+		$order       = $this->create_subscription_order( $customer_id );
+		$this->apply_and_stamp( $order, $plan );
+		$draft_id = $this->leave_draft( $order );
+		ScheduledActions::unschedule( 'woocommerce_subscriptions_lite_resume_checkout', [ 'order_id' => $order->get_id() ] );
+		$this->capture_log();
+
+		$this->fail_next_query( self::plan_read(), 1 ); // The classification's read passes.
+		do_action( 'woocommerce_subscriptions_lite_resume_checkout', $order->get_id() );
+
+		$this->assertSame( ContractStatus::DRAFT, $this->get_contract( $draft_id )->get_status() );
+		$this->assertTrue( $this->has_logged( sprintf( 'failed to resume draft contract %d of order %d', $draft_id, $order->get_id() ) ) );
+		$this->assertSame( '1', (string) wc_get_order( $order->get_id() )->get_meta( '_wcsl_resume_attempts' ), 'Counted as a failed run.' );
+		$this->assertCount( 1, $this->pending_resumes( $order->get_id() ), 'Resumed again later.' );
+
+		do_action( 'woocommerce_subscriptions_lite_resume_checkout', $order->get_id() );
+
+		$this->assertSame( ContractStatus::ACTIVE, $this->get_contract( $draft_id )->get_status() );
+	}
 }
