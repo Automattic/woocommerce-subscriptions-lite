@@ -2,8 +2,8 @@
 /**
  * Integration tests for ContractCreationHandler: recurring money facts of taxed,
  * discounted and multi-line orders, an activation write that fails, a contract
- * insert that fails (noted, retried on the next paid status), a contract field the engine refuses (deferred),
- * and a plan billing payload that does not parse.
+ * insert that fails (noted, resumed automatically), a contract field the engine
+ * refuses (deferred), and a plan billing payload that does not parse.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Tests
  */
@@ -221,7 +221,7 @@ final class ContractCreationOutcomesTest extends LiteIntegrationTestCase {
 		$this->assertNotEmpty( $this->get_order_notes_containing( $order->get_id(), 'plan_unavailable' ), 'An order note records the deferral.' );
 	}
 
-	public function test_a_failed_contract_insert_is_noted_and_retried_on_the_next_paid_status(): void {
+	public function test_a_failed_contract_insert_is_noted_and_retried(): void {
 		global $wpdb;
 
 		$order = $this->create_subscription_order( $this->create_customer() );
@@ -245,7 +245,9 @@ final class ContractCreationOutcomesTest extends LiteIntegrationTestCase {
 		$this->assertSame( [], Contracts::find_by_origin_order( $order->get_id() ), 'The insert failed, so no contract exists.' );
 		$this->assertSame( '', $this->deferral_reason( $order ), 'A database failure may be transient, so nothing blocks a retry.' );
 		$this->assertSame( [], $this->get_order_notes_containing( $order->get_id(), 'creation_failed' ) );
-		$this->assertCount( 1, $this->get_order_notes_containing( $order->get_id(), 'will be retried on the next paid status change' ), 'The merchant can see the failure.' );
+		$this->assertCount( 1, $this->get_order_notes_containing( $order->get_id(), 'It will be retried automatically.' ), 'The merchant can see the failure.' );
+		$pending = $this->get_pending_actions( 'woocommerce_subscriptions_lite_resume_checkout', [ 'order_id' => $order->get_id() ] );
+		$this->assertCount( 1, $pending, 'The creation is resumed later.' );
 
 		// The next paid transition retries and, with the database back, creates the contract.
 		$order->update_status( 'completed' );

@@ -871,6 +871,37 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 	}
 
 	/**
+	 * `$wpdb->suppress_errors()` before {@see self::fail_next_query()} first suppressed them.
+	 *
+	 * @var bool|null
+	 */
+	private $suppressed_errors = null;
+
+	/**
+	 * Replace the next statement matching `$pattern` (after `$skip` matches) with invalid SQL, so
+	 * it fails with a database error. Error output is suppressed until the test ends.
+	 *
+	 * @param string $pattern Regex the statement to break must match.
+	 * @param int    $skip    Matching statements to let through first.
+	 */
+	protected function fail_next_query( string $pattern, int $skip = 0 ): void {
+		global $wpdb;
+
+		$break = static function ( $query ) use ( $pattern, &$skip, &$break ) {
+			if ( is_string( $query ) && 1 === preg_match( $pattern, $query ) && 0 === $skip-- ) {
+				remove_filter( 'query', $break );
+				return 'SELECT * FROM table_that_does_not_exist_for_tests';
+			}
+			return $query;
+		};
+		add_filter( 'query', $break );
+
+		if ( null === $this->suppressed_errors ) {
+			$this->suppressed_errors = $wpdb->suppress_errors( true );
+		}
+	}
+
+	/**
 	 * The store's `timezone_string` and `gmt_offset` before this test pinned them.
 	 *
 	 * @var array{0: mixed, 1: mixed}|null
@@ -901,11 +932,16 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 	}
 
 	/**
-	 * Restore the database clock after a test that pinned it, the store time zone, and the
-	 * gateways' enabled values after a test that changed them.
+	 * Restore error output after a test that broke a query, the database clock after a test that
+	 * pinned it, the store time zone, and the gateways' enabled values after a test that changed them.
 	 */
 	public function tear_down(): void {
 		global $wpdb;
+
+		if ( null !== $this->suppressed_errors ) {
+			$wpdb->suppress_errors( $this->suppressed_errors );
+			$this->suppressed_errors = null;
+		}
 
 		if ( null !== $this->timezone_before ) {
 			update_option( 'timezone_string', $this->timezone_before[0] );
