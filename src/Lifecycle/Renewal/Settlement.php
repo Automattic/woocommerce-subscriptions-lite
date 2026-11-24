@@ -127,11 +127,9 @@ final class Settlement {
 
 	/**
 	 * Action Scheduler entry point for a refused or failed settlement: settle the order when it
-	 * still exists, else fail the cycle still linked to its id as dead (it was deleted unpaid). An
-	 * order that was paid and then deleted fails nothing: a warning is logged. A retry refused
-	 * again schedules the next one; the lock it waits for expires on its own. A storage failure
-	 * counts against {@see self::MAX_SETTLE_ATTEMPTS}; at the cap the retry is dropped and the
-	 * order noted.
+	 * still exists, else fail the cycle still linked to its id as dead (it was deleted unpaid; a
+	 * paid and deleted order only logs a warning). A storage failure is counted before the next
+	 * retry is scheduled ({@see self::record_failed_settlement()}).
 	 *
 	 * @param mixed $order_id Order id.
 	 * @param mixed $paid     Whether the order was paid when the retry was scheduled.
@@ -144,10 +142,7 @@ final class Settlement {
 		$order_id = (int) $order_id;
 		$order    = wc_get_order( $order_id );
 		if ( $order instanceof WC_Order ) {
-			$settled = $this->settle_or_schedule_retry( $order );
-			if ( ! $settled ) {
-				$this->record_failed_settlement( $order );
-			}
+			$this->settle_or_schedule_retry( $order, true );
 			return;
 		}
 
@@ -166,13 +161,15 @@ final class Settlement {
 	}
 
 	/**
-	 * Count a failed retry run on the order; at {@see self::MAX_SETTLE_ATTEMPTS} drop the pending
-	 * retry, note the order and clear the count, so a later failure gets its own attempts and
-	 * note. A failure to record it is logged.
+	 * Count a failed retry run on the order, before its successor is scheduled. At
+	 * {@see self::MAX_SETTLE_ATTEMPTS} drop any pending retry, note the order and clear the count,
+	 * so a later failure gets its own attempts and note. A failure to record it is logged and
+	 * noted, and no retry follows, so a count that cannot be stored cannot loop.
 	 *
 	 * @param WC_Order $order The order.
+	 * @return bool True when the next retry may be scheduled.
 	 */
-	private function record_failed_settlement( WC_Order $order ): void {
+	private function record_failed_settlement( WC_Order $order ): bool {
 		$order_id = $order->get_id();
 		try {
 			// The count is read from the database: a parallel retry run may have counted since.
@@ -181,7 +178,7 @@ final class Settlement {
 			if ( $attempts < self::MAX_SETTLE_ATTEMPTS ) {
 				$order->update_meta_data( self::SETTLE_ATTEMPTS_META, (string) $attempts );
 				$order->save_meta_data();
-				return;
+				return true;
 			}
 
 			ScheduledActions::unschedule(
@@ -197,7 +194,48 @@ final class Settlement {
 			$order->save_meta_data();
 		} catch ( Throwable $e ) {
 			$this->log_failure( sprintf( 'Settlement: failed to record a failed settlement on renewal order %d: %s', $order_id, $e->getMessage() ), $order_id );
+			$this->note_unretried_settlement( $order );
 		}
+
+		return false;
+	}
+
+	/**
+	 * Retry a settlement cut short by a storage failure once the lock has expired, then log the
+	 * failure with whether a retry is scheduled. A retry run counts first, and schedules nothing
+	 * at the cap; a retry that cannot be scheduled notes the order and drops a run's count.
+	 *
+	 * @param WC_Order         $order         The order.
+	 * @param RuntimeException $failure       The storage failure.
+	 * @param bool             $count_attempt Whether this is a retry run, counted against the cap.
+	 */
+	private function retry_failed_settlement( WC_Order $order, RuntimeException $failure, bool $count_attempt ): void {
+		$order_id  = $order->get_id();
+		$retry     = true;
+		$scheduled = false;
+		if ( $count_attempt ) {
+			$retry = $this->record_failed_settlement( $order );
+		}
+		if ( $retry ) {
+			$scheduled = $this->schedule_retry( $order_id, $order->is_paid(), self::SETTLE_AFTER_LOCK_EXPIRY_SECONDS );
+		}
+
+		$this->log_failure( sprintf( 'Settlement: settling renewal order %d failed: %s; %s', $order_id, $failure->getMessage(), self::retry_outcome( $scheduled ) ), $order_id );
+		if ( $retry && ! $scheduled ) {
+			$this->note_unretried_settlement( $order );
+			if ( $count_attempt ) {
+				$this->drop_settle_attempts( $order );
+			}
+		}
+	}
+
+	/**
+	 * The end of a settlement failure's log line: whether a retry is scheduled.
+	 *
+	 * @param bool $scheduled Whether a retry is scheduled.
+	 */
+	private static function retry_outcome( bool $scheduled ): string {
+		return $scheduled ? 'a retry is scheduled.' : 'no retry is scheduled.';
 	}
 
 	/**
@@ -209,6 +247,20 @@ final class Settlement {
 		if ( '' !== (string) $order->get_meta( self::SETTLE_ATTEMPTS_META ) ) {
 			$order->delete_meta_data( self::SETTLE_ATTEMPTS_META );
 			$order->save_meta_data();
+		}
+	}
+
+	/**
+	 * Drop the failed-attempt count of an order with no retry pending, so a later failure gets
+	 * its own attempts. A failure to drop it is logged.
+	 *
+	 * @param WC_Order $order The order.
+	 */
+	private function drop_settle_attempts( WC_Order $order ): void {
+		try {
+			self::clear_settle_attempts( $order );
+		} catch ( Throwable $e ) {
+			$this->log_failure( sprintf( 'Settlement: failed to drop the failed-attempt count of renewal order %d: %s', $order->get_id(), $e->getMessage() ), $order->get_id() );
 		}
 	}
 
@@ -387,8 +439,8 @@ final class Settlement {
 				return;
 			}
 
-			$this->log_failure( sprintf( 'Settlement: settling removed renewal order %d failed: %s; it is retried.', $order_id, $e->getMessage() ), $order_id );
 			$scheduled = $this->schedule_retry( $order_id, false, self::SETTLE_AFTER_LOCK_EXPIRY_SECONDS );
+			$this->log_failure( sprintf( 'Settlement: settling removed renewal order %d failed: %s; %s', $order_id, $e->getMessage(), self::retry_outcome( $scheduled ) ), $order_id );
 			if ( ! $scheduled ) {
 				$this->note_unretried_settlement( $order );
 			}
@@ -423,14 +475,15 @@ final class Settlement {
 	}
 
 	/**
-	 * Settle the order. A lock conflict schedules a retry; a storage failure (a `RuntimeException`
-	 * other than the lock's) schedules one for after the lock expires; any other failure is only
-	 * logged, so a bug is not retried. A completed run clears the failed-attempt count.
+	 * Settle the order. A lock conflict schedules a retry, a storage failure (a `RuntimeException`
+	 * other than the lock's) one for after the lock expires; any other failure is only logged. A
+	 * completed run clears the failed-attempt count. A retry completes a paid settlement cut
+	 * short, but not a failed or dead one cut short after its cycle write.
 	 *
-	 * @param WC_Order $order The order.
-	 * @return bool False when a storage failure cut the settlement short (a lock conflict is not a failure).
+	 * @param WC_Order $order         The order.
+	 * @param bool     $count_attempt Whether this is a retry run, whose storage failure is counted.
 	 */
-	private function settle_or_schedule_retry( WC_Order $order ): bool {
+	private function settle_or_schedule_retry( WC_Order $order, bool $count_attempt = false ): void {
 		$order_id = $order->get_id();
 		try {
 			$conflict = $this->settle( $order );
@@ -440,15 +493,11 @@ final class Settlement {
 		} catch ( ContractLockedException $e ) {
 			$conflict = HeldLocks::get_refused_conflict( $e );
 		} catch ( RuntimeException $e ) {
-			$this->log_failure( sprintf( 'Settlement: settling renewal order %d failed: %s; it is retried.', $order_id, $e->getMessage() ), $order_id );
-			$scheduled = $this->schedule_retry( $order_id, $order->is_paid(), self::SETTLE_AFTER_LOCK_EXPIRY_SECONDS );
-			if ( ! $scheduled ) {
-				$this->note_unretried_settlement( $order );
-			}
-			return false;
+			$this->retry_failed_settlement( $order, $e, $count_attempt );
+			return;
 		} catch ( Throwable $e ) {
 			$this->log_failure( sprintf( 'Settlement: settling renewal order %d failed: %s', $order_id, $e->getMessage() ), $order_id );
-			return true;
+			return;
 		}
 
 		if ( null !== $conflict ) {
@@ -458,8 +507,6 @@ final class Settlement {
 				$this->note_unretried_settlement( $order );
 			}
 		}
-
-		return true;
 	}
 
 	/**

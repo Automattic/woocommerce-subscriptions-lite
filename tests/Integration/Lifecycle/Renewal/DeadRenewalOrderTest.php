@@ -433,20 +433,34 @@ final class DeadRenewalOrderTest extends LiteIntegrationTestCase {
 	}
 
 	/**
-	 * Break the cycle lookup of both removal signals: with order storage sync on, removing an
-	 * order fires the orders-table hook and the posts hook.
+	 * Remove the order with every cycle lookup failing until the removal returns: one removal
+	 * signal fires, or two (the posts hook too) when order storage sync is on.
+	 *
+	 * @param WC_Order $order The order.
+	 * @param bool     $force True to delete it permanently, false to trash it.
 	 */
-	private function fail_removal_lookups(): void {
-		$this->fail_next_query( self::cycle_lookup() );
-		$this->fail_next_query( self::cycle_lookup() );
+	private function remove_with_failing_lookups( WC_Order $order, bool $force ): void {
+		global $wpdb;
+
+		$pattern    = self::cycle_lookup();
+		$break      = static function ( $query ) use ( $pattern ) {
+			return is_string( $query ) && 1 === preg_match( $pattern, $query ) ? 'SELECT * FROM table_that_does_not_exist_for_tests' : $query;
+		};
+		$suppressed = $wpdb->suppress_errors( true );
+		add_filter( 'query', $break );
+		try {
+			$order->delete( $force );
+		} finally {
+			remove_filter( 'query', $break );
+			$wpdb->suppress_errors( $suppressed );
+		}
 	}
 
 	public function test_a_trashed_renewal_order_whose_lookup_fails_fails_its_cycle_on_the_retry(): void {
 		[ $contract_id, , $order ] = $this->seed( ContractStatus::ACTIVE, 'pending', CycleStatus::PENDING );
 		$order_id                  = $order->get_id();
 
-		$this->fail_removal_lookups();
-		$order->delete();
+		$this->remove_with_failing_lookups( $order, false );
 
 		$this->assertCount( 1, $this->pending_retries( $order_id, false ) );
 		$this->assertSame( CycleStatus::PENDING, $this->head( $contract_id )->get_status() );
@@ -461,8 +475,7 @@ final class DeadRenewalOrderTest extends LiteIntegrationTestCase {
 		[ $contract_id, , $order ] = $this->seed( ContractStatus::ACTIVE, 'on-hold', CycleStatus::PROCESSING );
 		$order_id                  = $order->get_id();
 
-		$this->fail_removal_lookups();
-		$order->delete( true );
+		$this->remove_with_failing_lookups( $order, true );
 
 		$this->assertCount( 1, $this->pending_retries( $order_id, false ) );
 		$this->assertSame( CycleStatus::PROCESSING, $this->head( $contract_id )->get_status() );
@@ -478,8 +491,7 @@ final class DeadRenewalOrderTest extends LiteIntegrationTestCase {
 	public function test_a_deleted_renewal_order_whose_retry_fails_too_is_given_up_with_an_error(): void {
 		[ $contract_id, , $order ] = $this->seed( ContractStatus::ACTIVE, 'on-hold', CycleStatus::PROCESSING );
 		$order_id                  = $order->get_id();
-		$this->fail_removal_lookups();
-		$order->delete( true );
+		$this->remove_with_failing_lookups( $order, true );
 		foreach ( array_keys( $this->pending_retries( $order_id, false ) ) as $action_id ) {
 			\ActionScheduler::store()->mark_complete( (int) $action_id );
 		}
@@ -521,6 +533,8 @@ final class DeadRenewalOrderTest extends LiteIntegrationTestCase {
 
 		$this->assertTrue( $this->has_logged( sprintf( 'settling removed renewal order %d failed', $order->get_id() ) ) );
 		$this->assertTrue( $this->has_logged( sprintf( 'could not schedule the settlement retry of renewal order %d', $order->get_id() ) ) );
+		$this->assertTrue( $this->has_logged( 'no retry is scheduled.' ) );
 		$this->assertCount( 1, $this->get_order_notes_containing( $order->get_id(), 'no automatic retry could be scheduled' ) );
+		$this->assertSame( [], $this->get_order_notes_containing( $order->get_id(), 'table_that_does_not_exist' ), 'No database text in notes.' );
 	}
 }

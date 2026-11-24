@@ -826,6 +826,7 @@ final class SettlementTest extends LiteIntegrationTestCase {
 		( new Settlement() )->handle_order( $order->get_id() );
 
 		$this->assertTrue( $this->has_logged( sprintf( 'settling renewal order %d failed', $order->get_id() ) ) );
+		$this->assertTrue( $this->has_logged( 'a retry is scheduled.' ) );
 		$actions = $this->get_pending_actions(
 			'woocommerce_subscriptions_lite_settle_order',
 			[
@@ -924,8 +925,111 @@ final class SettlementTest extends LiteIntegrationTestCase {
 		$this->assertSame( [], $this->pending_retries( $order_id ), 'No retry after the cap.' );
 		$this->assertTrue( $this->has_logged( sprintf( 'gave up settling renewal order %d after 3 failed attempts', $order_id ) ) );
 		$this->assertCount( 1, $this->get_order_notes_containing( $order_id, 'still could not be updated after several automatic attempts' ) );
+		$this->assertSame( [], $this->get_order_notes_containing( $order_id, 'no automatic retry could be scheduled' ) );
+		$this->assertSame( [], $this->get_order_notes_containing( $order_id, 'table_that_does_not_exist' ), 'No database text in notes.' );
+		$this->assertTrue( $this->has_logged( 'no retry is scheduled.' ) );
 		$this->assertSame( '', $this->settle_attempts( $order_id ), 'Cleared, so a later failure gets its own attempts.' );
 		$this->assertSame( CycleStatus::PENDING, $this->head( $contract_id )->get_status() );
+	}
+
+	public function test_a_capped_run_whose_retry_cannot_be_scheduled_gets_only_the_cap_note(): void {
+		[ , $order ] = $this->seed_renewal();
+		$order_id    = $order->get_id();
+		$order->payment_complete();
+		$this->fail_next_query( self::cycle_lookup() );
+		( new Settlement() )->handle_order( $order_id );
+		$this->run_failing_retry( $order_id, true );
+		$this->run_failing_retry( $order_id, true );
+		add_filter( 'pre_as_schedule_single_action', '__return_zero' ); // Action Scheduler cannot store it.
+
+		$this->run_failing_retry( $order_id, true );
+
+		$this->assertCount( 1, $this->get_order_notes_containing( $order_id, 'still could not be updated after several automatic attempts' ) );
+		$this->assertSame( [], $this->get_order_notes_containing( $order_id, 'no automatic retry could be scheduled' ), 'The cap schedules nothing, so it has nothing to report.' );
+		$this->assertSame( '', $this->settle_attempts( $order_id ) );
+	}
+
+	public function test_a_retry_run_whose_successor_cannot_be_scheduled_drops_its_count(): void {
+		[ , $order ] = $this->seed_renewal();
+		$order_id    = $order->get_id();
+		$order->payment_complete();
+		$this->fail_next_query( self::cycle_lookup() );
+		( new Settlement() )->handle_order( $order_id );
+		$this->run_failing_retry( $order_id, true );
+		$this->assertSame( '1', $this->settle_attempts( $order_id ) );
+		add_filter( 'pre_as_schedule_single_action', '__return_zero' ); // Action Scheduler cannot store it.
+		$this->capture_log();
+
+		$this->run_failing_retry( $order_id, true );
+
+		$this->assertSame( [], $this->pending_retries( $order_id ) );
+		$this->assertSame( '', $this->settle_attempts( $order_id ), 'No retry continues the count.' );
+		$this->assertTrue( $this->has_logged( sprintf( 'settling renewal order %d failed', $order_id ) ) );
+		$this->assertTrue( $this->has_logged( 'no retry is scheduled.' ) );
+		$this->assertFalse( $this->has_logged( 'a retry is scheduled.' ) );
+		$this->assertCount( 1, $this->get_order_notes_containing( $order_id, 'no automatic retry could be scheduled' ) );
+		$this->assertSame( [], $this->get_order_notes_containing( $order_id, 'still could not be updated after several automatic attempts' ) );
+	}
+
+	public function test_a_note_that_cannot_be_added_for_an_unretried_settlement_is_logged(): void {
+		[ , $order ] = $this->seed_renewal();
+		$order->payment_complete();
+		add_filter( 'pre_as_schedule_single_action', '__return_zero' ); // Action Scheduler cannot store it.
+		add_filter( 'woocommerce_new_order_note_data', [ self::class, 'throw_on_note' ] );
+		$this->capture_log();
+
+		$this->fail_next_query( self::cycle_lookup() );
+		( new Settlement() )->handle_order( $order->get_id() );
+
+		$this->assertTrue( $this->has_logged( sprintf( 'failed to note the unretried settlement on renewal order %d', $order->get_id() ) ) );
+		$this->assertSame( [], $this->pending_retries( $order->get_id() ) );
+	}
+
+	public function test_a_cap_that_cannot_be_recorded_is_logged_and_not_retried(): void {
+		[ $contract_id, $order ] = $this->seed_renewal();
+		$order_id                = $order->get_id();
+		$order->payment_complete();
+		$this->fail_next_query( self::cycle_lookup() );
+		( new Settlement() )->handle_order( $order_id );
+		$this->run_failing_retry( $order_id, true );
+		$this->run_failing_retry( $order_id, true );
+		add_filter( 'woocommerce_new_order_note_data', [ self::class, 'throw_on_note' ] );
+		$this->capture_log();
+
+		$this->run_failing_retry( $order_id, true );
+
+		$this->assertTrue( $this->has_logged( sprintf( 'failed to record a failed settlement on renewal order %d', $order_id ) ) );
+		$this->assertTrue( $this->has_logged( sprintf( 'failed to note the unretried settlement on renewal order %d', $order_id ) ) );
+		$this->assertSame( [], $this->pending_retries( $order_id ), 'A count that cannot be recorded does not loop.' );
+		$this->assertSame( CycleStatus::PENDING, $this->head( $contract_id )->get_status() );
+	}
+
+	public function test_a_retry_run_that_ends_in_a_non_storage_error_is_not_counted_or_retried(): void {
+		[ , $order ] = $this->seed_renewal();
+		$order_id    = $order->get_id();
+		$order->payment_complete();
+		$this->capture_log();
+		add_action(
+			'woocommerce_subscriptions_lite_renewal_paid',
+			static function () {
+				throw new \Error( 'A bug in a listener.' );
+			}
+		);
+
+		( new Settlement() )->retry( $order_id, true );
+
+		$this->assertTrue( $this->has_logged( sprintf( 'settling renewal order %d failed: A bug in a listener.', $order_id ) ) );
+		$this->assertSame( '', $this->settle_attempts( $order_id ) );
+		$this->assertSame( [], $this->pending_retries( $order_id ) );
+	}
+
+	/**
+	 * `woocommerce_new_order_note_data` callback that makes adding the note throw.
+	 *
+	 * @throws \RuntimeException Always.
+	 */
+	public static function throw_on_note(): void {
+		throw new \RuntimeException( 'The note could not be added.' );
 	}
 
 	public function test_a_failure_after_the_cap_gets_its_own_attempts_and_note(): void {
@@ -1056,7 +1160,9 @@ final class SettlementTest extends LiteIntegrationTestCase {
 
 		$this->assertSame( [], $this->pending_retries( $order->get_id() ) );
 		$this->assertTrue( $this->has_logged( sprintf( 'could not schedule the settlement retry of renewal order %d', $order->get_id() ) ) );
+		$this->assertTrue( $this->has_logged( 'no retry is scheduled.' ) );
 		$this->assertCount( 1, $this->get_order_notes_containing( $order->get_id(), 'no automatic retry could be scheduled' ) );
+		$this->assertSame( [], $this->get_order_notes_containing( $order->get_id(), 'table_that_does_not_exist' ), 'No database text in notes.' );
 	}
 
 	public function test_a_lock_retry_that_cannot_be_scheduled_is_logged_and_noted(): void {
