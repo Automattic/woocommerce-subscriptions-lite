@@ -382,7 +382,7 @@ final class DeadRenewalOrderTest extends LiteIntegrationTestCase {
 
 	/**
 	 * A replaced order paid late whose renewal read fails must not read as "renewal gone" and be
-	 * flagged for a refund: the failure is logged and the renewal left as it was.
+	 * flagged for a refund: the failure is logged and retried, and the retry takes the renewal back.
 	 */
 	public function test_a_replaced_order_paid_late_whose_renewal_read_fails_is_not_flagged_for_a_refund(): void {
 		[ $contract_id, $order ] = $this->replace_a_cancelled_renewal( 'failed' );
@@ -398,5 +398,143 @@ final class DeadRenewalOrderTest extends LiteIntegrationTestCase {
 		$this->assertSame( CycleStatus::FAILED, $head->get_status() );
 		$this->assertNotSame( $order->get_id(), $head->get_order_id(), 'Not relinked.' );
 		$this->assert_lock_released( $contract_id );
+		$this->assertCount( 1, $this->pending_retries( $order->get_id(), true ) );
+
+		do_action( 'woocommerce_subscriptions_lite_settle_order', $order->get_id(), true );
+
+		$head = $this->head( $contract_id );
+		$this->assertSame( CycleStatus::BILLED, $head->get_status() );
+		$this->assertSame( $order->get_id(), $head->get_order_id(), 'Relinked by the retry.' );
+		$this->assertSame( ContractStatus::ACTIVE, $this->get_contract( $contract_id )->get_status() );
+	}
+
+	/**
+	 * Regex for the engine's cycle-by-order read (`Contracts::find_cycles_by_order()`).
+	 */
+	private static function cycle_lookup(): string {
+		return '/FROM ' . preg_quote( SchemaInstaller::get_table_name( SchemaInstaller::TABLE_CYCLES ), '/' ) . ' WHERE order_id/';
+	}
+
+	/**
+	 * Pending settlement retries for the order with these arguments.
+	 *
+	 * @param int  $order_id Order id.
+	 * @param bool $paid     The retry's paid argument.
+	 * @return array<int, \ActionScheduler_Action>
+	 */
+	private function pending_retries( int $order_id, bool $paid ): array {
+		return $this->get_pending_actions(
+			'woocommerce_subscriptions_lite_settle_order',
+			[
+				'order_id' => $order_id,
+				'paid'     => $paid,
+			]
+		);
+	}
+
+	/**
+	 * Remove the order with every cycle lookup failing until the removal returns: one removal
+	 * signal fires, or two (the posts hook too) when order storage sync is on.
+	 *
+	 * @param WC_Order $order The order.
+	 * @param bool     $force True to delete it permanently, false to trash it.
+	 */
+	private function remove_with_failing_lookups( WC_Order $order, bool $force ): void {
+		global $wpdb;
+
+		$pattern    = self::cycle_lookup();
+		$break      = static function ( $query ) use ( $pattern ) {
+			return is_string( $query ) && 1 === preg_match( $pattern, $query ) ? 'SELECT * FROM table_that_does_not_exist_for_tests' : $query;
+		};
+		$suppressed = $wpdb->suppress_errors( true );
+		add_filter( 'query', $break );
+		try {
+			$order->delete( $force );
+		} finally {
+			remove_filter( 'query', $break );
+			$wpdb->suppress_errors( $suppressed );
+		}
+	}
+
+	public function test_a_trashed_renewal_order_whose_lookup_fails_fails_its_cycle_on_the_retry(): void {
+		[ $contract_id, , $order ] = $this->seed( ContractStatus::ACTIVE, 'pending', CycleStatus::PENDING );
+		$order_id                  = $order->get_id();
+
+		$this->remove_with_failing_lookups( $order, false );
+
+		$this->assertCount( 1, $this->pending_retries( $order_id, false ) );
+		$this->assertSame( CycleStatus::PENDING, $this->head( $contract_id )->get_status() );
+
+		do_action( 'woocommerce_subscriptions_lite_settle_order', $order_id, false );
+
+		$this->assertSame( CycleStatus::FAILED, $this->head( $contract_id )->get_status() );
+		$this->assertSame( ContractStatus::ON_HOLD, $this->get_contract( $contract_id )->get_status() );
+	}
+
+	public function test_a_deleted_renewal_order_whose_lookup_fails_fails_its_cycle_on_the_retry(): void {
+		[ $contract_id, , $order ] = $this->seed( ContractStatus::ACTIVE, 'on-hold', CycleStatus::PROCESSING );
+		$order_id                  = $order->get_id();
+
+		$this->remove_with_failing_lookups( $order, true );
+
+		$this->assertCount( 1, $this->pending_retries( $order_id, false ) );
+		$this->assertSame( CycleStatus::PROCESSING, $this->head( $contract_id )->get_status() );
+
+		do_action( 'woocommerce_subscriptions_lite_settle_order', $order_id, false );
+
+		$head = $this->head( $contract_id );
+		$this->assertSame( CycleStatus::FAILED, $head->get_status() );
+		$this->assertSame( Settlement::REASON_ORDER_CANCELLED, $head->get_reason() );
+		$this->assertSame( ContractStatus::ON_HOLD, $this->get_contract( $contract_id )->get_status() );
+	}
+
+	public function test_a_deleted_renewal_order_whose_retry_fails_too_is_given_up_with_an_error(): void {
+		[ $contract_id, , $order ] = $this->seed( ContractStatus::ACTIVE, 'on-hold', CycleStatus::PROCESSING );
+		$order_id                  = $order->get_id();
+		$this->remove_with_failing_lookups( $order, true );
+		foreach ( array_keys( $this->pending_retries( $order_id, false ) ) as $action_id ) {
+			\ActionScheduler::store()->mark_complete( (int) $action_id );
+		}
+		$this->capture_log();
+
+		$this->fail_next_query( self::cycle_lookup() );
+		do_action( 'woocommerce_subscriptions_lite_settle_order', $order_id, false );
+
+		$this->assertTrue( $this->has_logged( sprintf( 'gave up settling deleted renewal order %d', $order_id ) ) );
+		$this->assertSame( [], $this->pending_retries( $order_id, false ), 'Nothing more is scheduled.' );
+		$this->assertSame( CycleStatus::PROCESSING, $this->head( $contract_id )->get_status() );
+	}
+
+	public function test_an_unpaid_renewal_order_trashed_from_the_legacy_posts_screen_whose_lookup_fails_is_retried(): void {
+		if ( OrderUtil::custom_orders_table_usage_is_enabled() ) {
+			$this->markTestSkipped( 'The suite runs on the orders table; the legacy posts screen only exists with post storage.' );
+		}
+		[ $contract_id, , $order ] = $this->seed( ContractStatus::ACTIVE, 'on-hold', CycleStatus::PROCESSING );
+
+		$this->fail_next_query( self::cycle_lookup() );
+		wp_trash_post( $order->get_id() );
+
+		$this->assertCount( 1, $this->pending_retries( $order->get_id(), false ) );
+		$this->assertSame( CycleStatus::PROCESSING, $this->head( $contract_id )->get_status() );
+
+		do_action( 'woocommerce_subscriptions_lite_settle_order', $order->get_id(), false );
+
+		$this->assertSame( CycleStatus::FAILED, $this->head( $contract_id )->get_status() );
+		$this->assertSame( ContractStatus::ON_HOLD, $this->get_contract( $contract_id )->get_status() );
+	}
+
+	public function test_a_removed_renewal_order_whose_retry_cannot_be_scheduled_is_logged_and_noted(): void {
+		[ , , $order ] = $this->seed( ContractStatus::ACTIVE, 'on-hold', CycleStatus::PROCESSING );
+		add_filter( 'pre_as_schedule_single_action', '__return_zero' ); // Action Scheduler cannot store it.
+		$this->capture_log();
+
+		$this->fail_next_query( self::cycle_lookup() );
+		( new Settlement() )->handle_removed_order( $order->get_id() );
+
+		$this->assertTrue( $this->has_logged( sprintf( 'settling removed renewal order %d failed', $order->get_id() ) ) );
+		$this->assertTrue( $this->has_logged( sprintf( 'could not schedule the settlement retry of renewal order %d', $order->get_id() ) ) );
+		$this->assertTrue( $this->has_logged( 'no retry is scheduled.' ) );
+		$this->assertCount( 1, $this->get_order_notes_containing( $order->get_id(), 'no automatic retry could be scheduled' ) );
+		$this->assertSame( [], $this->get_order_notes_containing( $order->get_id(), 'table_that_does_not_exist' ), 'No database text in notes.' );
 	}
 }
