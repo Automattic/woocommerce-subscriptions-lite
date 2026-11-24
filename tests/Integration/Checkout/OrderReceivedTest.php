@@ -16,6 +16,7 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Checkout;
 use Automattic\WooCommerce\Enums\OrderStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\PlanStatus;
+use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\SchemaInstaller;
 use Automattic\WooCommerce\SubscriptionsLite\Checkout\ContractCreationHandler;
 use Automattic\WooCommerce\SubscriptionsLite\Checkout\OrderReceived;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
@@ -180,5 +181,27 @@ final class OrderReceivedTest extends LiteIntegrationTestCase {
 		$order       = $this->create_subscription_order( $customer_id );
 
 		$this->assertSame( '', trim( $this->render( $order->get_id() ) ) );
+	}
+
+	public function test_renders_nothing_and_logs_when_the_contract_cannot_be_read(): void {
+		$contract_id = $this->create_contract( $this->create_customer() );
+		$order_id    = (int) Contracts::get( $contract_id )->get_origin_order_id();
+		$this->capture_log();
+
+		$this->fail_next_query( '/FROM ' . preg_quote( SchemaInstaller::get_table_name( SchemaInstaller::TABLE_CONTRACTS ), '/' ) . ' WHERE origin_order_id/' );
+
+		$this->assertSame( '', $this->render( $order_id ) );
+		$this->assertTrue( $this->has_logged( 'table_that_does_not_exist' ), 'The engine message is logged.' );
+	}
+
+	public function test_renders_nothing_and_logs_when_the_plan_cannot_be_read(): void {
+		$contract_id = $this->create_contract( $this->create_customer() );
+		$order_id    = (int) Contracts::get( $contract_id )->get_origin_order_id();
+		$this->capture_log();
+
+		$this->fail_next_query( self::plan_read() );
+
+		$this->assertSame( '', $this->render( $order_id ), 'No partial summary.' );
+		$this->assertTrue( $this->has_logged( 'table_that_does_not_exist' ), 'The engine message is logged.' );
 	}
 }

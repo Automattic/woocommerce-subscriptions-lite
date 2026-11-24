@@ -32,6 +32,7 @@ use Automattic\WooCommerce\SubscriptionsLite\CustomerPortal\Endpoints;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Pricing\BillingTerms;
 use Automattic\WooCommerce\SubscriptionsLite\Utilities\Formatter;
+use RuntimeException;
 use WC_Order;
 
 defined( 'ABSPATH' ) || exit;
@@ -52,7 +53,8 @@ final class OrderReceived {
 	}
 
 	/**
-	 * Print the subscription table, or the deferral warning, for an order.
+	 * Print the subscription table, or the deferral warning, for an order. When the
+	 * subscription or its plan cannot be read, it prints nothing and logs the failure.
 	 *
 	 * @param mixed $order A `WC_Order` (as the hook passes) or an order id.
 	 */
@@ -62,9 +64,22 @@ final class OrderReceived {
 			return;
 		}
 
-		$contract = $this->find_contract( $order );
+		try {
+			$contract = $this->find_contract( $order );
+			$plan     = null !== $contract ? $this->find_plan( $contract->get_selling_plan_id() ) : null;
+		} catch ( RuntimeException $e ) {
+			wc_get_logger()->error(
+				sprintf( 'OrderReceived: failed to read the subscription of order %d: %s', $order->get_id(), $e->getMessage() ),
+				[
+					'source'   => Package::EXTENSION_SLUG,
+					'order_id' => $order->get_id(),
+				]
+			);
+			return;
+		}
+
 		if ( null !== $contract ) {
-			$this->render_table( $contract );
+			$this->render_table( $contract, $plan );
 			return;
 		}
 
@@ -103,13 +118,13 @@ final class OrderReceived {
 	 * Mirrors WooCommerce's My Account orders-table markup so the theme styles it
 	 * identically to the order details table above it.
 	 *
-	 * @param ContractView $contract The created contract.
+	 * @param ContractView  $contract The created contract.
+	 * @param PlanView|null $plan     The contract's plan, or null if gone.
 	 */
-	private function render_table( ContractView $contract ): void {
+	private function render_table( ContractView $contract, ?PlanView $plan ): void {
 		$contract_id  = $contract->get_id();
 		$status       = $contract->get_status();
 		$url          = ( new Endpoints() )->detail_url( $contract_id );
-		$plan         = $this->find_plan( $contract->get_selling_plan_id() );
 		$cadence      = $this->plan_cadence( $plan );
 		$amount       = wc_price( (float) $contract->get_billing_total(), [ 'currency' => (string) ( $contract->get_currency() ?? '' ) ] );
 		$next_gmt     = $contract->get_next_payment_gmt();

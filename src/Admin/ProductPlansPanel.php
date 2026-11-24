@@ -26,6 +26,7 @@ declare( strict_types=1 );
 namespace Automattic\WooCommerce\SubscriptionsLite\Admin;
 
 use InvalidArgumentException;
+use RuntimeException;
 use WC_Admin_Meta_Boxes;
 use WC_Product;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Plans;
@@ -137,20 +138,28 @@ final class ProductPlansPanel {
 	 * Render the panel. The server paints the state matching the saved
 	 * applicability (plans section hidden in one-time mode, the checkbox
 	 * column hidden in all-scope); the toggle script only mirrors these
-	 * rules on input changes.
+	 * rules on input changes. When the plans cannot be read, an inline error
+	 * replaces the plan list and the failure is logged.
 	 */
 	public function render_panel(): void {
 		global $post;
 
 		$product_id    = isset( $post->ID ) ? (int) $post->ID : 0;
 		$applicability = ( new ApplicabilityStore() )->get( $product_id );
-		$active_plans  = Plans::list(
-			[
-				'extension_slug' => Package::EXTENSION_SLUG,
-				'status'         => PlanStatus::ACTIVE,
-			]
-		);
-		$plans         = ( new PlanOrder() )->sort( $active_plans );
+		$plans         = [];
+		$plans_failed  = false;
+		try {
+			$active_plans = Plans::list(
+				[
+					'extension_slug' => Package::EXTENSION_SLUG,
+					'status'         => PlanStatus::ACTIVE,
+				]
+			);
+			$plans        = ( new PlanOrder() )->sort( $active_plans );
+		} catch ( RuntimeException $e ) {
+			$plans_failed = true;
+			self::log_read_failure( sprintf( 'failed to read the plans for the panel of product %d', $product_id ), $e );
+		}
 
 		$is_plans_mode = ProductApplicability::MODE_DISABLE !== $applicability->get_mode();
 		$is_select     = ProductApplicability::MODE_INHERIT_SELECT === $applicability->get_mode();
@@ -229,7 +238,11 @@ final class ProductPlansPanel {
 						</label>
 					</fieldset>
 
-					<?php if ( empty( $plans ) ) : ?>
+					<?php if ( $plans_failed ) : ?>
+						<div class="notice notice-error inline wc-subscriptions-lite-plans-read-error">
+							<p><?php esc_html_e( 'The subscription plans could not be loaded. Please reload the page to try again.', 'woocommerce-subscriptions-lite' ); ?></p>
+						</div>
+					<?php elseif ( empty( $plans ) ) : ?>
 						<p class="wc-subscriptions-lite-plans-empty">
 							<?php esc_html_e( 'No storewide subscription plans yet.', 'woocommerce-subscriptions-lite' ); ?>
 						</p>
@@ -352,8 +365,9 @@ final class ProductPlansPanel {
 	 * checkbox is treated as "nothing chosen yet", not as detaching all
 	 * plans. Never throws: core fires
 	 * `woocommerce_admin_process_product_object` unwrapped, so an exception
-	 * here would fatal the whole product save - a store rejection reports
-	 * through the metabox error list instead.
+	 * here would fatal the whole product save - a store rejection, or plans
+	 * that cannot be read to validate the selection, report through the
+	 * metabox error list instead.
 	 *
 	 * @param WC_Product $product The product being saved.
 	 */
@@ -421,7 +435,22 @@ final class ProductPlansPanel {
 					$e->getMessage()
 				)
 			);
+		} catch ( RuntimeException $e ) {
+			// The plans could not be read to validate the selection: nothing is written, and the
+			// rest of the product save proceeds, as for a refusal.
+			self::log_read_failure( sprintf( 'failed to read the plans to save product %d', $product->get_id() ), $e );
+			WC_Admin_Meta_Boxes::add_error( __( 'The subscription plans could not be saved right now. Please try again.', 'woocommerce-subscriptions-lite' ) );
 		}
+	}
+
+	/**
+	 * Log a failed plan read with the engine message.
+	 *
+	 * @param string           $context What failed, without the class prefix.
+	 * @param RuntimeException $error   The read failure.
+	 */
+	private static function log_read_failure( string $context, RuntimeException $error ): void {
+		wc_get_logger()->error( sprintf( 'ProductPlansPanel: %s: %s', $context, $error->getMessage() ), [ 'source' => Package::EXTENSION_SLUG ] );
 	}
 
 	/**

@@ -158,4 +158,19 @@ final class PlanOrderControllerTest extends LiteIntegrationTestCase {
 
 		return rest_do_request( $request );
 	}
+
+	public function test_a_failed_plan_read_answers_500_without_writing(): void {
+		$first  = (int) $this->make_plan()->get_id();
+		$second = (int) $this->make_plan()->get_id();
+		$this->capture_log();
+
+		$this->fail_next_query( self::plan_read() );
+		$response = $this->reorder( [ $second, $first ] );
+
+		$this->assertSame( 500, $response->get_status() );
+		$this->assertSame( 'woocommerce_subscriptions_lite_plans_read_failed', $response->get_data()['code'] );
+		$this->assertStringNotContainsString( 'table_that_does_not_exist', (string) wp_json_encode( $response->get_data() ) );
+		$this->assertSame( [], ( new PlanOrder() )->get(), 'Nothing is written.' );
+		$this->assertTrue( $this->has_logged( 'table_that_does_not_exist' ), 'The engine message is logged.' );
+	}
 }

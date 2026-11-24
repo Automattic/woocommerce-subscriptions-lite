@@ -132,7 +132,7 @@ final class SubscriptionsListTable extends WP_List_Table {
 			wc_get_logger()->error(
 				'Admin subscriptions list could not be loaded: ' . $e->getMessage(),
 				[
-					'source'    => 'woocommerce-subscriptions-lite',
+					'source'    => Package::EXTENSION_SLUG,
 					'exception' => $e,
 				]
 			);
@@ -142,8 +142,8 @@ final class SubscriptionsListTable extends WP_List_Table {
 
 		$this->items = $rows;
 
-		// One batched read for the whole page's items counts; a failure degrades to
-		// no counts (rendered as 0) rather than a fatal or a per-row query.
+		// One batched read for the whole page's items counts; a failure is logged and degrades
+		// to no counts (rendered as 0) rather than a fatal or a per-row query.
 		$this->item_counts = [];
 		if ( ! empty( $rows ) ) {
 			try {
@@ -153,6 +153,13 @@ final class SubscriptionsListTable extends WP_List_Table {
 				}
 				$this->item_counts = Contracts::item_counts( $ids );
 			} catch ( Throwable $e ) {
+				wc_get_logger()->error(
+					'Admin subscriptions list item counts could not be loaded: ' . $e->getMessage(),
+					[
+						'source'    => Package::EXTENSION_SLUG,
+						'exception' => $e,
+					]
+				);
 				$this->item_counts = [];
 			}
 		}
@@ -178,6 +185,13 @@ final class SubscriptionsListTable extends WP_List_Table {
 		try {
 			$counts = Contracts::count_by_status();
 		} catch ( Throwable $e ) {
+			wc_get_logger()->error(
+				'Admin subscriptions list status counts could not be loaded: ' . $e->getMessage(),
+				[
+					'source'    => Package::EXTENSION_SLUG,
+					'exception' => $e,
+				]
+			);
 			return [];
 		}
 

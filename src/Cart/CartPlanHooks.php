@@ -27,6 +27,9 @@
  *
  * A failed plan read fails closed where money is decided: the add is refused,
  * checkout is refused or stopped, and the shopper never sees the database error.
+ * The display filters leave the line without its plan label and cadence. The
+ * pricing pass and the display filters log a cart item's failure once per request
+ * ({@see PlanReadFailureLog}).
  *
  * Mixed-cart guards are out of scope: this module keeps mixed
  * carts working, it does not police them.
@@ -192,8 +195,7 @@ final class CartPlanHooks {
 	 * the cart's product clone (`$cart_item['data']`) so plan state never smears
 	 * across rows. A plan that no longer resolves leaves the price untouched; one that
 	 * cannot be read does too, without throwing, and the line is recorded so checkout is
-	 * refused. A later pass that reads the plan clears the record. The display filters
-	 * still read the plan themselves and throw while it cannot be read.
+	 * refused. A later pass that reads the plan clears the record.
 	 *
 	 * @param WC_Cart $cart Current cart.
 	 */
@@ -202,7 +204,7 @@ final class CartPlanHooks {
 			try {
 				$plan = $this->resolve_line_plan( $cart_item );
 			} catch ( RuntimeException $e ) {
-				self::log_read_failure( sprintf( 'failed to read the plan of cart item %s for its price', $cart_item_key ), $e );
+				PlanReadFailureLog::log( (string) $cart_item_key, sprintf( 'CartPlanHooks: failed to read the plan of cart item %s for its price', $cart_item_key ), $e );
 				$this->unpriced_cart_items[ (string) $cart_item_key ] = true;
 				continue;
 			}
@@ -227,14 +229,19 @@ final class CartPlanHooks {
 	/**
 	 * Add a plan-name row under the cart line. Frequency is not repeated here -
 	 * it rides the price (see {@see self::cart_item_price()}). Relayed into the
-	 * Blocks cart by core's Store API.
+	 * Blocks cart by core's Store API. A plan that cannot be read adds no row.
 	 *
 	 * @param array<int, array{key:string,value:string,display?:string}> $item_data Existing rows.
 	 * @param array<string, mixed>                                       $cart_item Cart item row.
 	 * @return array<int, array{key:string,value:string,display?:string}>
 	 */
 	public function get_item_data( array $item_data, array $cart_item ): array {
-		$plan = $this->resolve_line_plan( $cart_item );
+		try {
+			$plan = $this->resolve_line_plan( $cart_item );
+		} catch ( RuntimeException $e ) {
+			self::log_display_read_failure( $cart_item, $e );
+			return $item_data;
+		}
 		if ( ! $plan instanceof PlanView ) {
 			return $item_data;
 		}
@@ -334,14 +341,20 @@ final class CartPlanHooks {
 	}
 
 	/**
-	 * Append " {cadence}" to a formatted price string for a plan line.
+	 * Append " {cadence}" to a formatted price string for a plan line. A plan that cannot be
+	 * read appends nothing.
 	 *
 	 * @param string               $html      Formatted price/subtotal HTML.
 	 * @param array<string, mixed> $cart_item Cart item row.
 	 * @return string
 	 */
 	private function append_cadence( string $html, array $cart_item ): string {
-		$plan = $this->resolve_line_plan( $cart_item );
+		try {
+			$plan = $this->resolve_line_plan( $cart_item );
+		} catch ( RuntimeException $e ) {
+			self::log_display_read_failure( $cart_item, $e );
+			return $html;
+		}
 		if ( ! $plan instanceof PlanView ) {
 			return $html;
 		}
@@ -372,6 +385,17 @@ final class CartPlanHooks {
 	 */
 	private static function log_read_failure( string $context, RuntimeException $error ): void {
 		wc_get_logger()->error( sprintf( 'CartPlanHooks: %s: %s', $context, $error->getMessage() ), [ 'source' => Package::EXTENSION_SLUG ] );
+	}
+
+	/**
+	 * Log a plan read that failed while displaying a cart line, once per cart item per request.
+	 *
+	 * @param array<string, mixed> $cart_item Cart item row.
+	 * @param RuntimeException     $error     The read failure.
+	 */
+	private static function log_display_read_failure( array $cart_item, RuntimeException $error ): void {
+		$cart_item_key = isset( $cart_item['key'] ) && is_string( $cart_item['key'] ) ? $cart_item['key'] : '';
+		PlanReadFailureLog::log( $cart_item_key, sprintf( 'CartPlanHooks: failed to read the plan of cart item %s for its display', $cart_item_key ), $error );
 	}
 
 	/**

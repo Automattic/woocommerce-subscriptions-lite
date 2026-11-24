@@ -16,8 +16,10 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Admin\MetaBoxes;
 
+use RuntimeException;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\Formatting;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
+use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ContractPlans;
 
 defined( 'ABSPATH' ) || exit;
@@ -69,13 +71,30 @@ final class Schedule {
 	/**
 	 * Plan-detail rows from the contract's live plan: the billing cadence, the
 	 * fixed length when the plan is close-ended, and a native trial when present.
-	 * Empty when the plan does not resolve, so the box shows only the dates.
+	 * Empty when the plan does not resolve, so the box shows only the dates. When the
+	 * plan cannot be read, one billing row says so and the failure is logged.
 	 *
 	 * @param ContractView $contract The contract.
 	 * @return array<int, array{label: string, value: string}>
 	 */
 	private static function plan_rows( ContractView $contract ): array {
-		$terms = ContractPlans::get_billing_terms_for( $contract );
+		try {
+			$terms = ContractPlans::get_billing_terms_for( $contract );
+		} catch ( RuntimeException $e ) {
+			wc_get_logger()->error(
+				sprintf( 'Schedule: failed to read the plan of contract %d: %s', (int) $contract->get_id(), $e->getMessage() ),
+				[
+					'source'      => Package::EXTENSION_SLUG,
+					'contract_id' => (int) $contract->get_id(),
+				]
+			);
+			return [
+				[
+					'label' => __( 'Billing', 'woocommerce-subscriptions-lite' ),
+					'value' => esc_html__( 'Could not be loaded.', 'woocommerce-subscriptions-lite' ),
+				],
+			];
+		}
 		if ( null === $terms ) {
 			return [];
 		}
