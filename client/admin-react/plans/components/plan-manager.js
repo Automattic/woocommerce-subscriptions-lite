@@ -82,11 +82,10 @@ export function PlanManager() {
 
 	const handleSave = useCallback(
 		async ( payload ) => {
-			const { isDuplicate } = findDuplicate(
-				payload,
-				plans,
-				editor.plan?.id
-			);
+			// An archived plan's edits are not checked; restoring it is.
+			const isDuplicate =
+				editor.plan?.status !== 'archived' &&
+				findDuplicate( payload, plans, editor.plan?.id ).isDuplicate;
 			if ( isDuplicate ) {
 				setEditor( ( current ) => ( {
 					...current,
@@ -135,6 +134,19 @@ export function PlanManager() {
 
 	const changeStatus = useCallback(
 		async ( plan, status ) => {
+			if ( status !== 'archived' ) {
+				const { isDuplicate } = findDuplicate( plan, plans, plan.id );
+				if ( isDuplicate ) {
+					showError(
+						__(
+							'This plan matches an active plan. Archive or change that plan first.',
+							'woocommerce-subscriptions-lite'
+						)
+					);
+					return;
+				}
+			}
+
 			try {
 				await setStatus( plan, status );
 				showSuccess(
@@ -161,7 +173,7 @@ export function PlanManager() {
 				);
 			}
 		},
-		[ reload, setStatus, showError, showSuccess ]
+		[ findDuplicate, plans, reload, setStatus, showError, showSuccess ]
 	);
 
 	const handleReorder = useCallback(

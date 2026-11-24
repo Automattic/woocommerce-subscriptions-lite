@@ -52,7 +52,11 @@ export function planSignature( planOrPayload = {} ) {
 }
 
 /**
- * Determine whether a candidate plan matches an existing one.
+ * Determine whether a candidate plan matches an existing non-archived plan.
+ *
+ * Archived plans are skipped: the merchant retired them, so a match against
+ * one should not block a new plan. Restoring one is checked by the caller.
+ * Any other status, including one an extension registers, still counts.
  *
  * @param {Object} candidate     Candidate engine payload.
  * @param {Array}  existingPlans Existing engine plan objects.
@@ -68,6 +72,9 @@ export function findDuplicatePlan(
 
 	const matchingPlan = existingPlans.find( ( plan ) => {
 		if ( excludeId && plan.id === excludeId ) {
+			return false;
+		}
+		if ( plan.status === 'archived' ) {
 			return false;
 		}
 		return planSignature( plan ) === target;
