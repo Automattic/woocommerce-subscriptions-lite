@@ -71,4 +71,37 @@ describe( 'findDuplicatePlan', () => {
 		expect( result.isDuplicate ).toBe( false );
 		expect( result.matchingPlan ).toBeNull();
 	} );
+
+	it( 'ignores an archived match', () => {
+		const result = findDuplicatePlan( plan( { id: undefined } ), [
+			plan( { id: 20, status: 'archived' } ),
+		] );
+		expect( result.isDuplicate ).toBe( false );
+		expect( result.matchingPlan ).toBeNull();
+	} );
+
+	it( 'detects an active match', () => {
+		const result = findDuplicatePlan( plan( { id: undefined } ), [
+			plan( { id: 21, status: 'active' } ),
+		] );
+		expect( result.isDuplicate ).toBe( true );
+		expect( result.matchingPlan.id ).toBe( 21 );
+	} );
+
+	it( 'returns the active match when an archived twin comes first', () => {
+		const result = findDuplicatePlan( plan( { id: undefined } ), [
+			plan( { id: 22, status: 'archived' } ),
+			plan( { id: 23, status: 'active' } ),
+		] );
+		expect( result.isDuplicate ).toBe( true );
+		expect( result.matchingPlan.id ).toBe( 23 );
+	} );
+
+	it( 'counts a match with an unknown status', () => {
+		const result = findDuplicatePlan( plan( { id: undefined } ), [
+			plan( { id: 24, status: 'paused' } ),
+		] );
+		expect( result.isDuplicate ).toBe( true );
+		expect( result.matchingPlan.id ).toBe( 24 );
+	} );
 } );
