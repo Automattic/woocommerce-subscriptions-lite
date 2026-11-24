@@ -162,7 +162,7 @@ final class Settlement {
 			return;
 		}
 
-		$this->settle_removed( $order_id );
+		$this->settle_removed( $order_id, null );
 	}
 
 	/**
@@ -327,8 +327,8 @@ final class Settlement {
 
 	/**
 	 * Hook entry point for a renewal order about to be trashed or deleted: an unpaid one dies
-	 * like a cancelled one. A lock conflict schedules a retry (which finds the order trashed,
-	 * or gone); any other failure is logged, not rethrown.
+	 * like a cancelled one. A lock conflict or a storage failure schedules a retry (which finds
+	 * the order trashed, or gone); any other failure is logged, not rethrown.
 	 *
 	 * @param mixed $order_id Order id.
 	 */
@@ -338,17 +338,19 @@ final class Settlement {
 			return;
 		}
 
-		$this->settle_removed( $order->get_id() );
+		$this->settle_removed( $order->get_id(), $order );
 	}
 
 	/**
 	 * Fail the open Lite cycle linked to an unpaid order that is removed or gone, under its
-	 * contract's lock. A lock conflict schedules a retry; any other failure is logged, not
-	 * rethrown.
+	 * contract's lock. A lock conflict schedules a retry. A storage failure schedules one while
+	 * the order still exists; once it is gone there is nothing to count or note, so the failure
+	 * is logged as final. Any other failure is logged, not rethrown.
 	 *
-	 * @param int $order_id Order id.
+	 * @param int           $order_id Order id.
+	 * @param WC_Order|null $order    The order about to be removed, or null when it is gone.
 	 */
-	private function settle_removed( int $order_id ): void {
+	private function settle_removed( int $order_id, ?WC_Order $order ): void {
 		$conflict = null;
 		try {
 			$contract_id = self::find_lite_contract_id( $order_id );
@@ -379,6 +381,18 @@ final class Settlement {
 			}
 		} catch ( ContractLockedException $e ) {
 			$conflict = HeldLocks::get_refused_conflict( $e );
+		} catch ( RuntimeException $e ) {
+			if ( null === $order ) {
+				$this->log_failure( sprintf( 'Settlement: gave up settling deleted renewal order %d: %s. Check its subscription.', $order_id, $e->getMessage() ), $order_id );
+				return;
+			}
+
+			$this->log_failure( sprintf( 'Settlement: settling removed renewal order %d failed: %s; it is retried.', $order_id, $e->getMessage() ), $order_id );
+			$scheduled = $this->schedule_retry( $order_id, false, self::SETTLE_AFTER_LOCK_EXPIRY_SECONDS );
+			if ( ! $scheduled ) {
+				$this->note_unretried_settlement( $order );
+			}
+			return;
 		} catch ( Throwable $e ) {
 			$this->log_failure( sprintf( 'Settlement: settling removed renewal order %d failed: %s', $order_id, $e->getMessage() ), $order_id );
 			return;
@@ -386,7 +400,10 @@ final class Settlement {
 
 		if ( null !== $conflict ) {
 			$this->log_conflict( $order_id, $conflict );
-			$this->schedule_retry( $order_id, false, ScheduledActions::LOCK_RETRY_DELAY_SECONDS );
+			$scheduled = $this->schedule_retry( $order_id, false, ScheduledActions::LOCK_RETRY_DELAY_SECONDS );
+			if ( ! $scheduled && null !== $order ) {
+				$this->note_unretried_settlement( $order );
+			}
 		}
 	}
 
