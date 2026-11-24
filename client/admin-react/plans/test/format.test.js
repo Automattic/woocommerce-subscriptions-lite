@@ -63,7 +63,9 @@ describe( 'formatCurrency', () => {
 
 describe( 'formatDiscount', () => {
 	const plan = ( policy ) => ( {
-		pricing_policy: { policies: policy ? [ policy ] : [] },
+		pricing_policy: {
+			policies: policy ? [ { field: 'discount', ...policy } ] : [],
+		},
 	} );
 
 	it( 'renders a percentage discount', () => {
@@ -117,6 +119,39 @@ describe( 'formatDiscount', () => {
 	it( 'renders the placeholder when there is no policy', () => {
 		expect( formatDiscount( plan( null ), USD ) ).toBe( EMPTY_VALUE );
 		expect( formatDiscount( {}, USD ) ).toBe( EMPTY_VALUE );
+	} );
+
+	it( 'renders the marked entry when it is not the first', () => {
+		expect(
+			formatDiscount(
+				{
+					pricing_policy: {
+						policies: [
+							{ type: 'fixed_amount', value: 3 },
+							{
+								field: 'discount',
+								type: 'percentage',
+								value: 14,
+							},
+						],
+					},
+				},
+				USD
+			)
+		).toBe( '14%' );
+	} );
+
+	it( 'renders the placeholder when no entry is marked', () => {
+		expect(
+			formatDiscount(
+				{
+					pricing_policy: {
+						policies: [ { type: 'percentage', value: 14 } ],
+					},
+				},
+				USD
+			)
+		).toBe( EMPTY_VALUE );
 	} );
 } );
 
