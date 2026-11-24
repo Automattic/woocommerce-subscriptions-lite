@@ -463,7 +463,7 @@ final class EndpointsRenderTest extends LiteIntegrationTestCase {
 		$this->assertStringContainsString( 'Your subscriptions could not be loaded. Please try again later.', $html );
 		$this->assertStringNotContainsString( 'table_that_does_not_exist', $html );
 		$this->assertStringNotContainsString( 'wc-subs-lite-status-badge', $html, 'No list rows.' );
-		$this->assertStringNotContainsString( 'No subscriptions', $html, 'Not the empty state.' );
+		$this->assertStringNotContainsString( 'You have no subscriptions yet.', $html, 'Not the empty state.' );
 		$this->assertTrue( $this->has_logged( 'table_that_does_not_exist' ), 'The engine message is logged.' );
 	}
 
@@ -488,6 +488,7 @@ final class EndpointsRenderTest extends LiteIntegrationTestCase {
 	public function test_a_failed_plan_read_on_the_detail_page_renders_the_error_notice(): void {
 		$contract_id = $this->create_contract( $this->customer_id );
 		$endpoints   = new Endpoints();
+		$this->capture_log();
 
 		$this->fail_next_query( self::plan_read() );
 		$html = $this->capture(
@@ -498,12 +499,16 @@ final class EndpointsRenderTest extends LiteIntegrationTestCase {
 
 		$this->assertStringContainsString( 'Your subscriptions could not be loaded. Please try again later.', $html );
 		$this->assertStringNotContainsString( 'subscription-detail-block', $html );
+		$this->assertStringNotContainsString( 'table_that_does_not_exist', $html );
+		$this->assertTrue( $this->has_logged( 'table_that_does_not_exist' ), 'The engine message is logged.' );
 	}
 
 	public function test_a_failed_related_orders_read_renders_the_error_notice(): void {
 		$contract_id = $this->create_contract( $this->customer_id );
 		$endpoints   = new Endpoints();
+		$this->capture_log();
 
+		// Skip 1: the unpaid-renewal cycles read (`UnpaidRenewal::find()`) runs first; the next one is `get_related_orders()`.
 		$this->fail_next_query( '/FROM ' . preg_quote( SchemaInstaller::get_table_name( SchemaInstaller::TABLE_CYCLES ), '/' ) . ' WHERE contract_id/', 1 );
 		$html = $this->capture(
 			static function () use ( $endpoints, $contract_id ): void {
@@ -513,5 +518,7 @@ final class EndpointsRenderTest extends LiteIntegrationTestCase {
 
 		$this->assertStringContainsString( 'Your subscriptions could not be loaded. Please try again later.', $html );
 		$this->assertStringNotContainsString( 'subscription-detail-block', $html );
+		$this->assertStringNotContainsString( 'table_that_does_not_exist', $html );
+		$this->assertTrue( $this->has_logged( 'table_that_does_not_exist' ), 'The engine message is logged.' );
 	}
 }

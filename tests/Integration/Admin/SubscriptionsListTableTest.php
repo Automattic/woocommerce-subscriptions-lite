@@ -15,6 +15,7 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Admin;
 
 use Automattic\WooCommerce\SubscriptionsLite\Admin\PageController;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\SubscriptionsListTable;
+use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
 
 /**
@@ -252,7 +253,7 @@ final class SubscriptionsListTableTest extends LiteIntegrationTestCase {
 		return (string) ob_get_clean();
 	}
 
-	public function test_a_failed_item_counts_read_is_logged_and_shows_no_counts(): void {
+	public function test_a_failed_item_counts_read_is_logged_and_the_list_still_loads(): void {
 		$this->create_contract( $this->create_customer() );
 		$this->capture_log();
 
@@ -262,6 +263,7 @@ final class SubscriptionsListTableTest extends LiteIntegrationTestCase {
 		$this->assertCount( 1, $table->items, 'The list still loads.' );
 		$this->assertTrue( $this->has_logged( 'item counts could not be loaded' ) );
 		$this->assertTrue( $this->has_logged( 'table_that_does_not_exist' ) );
+		$this->assertSame( [ Package::EXTENSION_SLUG ], $this->logged_sources_of( 'item counts could not be loaded' ), 'Logged under the Lite source.' );
 	}
 
 	public function test_a_failed_status_counts_read_is_logged_and_shows_no_views(): void {

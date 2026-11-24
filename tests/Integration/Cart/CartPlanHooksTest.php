@@ -48,11 +48,13 @@ final class CartPlanHooksTest extends LiteIntegrationTestCase {
 	}
 
 	/**
-	 * Empty the cart and clear POST/notice state between tests.
+	 * Empty the cart, forget the session and clear POST/notice state between tests.
 	 */
 	public function tear_down(): void {
 		WC()->cart->empty_cart();
 		wc_clear_notices();
+		// A checkout saves the session, which the test's rollback undoes: start the next test afresh.
+		WC()->session->forget_session();
 		unset( $_POST[ CartPlanHooks::SELLING_PLAN_ID_KEY ] );
 		parent::tear_down();
 	}
@@ -701,9 +703,6 @@ final class CartPlanHooksTest extends LiteIntegrationTestCase {
 		$this->assertCount( 1, $created );
 		$order = wc_get_order( $created[0] );
 		$this->assertSame( 18.0, (float) $order->get_total(), 'The order carries the plan price.' );
-
-		// Checkout saved the session, which the test's rollback undoes: start the next test afresh.
-		WC()->session->forget_session();
 	}
 
 	public function test_a_failed_pricing_read_refuses_store_api_checkout(): void {
@@ -767,9 +766,9 @@ final class CartPlanHooksTest extends LiteIntegrationTestCase {
 		apply_filters( 'woocommerce_cart_item_price', '', $cart_item, $key );
 		apply_filters( 'woocommerce_cart_item_subtotal', '', $cart_item, $key );
 
-		$this->assertGreaterThan( 0, $logged_by_the_first_pass );
-		$this->assertSame( $logged_by_the_first_pass, $this->count_logged( $key ), 'Later passes and display hooks log nothing more.' );
-		$this->assertSame( $logged_by_the_first_pass, $this->count_logged( $other_key ), 'The other line logs its own failure once.' );
+		$this->assertSame( 1, $logged_by_the_first_pass, 'The first pass logs the line once.' );
+		$this->assertSame( 1, $this->count_logged( $key ), 'Later passes and display hooks log nothing more.' );
+		$this->assertSame( 1, $this->count_logged( $other_key ), 'The other line logs its own failure once.' );
 	}
 
 	public function test_with_every_plan_read_failing_the_store_api_cart_responds_without_the_database_error(): void {
@@ -840,9 +839,6 @@ final class CartPlanHooksTest extends LiteIntegrationTestCase {
 		$this->assertStringContainsString( 'woocommerce_subscriptions_lite_plan_read_failed', (string) wp_json_encode( $block->get_data() ) );
 		$this->assertStringNotContainsString( 'table_that_does_not_exist', (string) wp_json_encode( $block->get_data() ) );
 		$this->assertSame( [], $created, 'No order is created, so nothing is charged.' );
-
-		// Checkout saved the session, which the test's rollback undoes: start the next test afresh.
-		WC()->session->forget_session();
 	}
 
 	/**

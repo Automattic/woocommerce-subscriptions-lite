@@ -36,6 +36,7 @@ use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\SchemaInstall
 use Automattic\WooCommerce\SubscriptionsLite\Admin\RowActionController;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\RowActionResult;
 use Automattic\WooCommerce\SubscriptionsLite\Cart\CartPlanHooks;
+use Automattic\WooCommerce\SubscriptionsLite\Cart\PlanReadFailureLog;
 use Automattic\WooCommerce\SubscriptionsLite\Checkout\ContractCreationHandler;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Cancellation;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\HeldLocks;
@@ -104,18 +105,55 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 	protected $logged_messages = [];
 
 	/**
+	 * Logger sources, one per entry of {@see self::$logged_messages}.
+	 *
+	 * @var array<int, string>
+	 */
+	protected $logged_sources = [];
+
+	/**
 	 * Record every message the WooCommerce logger receives from now on into
-	 * {@see self::$logged_messages}.
+	 * {@see self::$logged_messages}, and its source into {@see self::$logged_sources}. The filter
+	 * runs once per log handler, so only the first handler class's pass is recorded: one entry per log call.
 	 */
 	protected function capture_log(): void {
 		$this->logged_messages = [];
+		$this->logged_sources  = [];
+		$first_handler         = null;
 		add_filter(
 			'woocommerce_logger_log_message',
-			function ( $message ) {
+			function ( $message, $level = '', $context = [], $handler = null ) use ( &$first_handler ) {
+				$handler_class = is_object( $handler ) ? get_class( $handler ) : '';
+				if ( null === $first_handler ) {
+					$first_handler = $handler_class;
+				}
+				if ( $handler_class !== $first_handler ) {
+					return $message;
+				}
 				$this->logged_messages[] = (string) $message;
+				$this->logged_sources[]  = is_array( $context ) ? (string) ( $context['source'] ?? '' ) : '';
 				return $message;
-			}
+			},
+			10,
+			4
 		);
+	}
+
+	/**
+	 * Logger sources of the captured messages that contain `$needle`.
+	 *
+	 * @param string $needle Text to look for.
+	 * @return array<int, string>
+	 */
+	protected function logged_sources_of( string $needle ): array {
+		$sources = [];
+		foreach ( $this->logged_messages as $index => $message ) {
+			if ( false !== strpos( $message, $needle ) ) {
+				$sources[] = $this->logged_sources[ $index ];
+			}
+		}
+
+		return $sources;
 	}
 
 	/**
@@ -942,11 +980,13 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 	private $timezone_before;
 
 	/**
-	 * Pin the store time zone to UTC, so date tests never depend on the site's setting.
+	 * Pin the store time zone to UTC, so date tests never depend on the site's setting, and start
+	 * each test as a fresh request for the once-per-request plan read failure log.
 	 */
 	public function set_up(): void {
 		parent::set_up();
 		$this->set_store_timezone( 'UTC' );
+		PlanReadFailureLog::reset();
 	}
 
 	/**

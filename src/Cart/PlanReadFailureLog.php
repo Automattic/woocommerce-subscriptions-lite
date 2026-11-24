@@ -50,4 +50,13 @@ final class PlanReadFailureLog {
 
 		wc_get_logger()->error( sprintf( '%s: %s', $context, $error->getMessage() ), [ 'source' => Package::EXTENSION_SLUG ] );
 	}
+
+	/**
+	 * Forget the logged cart items, so each test starts a fresh request.
+	 *
+	 * @internal For tests only.
+	 */
+	public static function reset(): void {
+		self::$logged_cart_items = [];
+	}
 }

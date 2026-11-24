@@ -132,7 +132,7 @@ final class SubscriptionsListTable extends WP_List_Table {
 			wc_get_logger()->error(
 				'Admin subscriptions list could not be loaded: ' . $e->getMessage(),
 				[
-					'source'    => 'woocommerce-subscriptions-lite',
+					'source'    => Package::EXTENSION_SLUG,
 					'exception' => $e,
 				]
 			);
@@ -156,7 +156,7 @@ final class SubscriptionsListTable extends WP_List_Table {
 				wc_get_logger()->error(
 					'Admin subscriptions list item counts could not be loaded: ' . $e->getMessage(),
 					[
-						'source'    => 'woocommerce-subscriptions-lite',
+						'source'    => Package::EXTENSION_SLUG,
 						'exception' => $e,
 					]
 				);
@@ -188,7 +188,7 @@ final class SubscriptionsListTable extends WP_List_Table {
 			wc_get_logger()->error(
 				'Admin subscriptions list status counts could not be loaded: ' . $e->getMessage(),
 				[
-					'source'    => 'woocommerce-subscriptions-lite',
+					'source'    => Package::EXTENSION_SLUG,
 					'exception' => $e,
 				]
 			);
