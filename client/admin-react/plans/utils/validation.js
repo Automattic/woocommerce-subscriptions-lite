@@ -54,8 +54,8 @@ export function planSignature( planOrPayload = {} ) {
 /**
  * Determine whether a candidate plan matches an existing non-archived plan.
  *
- * Archived plans are skipped: they are hidden from the default list, so a
- * match against one would refuse the merchant for a plan they cannot see.
+ * Archived plans are skipped: the merchant retired them, so a match against
+ * one should not block a new plan. Restoring one is checked by the caller.
  * Any other status, including one an extension registers, still counts.
  *
  * @param {Object} candidate     Candidate engine payload.

@@ -53,19 +53,22 @@ jest.mock( '../components/plans-table', () => ( {
 } ) );
 
 jest.mock( '../components/plan-modal', () => ( {
-	PlanModal: ( { plan, onSave } ) => (
-		<button
-			type="button"
-			onClick={ () =>
-				onSave( {
-					name: 'Renamed',
-					billing_policy: plan.billing_policy,
-					pricing_policy: plan.pricing_policy,
-				} )
-			}
-		>
-			Save
-		</button>
+	PlanModal: ( { plan, onSave, duplicateWarning } ) => (
+		<>
+			<button
+				type="button"
+				onClick={ () =>
+					onSave( {
+						name: 'Renamed',
+						billing_policy: plan.billing_policy,
+						pricing_policy: plan.pricing_policy,
+					} )
+				}
+			>
+				Save
+			</button>
+			{ duplicateWarning && <p>Duplicate warning</p> }
+		</>
 	),
 } ) );
 
@@ -263,5 +266,6 @@ describe( 'PlanManager status changes', () => {
 		await click( 'Save' );
 
 		expect( getPatches() ).toEqual( [] );
+		expect( document.body.textContent ).toContain( 'Duplicate warning' );
 	} );
 } );
