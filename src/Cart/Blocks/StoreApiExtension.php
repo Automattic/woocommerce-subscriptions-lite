@@ -17,9 +17,11 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Cart\Blocks;
 
+use RuntimeException;
 use WC_Product;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\PlanView;
 use Automattic\WooCommerce\SubscriptionsLite\Cart\CartPlanHooks;
+use Automattic\WooCommerce\SubscriptionsLite\Cart\PlanReadFailureLog;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ProductPlanResolver;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Pricing\BillingTerms;
@@ -86,13 +88,19 @@ final class StoreApiExtension {
 	}
 
 	/**
-	 * Build the per-item payload for a plan line; `[]` for one-time lines.
+	 * Build the per-item payload for a plan line; `[]` for one-time lines and for a line
+	 * whose plan cannot be read.
 	 *
 	 * @param array<string, mixed> $cart_item Cart item row.
 	 * @return array<string, mixed>
 	 */
 	public function get_item_data( array $cart_item ): array {
-		$plan  = $this->resolve_line_plan( $cart_item );
+		try {
+			$plan = $this->resolve_line_plan( $cart_item );
+		} catch ( RuntimeException $e ) {
+			self::log_read_failure( $cart_item, $e );
+			return [];
+		}
 		$terms = null === $plan ? null : BillingTerms::from_plan( $plan );
 		if ( null === $plan || null === $terms ) {
 			return [];
@@ -159,7 +167,8 @@ final class StoreApiExtension {
 
 	/**
 	 * Build the cart-level payload: whether any line is a subscription. The
-	 * "Total due today" relabel trigger. Not a recurring-totals array.
+	 * "Total due today" relabel trigger. Not a recurring-totals array. A line whose plan
+	 * cannot be read does not count: the flag only changes a label.
 	 *
 	 * @return array<string, mixed>
 	 */
@@ -170,7 +179,13 @@ final class StoreApiExtension {
 			// Resolve the plan (not just the raw meta) so the flag agrees with
 			// pricing: a line whose plan no longer resolves is priced as one-time
 			// and must not read as a subscription here.
-			if ( $this->resolve_line_plan( $cart_item ) instanceof PlanView ) {
+			try {
+				$plan = $this->resolve_line_plan( $cart_item );
+			} catch ( RuntimeException $e ) {
+				self::log_read_failure( $cart_item, $e );
+				continue;
+			}
+			if ( $plan instanceof PlanView ) {
 				$has = true;
 				break;
 			}
@@ -195,10 +210,22 @@ final class StoreApiExtension {
 	}
 
 	/**
+	 * Log a failed plan read for a cart line, once per cart item per request.
+	 *
+	 * @param array<string, mixed> $cart_item Cart item row.
+	 * @param RuntimeException     $error     The read failure.
+	 */
+	private static function log_read_failure( array $cart_item, RuntimeException $error ): void {
+		$cart_item_key = isset( $cart_item['key'] ) && is_string( $cart_item['key'] ) ? $cart_item['key'] : '';
+		PlanReadFailureLog::log( $cart_item_key, sprintf( 'StoreApiExtension: failed to read the plan of cart item %s', $cart_item_key ), $error );
+	}
+
+	/**
 	 * Resolve the plan for a cart item ({@see ProductPlanResolver::get_line_plan()}),
 	 * or null for a one-time line.
 	 *
 	 * @param array<string, mixed> $cart_item Cart item row.
+	 * @throws RuntimeException When the plan cannot be read.
 	 */
 	private function resolve_line_plan( array $cart_item ): ?PlanView {
 		$plan_id = isset( $cart_item[ CartPlanHooks::SELLING_PLAN_ID_KEY ] ) ? (int) $cart_item[ CartPlanHooks::SELLING_PLAN_ID_KEY ] : 0;

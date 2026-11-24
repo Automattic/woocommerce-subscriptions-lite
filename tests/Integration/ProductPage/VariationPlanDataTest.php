@@ -203,4 +203,24 @@ final class VariationPlanDataTest extends LiteIntegrationTestCase {
 		$this->assertStringNotContainsString( '<script', $option_html, 'Script tags never reach the innerHTML sink.' );
 		$this->assertStringContainsString( '<span class="amount">$30.00</span>', $option_html, 'The allowed price markup survives.' );
 	}
+
+	/**
+	 * A failed read leaves the payload untouched and is not cached: the parent's
+	 * next variation reads the plans again.
+	 */
+	public function test_payload_is_untouched_when_the_plans_cannot_be_read_and_the_failure_is_not_cached(): void {
+		$plan   = $this->discounted_plan();
+		$parent = $this->subscribable_parent();
+		$data   = new VariationPlanData();
+		$this->capture_log();
+
+		$this->fail_next_query( self::plan_read() );
+		$failed = $data->filter_available_variation( [ 'variation_id' => 1 ], $parent, $this->variation_of( $parent, '30.00' ) );
+
+		$this->assertSame( [ 'variation_id' => 1 ], $failed );
+		$this->assertTrue( $this->has_logged( 'table_that_does_not_exist' ), 'The engine message is logged.' );
+
+		$next = $data->filter_available_variation( [], $parent, $this->variation_of( $parent, '20.00' ) );
+		$this->assertSame( [ (int) $plan->get_id() ], array_keys( $next['subscriptions_lite']['option_html'] ) );
+	}
 }

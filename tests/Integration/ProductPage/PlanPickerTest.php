@@ -278,4 +278,15 @@ final class PlanPickerTest extends LiteIntegrationTestCase {
 
 		$this->assertStringContainsString( 'name="_wcsl_selling_plan_id"', $html );
 	}
+
+	public function test_render_returns_empty_and_logs_when_the_plans_cannot_be_read(): void {
+		$this->make_plan();
+		$product = $this->subscribable_product();
+		$this->capture_log();
+
+		$this->fail_next_query( self::plan_read() );
+
+		$this->assertSame( '', ( new PlanPicker() )->render( $product ) );
+		$this->assertTrue( $this->has_logged( 'table_that_does_not_exist' ), 'The engine message is logged.' );
+	}
 }

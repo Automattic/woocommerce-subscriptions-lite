@@ -24,8 +24,10 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\ProductPage;
 
+use RuntimeException;
 use WC_Product;
 use WC_Product_Variation;
+use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ProductPlanResolver;
 
 defined( 'ABSPATH' ) || exit;
@@ -56,8 +58,9 @@ final class VariationPlanData {
 	 * Append per-plan option HTML to a variation's payload.
 	 *
 	 * Returns the payload untouched when the parent resolves no plans (the
-	 * picker is absent, nothing consumes the map). Plans without an id cannot
-	 * be keyed and are skipped.
+	 * picker is absent, nothing consumes the map), and when the plans cannot be
+	 * read (logged, not cached, so the next variation reads again). Plans
+	 * without an id cannot be keyed and are skipped.
 	 *
 	 * @param array<string, mixed> $data      Variation payload WooCommerce emits.
 	 * @param WC_Product           $product   Parent variable product.
@@ -67,7 +70,16 @@ final class VariationPlanData {
 	public function filter_available_variation( array $data, WC_Product $product, WC_Product_Variation $variation ): array {
 		$product_id = (int) $product->get_id();
 		if ( ! array_key_exists( $product_id, self::$plans_cache ) ) {
-			self::$plans_cache[ $product_id ] = ( new ProductPlanResolver() )->get_plans_for_product( $product_id );
+			try {
+				$resolved_plans = ( new ProductPlanResolver() )->get_plans_for_product( $product_id );
+			} catch ( RuntimeException $e ) {
+				wc_get_logger()->error(
+					sprintf( 'VariationPlanData: failed to read the plans of product %d: %s', $product_id, $e->getMessage() ),
+					[ 'source' => Package::EXTENSION_SLUG ]
+				);
+				return $data;
+			}
+			self::$plans_cache[ $product_id ] = $resolved_plans;
 		}
 
 		$plans = self::$plans_cache[ $product_id ];

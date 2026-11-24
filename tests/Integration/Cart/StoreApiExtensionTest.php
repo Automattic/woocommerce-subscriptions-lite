@@ -180,4 +180,38 @@ final class StoreApiExtensionTest extends LiteIntegrationTestCase {
 
 		$this->assertFalse( ( new StoreApiExtension() )->get_cart_data()['has_subscriptions'] );
 	}
+
+	public function test_per_item_payload_is_empty_when_the_plan_cannot_be_read(): void {
+		$plan = $this->make_plan();
+		$this->capture_log();
+
+		$this->fail_next_query( self::plan_read() );
+		$data = ( new StoreApiExtension() )->get_item_data(
+			[
+				CartPlanHooks::SELLING_PLAN_ID_KEY => (int) $plan->get_id(),
+				'data'                             => new WC_Product_Simple(),
+				'key'                              => 'unreadable-item-' . $plan->get_id(),
+			]
+		);
+
+		$this->assertSame( [], $data );
+		$this->assertTrue( $this->has_logged( 'table_that_does_not_exist' ), 'The engine message is logged.' );
+	}
+
+	public function test_cart_flag_is_false_when_the_plan_cannot_be_read(): void {
+		$product = new WC_Product_Simple();
+		$product->set_regular_price( '20.00' );
+		$product_id = (int) $product->save();
+		$plan_id    = (int) $this->make_plan()->get_id();
+		( new ApplicabilityStore() )->set( $product_id, new ProductApplicability( ProductApplicability::MODE_INHERIT_ALL ) );
+
+		$_POST[ CartPlanHooks::SELLING_PLAN_ID_KEY ] = (string) $plan_id;
+		WC()->cart->add_to_cart( $product_id );
+		$this->capture_log();
+
+		$this->fail_next_query( self::plan_read() );
+
+		$this->assertFalse( ( new StoreApiExtension() )->get_cart_data()['has_subscriptions'] );
+		$this->assertTrue( $this->has_logged( 'table_that_does_not_exist' ), 'The engine message is logged.' );
+	}
 }

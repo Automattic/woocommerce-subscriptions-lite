@@ -22,6 +22,7 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\ProductPage;
 
+use RuntimeException;
 use WC_Product;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ApplicabilityStore;
@@ -81,8 +82,8 @@ final class PlanPicker {
 	 * Render the picker for a product.
 	 *
 	 * Returns the empty string when there is nothing to render - unsupported
-	 * product type or no resolved plans - and never emits whitespace, so
-	 * products sold one-time only are untouched.
+	 * product type, no resolved plans, or plans that cannot be read (logged) - and
+	 * never emits whitespace, so products sold one-time only are untouched.
 	 *
 	 * @param WC_Product $product Product the PDP is rendering.
 	 * @return string Picker HTML, or '' when nothing should render.
@@ -94,7 +95,15 @@ final class PlanPicker {
 
 		$product_id = (int) $product->get_id();
 
-		$plans = ( new ProductPlanResolver() )->get_plans_for_product( $product_id );
+		try {
+			$plans = ( new ProductPlanResolver() )->get_plans_for_product( $product_id );
+		} catch ( RuntimeException $e ) {
+			wc_get_logger()->error(
+				sprintf( 'PlanPicker: failed to read the plans of product %d: %s', $product_id, $e->getMessage() ),
+				[ 'source' => Package::EXTENSION_SLUG ]
+			);
+			return '';
+		}
 		if ( empty( $plans ) ) {
 			return '';
 		}

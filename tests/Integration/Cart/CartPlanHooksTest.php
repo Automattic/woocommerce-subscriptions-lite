@@ -734,4 +734,130 @@ final class CartPlanHooksTest extends LiteIntegrationTestCase {
 		$this->assertStringContainsString( 'Your subscription could not be processed right now.', (string) wp_json_encode( $response->get_data() ) );
 		$this->assertStringNotContainsString( 'table_that_does_not_exist', (string) wp_json_encode( $response->get_data() ) );
 	}
+
+	public function test_the_display_hooks_degrade_when_the_plan_cannot_be_read(): void {
+		[ $product_id, $plan_id ] = $this->make_product_on_plan();
+		$key                      = $this->add_to_cart( $product_id, $plan_id );
+		$cart_item                = WC()->cart->get_cart()[ $key ];
+		$this->capture_log();
+
+		$this->fail_every_query( self::plan_read() );
+
+		$this->assertSame( [], apply_filters( 'woocommerce_get_item_data', [], $cart_item ), 'No plan label row.' );
+		$this->assertSame( '$18.00', apply_filters( 'woocommerce_cart_item_price', '$18.00', $cart_item, $key ), 'No cadence.' );
+		$this->assertSame( '$18.00', apply_filters( 'woocommerce_cart_item_subtotal', '$18.00', $cart_item, $key ), 'No cadence.' );
+		$this->assertTrue( $this->has_logged( 'table_that_does_not_exist' ), 'The engine message is logged.' );
+	}
+
+	public function test_a_failed_plan_read_is_logged_once_per_cart_item_per_request(): void {
+		[ $product_id, $plan_id ]  = $this->make_product_on_plan();
+		[ $other_id, $other_plan ] = $this->make_product_on_plan();
+		$key                       = $this->add_to_cart( $product_id, $plan_id );
+		$other_key                 = $this->add_to_cart( $other_id, $other_plan );
+		$this->capture_log();
+
+		$this->fail_every_query( self::plan_read() );
+		WC()->cart->calculate_totals();
+		$logged_by_the_first_pass = $this->count_logged( $key );
+
+		WC()->cart->calculate_totals();
+		WC()->cart->calculate_totals();
+		$cart_item = WC()->cart->get_cart()[ $key ];
+		apply_filters( 'woocommerce_get_item_data', [], $cart_item );
+		apply_filters( 'woocommerce_cart_item_price', '', $cart_item, $key );
+		apply_filters( 'woocommerce_cart_item_subtotal', '', $cart_item, $key );
+
+		$this->assertGreaterThan( 0, $logged_by_the_first_pass );
+		$this->assertSame( $logged_by_the_first_pass, $this->count_logged( $key ), 'Later passes and display hooks log nothing more.' );
+		$this->assertSame( $logged_by_the_first_pass, $this->count_logged( $other_key ), 'The other line logs its own failure once.' );
+	}
+
+	public function test_with_every_plan_read_failing_the_store_api_cart_responds_without_the_database_error(): void {
+		wp_set_current_user( $this->create_customer() );
+		[ $product_id, $plan_id ] = $this->make_product_on_plan();
+		$this->add_to_cart( $product_id, $plan_id );
+
+		$this->fail_every_query( self::plan_read() );
+		$response = $this->dispatch_store_api( 'GET', '/cart' );
+		$body     = (string) wp_json_encode( $response->get_data() );
+
+		$this->assertSame( 200, $response->get_status(), $body );
+		$this->assertStringNotContainsString( 'table_that_does_not_exist', $body );
+		$data = json_decode( $body, true );
+		$this->assertCount( 1, $data['items'] );
+		$this->assertSame( [], $data['items'][0]['item_data'], 'No plan label row.' );
+		$this->assertFalse( $data['extensions']['woocommerce-subscriptions-lite']['has_subscriptions'] );
+	}
+
+	public function test_with_every_plan_read_failing_the_classic_cart_and_checkout_render_and_every_checkout_is_refused(): void {
+		$this->enable_only_gateways( [ 'cod' ] );
+		$this->support_engine_charges( 'cod' );
+		wp_set_current_user( $this->create_customer() );
+		[ $product_id, $plan_id ] = $this->make_product_on_plan();
+		$this->make_virtual( $product_id );
+		$this->add_to_cart( $product_id, $plan_id );
+		wc_clear_notices();
+		$created = [];
+		add_action(
+			'woocommerce_checkout_order_created',
+			static function ( $order ) use ( &$created ): void {
+				$created[] = $order->get_id();
+			}
+		);
+
+		$this->fail_every_query( self::plan_read() );
+
+		$cart_page = do_shortcode( '[woocommerce_cart]' );
+		$this->assertStringContainsString( 'Coffee beans', $cart_page, 'The cart page renders its line.' );
+		$this->assertStringNotContainsString( 'table_that_does_not_exist', $cart_page );
+		wc_clear_notices();
+
+		$checkout_page = do_shortcode( '[woocommerce_checkout]' );
+		$this->assertStringContainsString( 'Coffee beans', $checkout_page, 'The checkout page renders its line.' );
+		$this->assertStringNotContainsString( 'table_that_does_not_exist', $checkout_page );
+		wc_clear_notices();
+
+		$classic = $this->submit_classic_checkout();
+		$this->assertSame( 'failure', $classic['result'] ?? null, (string) wp_json_encode( $classic ) );
+		$this->assertStringContainsString( 'Your subscription could not be processed right now.', (string) ( $classic['messages'] ?? '' ) );
+		$this->assertStringNotContainsString( 'table_that_does_not_exist', (string) ( $classic['messages'] ?? '' ) );
+
+		$address = self::BILLING_ADDRESS + [
+			'company'   => '',
+			'address_2' => '',
+			'state'     => '',
+		];
+		$block   = $this->dispatch_store_api(
+			'POST',
+			'/checkout',
+			[
+				'billing_address'  => (object) $address,
+				'shipping_address' => (object) array_diff_key( $address, [ 'email' => true ] ),
+				'payment_method'   => 'cod',
+			]
+		);
+		$this->assertSame( 409, $block->get_status(), (string) wp_json_encode( $block->get_data() ) );
+		$this->assertStringContainsString( 'woocommerce_subscriptions_lite_plan_read_failed', (string) wp_json_encode( $block->get_data() ) );
+		$this->assertStringNotContainsString( 'table_that_does_not_exist', (string) wp_json_encode( $block->get_data() ) );
+		$this->assertSame( [], $created, 'No order is created, so nothing is charged.' );
+
+		// Checkout saved the session, which the test's rollback undoes: start the next test afresh.
+		WC()->session->forget_session();
+	}
+
+	/**
+	 * How many captured log messages mention `$needle`.
+	 *
+	 * @param string $needle Text to look for.
+	 */
+	private function count_logged( string $needle ): int {
+		return count(
+			array_filter(
+				$this->logged_messages,
+				static function ( string $message ) use ( $needle ): bool {
+					return false !== strpos( $message, $needle );
+				}
+			)
+		);
+	}
 }

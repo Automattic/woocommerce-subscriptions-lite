@@ -914,6 +914,27 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Replace every statement matching `$pattern` with invalid SQL until the test ends, so each
+	 * one fails with a database error. Error output is suppressed until the test ends.
+	 *
+	 * @param string $pattern Regex the statements to break must match.
+	 */
+	protected function fail_every_query( string $pattern ): void {
+		global $wpdb;
+
+		add_filter(
+			'query',
+			static function ( $query ) use ( $pattern ) {
+				return is_string( $query ) && 1 === preg_match( $pattern, $query ) ? 'SELECT * FROM table_that_does_not_exist_for_tests' : $query;
+			}
+		);
+
+		if ( null === $this->suppressed_errors ) {
+			$this->suppressed_errors = $wpdb->suppress_errors( true );
+		}
+	}
+
+	/**
 	 * The store's `timezone_string` and `gmt_offset` before this test pinned them.
 	 *
 	 * @var array{0: mixed, 1: mixed}|null
