@@ -25,6 +25,7 @@ use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\PlanStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\PlanRepository;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\SchemaInstaller;
 use Automattic\WooCommerce\SubscriptionsLite\Checkout\ContractCreationHandler;
+use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\History;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\RenewalOrderBuilder;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ApplicabilityStore;
@@ -643,6 +644,7 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 		$this->assertCount( 1, Contracts::find_by_origin_order( $order->get_id() ) );
 		$this->assertCount( 1, $this->get_order_notes_containing( $order->get_id(), 'activated after its creation was interrupted' ) );
 		$this->assertSame( [], $this->pending_resumes( $order->get_id() ), 'The resume is dropped once active.' );
+		$this->assertSame( [ History::TYPE_CREATED ], $this->get_history_types( $draft_id ), 'The resumed creation records one entry.' );
 	}
 
 	/**
@@ -681,6 +683,7 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 		$this->assertNull( $contract->get_lock_state() );
 		$this->assertCount( 1, Contracts::get_cycles( $drafts[0]->get_id() ), 'No second cycle.' );
 		$this->assertCount( 1, $this->get_order_notes_containing( $order->get_id(), 'activated after its creation was interrupted' ) );
+		$this->assertSame( [ History::TYPE_CREATED ], $this->get_history_types( $contract->get_id() ), 'The resumed creation records one entry.' );
 	}
 
 	public function test_a_successful_creation_leaves_no_resume_action_and_the_action_is_a_no_op(): void {

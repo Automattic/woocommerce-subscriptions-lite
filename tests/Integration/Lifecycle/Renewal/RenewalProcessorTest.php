@@ -19,6 +19,8 @@ use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\CycleStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\SchemaInstaller;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\RowActionResult;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\HeldLocks;
+use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\History;
+use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Hold;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\RenewalOrderBuilder;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\RenewalProcessor;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\Settlement;
@@ -175,6 +177,8 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 		$this->assertSame( $this->period_end, $cycle->get_ends_at_gmt() );
 		$this->assertSame( $this->period_end, $this->get_contract( $contract_id )->get_next_payment_gmt() );
 		$this->assertSame( ContractStatus::ACTIVE, $this->get_contract( $contract_id )->get_status() );
+		$this->assertSame( [ History::TYPE_CREATED, History::TYPE_RENEWAL_PAID ], $this->get_history_types( $contract_id ) );
+		$this->assertSame( $cycle->get_id(), $this->get_history( $contract_id, History::TYPE_RENEWAL_PAID )[0]->get_cycle_id() );
 	}
 
 	public function test_a_failed_charge_fails_the_cycle_and_holds_the_contract(): void {
@@ -188,6 +192,8 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 		$contract = $this->get_contract( $contract_id );
 		$this->assertSame( ContractStatus::ON_HOLD, $contract->get_status() );
 		$this->assertNull( $contract->get_next_payment_gmt() );
+		$this->assertSame( [ History::TYPE_CREATED, History::TYPE_RENEWAL_FAILED, History::TYPE_HELD ], $this->get_history_types( $contract_id ) );
+		$this->assertSame( Hold::REASON_RENEWAL_FAILED, $this->get_history( $contract_id, History::TYPE_HELD )[0]->get_payload()['reason'] );
 	}
 
 	public function test_an_async_charge_leaves_the_cycle_processing_and_is_not_charged_again(): void {
@@ -434,6 +440,10 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 
 		$this->assertNull( $this->renew( $contract_id, $this->from_now( '+1 hour' ) ) );
 		$this->assertSame( 1, $this->charge_count() );
+		$held = $this->get_history( $contract_id, History::TYPE_HELD );
+		$this->assertCount( 2, $held, 'The re-applied hold is recorded too.' );
+		$this->assertSame( $this->head( $contract_id )->get_id(), $held[1]->get_cycle_id() );
+		$this->assertSame( Hold::REASON_RENEWAL_FAILED, $held[1]->get_payload()['reason'] );
 	}
 
 	public function test_a_manual_retry_of_a_failed_renewal_charges_the_same_order(): void {
@@ -463,6 +473,30 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 
 		$this->assertSame( 2, $this->charge_count() );
 		$this->assertSame( CycleStatus::FAILED, $this->head( $contract_id )->get_status() );
+	}
+
+	public function test_each_failure_of_a_retried_renewal_order_is_recorded_once(): void {
+		$this->support_engine_charges( 'cod', 'failed' );
+		$contract_id = $this->make_contract();
+		$order       = $this->renew( $contract_id );
+		$this->assertInstanceOf( WC_Order::class, $order );
+		( new Settlement() )->settle( wc_get_order( $order->get_id() ) );
+
+		$this->assertInstanceOf( WC_Order::class, $this->renew( $contract_id, $this->from_now( '+1 day' ), true ) );
+		( new Settlement() )->settle( wc_get_order( $order->get_id() ) );
+		( new Settlement() )->settle( wc_get_order( $order->get_id() ) );
+
+		$this->assertSame( 2, $this->charge_count() );
+		$this->assertSame(
+			[ History::TYPE_CREATED, History::TYPE_RENEWAL_FAILED, History::TYPE_HELD, History::TYPE_RENEWAL_FAILED, History::TYPE_HELD ],
+			$this->get_history_types( $contract_id ),
+			'Each failure of the same order gets one entry; a re-delivered settlement records nothing more.'
+		);
+		$cycle_id = $this->head( $contract_id )->get_id();
+		foreach ( $this->get_history( $contract_id, History::TYPE_RENEWAL_FAILED ) as $failure ) {
+			$this->assertSame( $cycle_id, $failure->get_cycle_id() );
+			$this->assertSame( $order->get_id(), $failure->get_payload()['order_id'] );
+		}
 	}
 
 	public function test_a_renewal_order_that_cannot_be_built_fails_the_renewal_and_holds_the_contract(): void {
@@ -501,6 +535,10 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 		$this->assertSame( RenewalProcessor::REASON_ORDER_BUILD_FAILED, $head->get_reason() );
 		$this->assertNull( $head->get_order_id() );
 		$this->assertTrue( RenewalProcessor::can_renew_now( $contract ), 'Renew now is offered to recover it.' );
+		$this->assertSame( [ History::TYPE_CREATED, History::TYPE_HELD ], $this->get_history_types( $contract_id ) );
+		$held = $this->get_history( $contract_id, History::TYPE_HELD )[0];
+		$this->assertSame( $head->get_id(), $held->get_cycle_id() );
+		$this->assertSame( Hold::REASON_RENEWAL_FAILED, $held->get_payload()['reason'] );
 
 		$result = $this->renew_now_as_admin( $contract_id );
 
@@ -589,6 +627,10 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 		$contract = $this->get_contract( $contract_id );
 		$this->assertSame( ContractStatus::ON_HOLD, $contract->get_status() );
 		$this->assertNull( $contract->get_next_payment_gmt() );
+		$held = $this->get_history( $contract_id, History::TYPE_HELD );
+		$this->assertCount( 1, $held );
+		$this->assertSame( $cycle->get_id(), $held[0]->get_cycle_id() );
+		$this->assertSame( Hold::REASON_AWAITING_PAYMENT, $held[0]->get_payload()['reason'] );
 
 		Payments::process_scheduled_payment( $reloaded );
 		$this->assertSame( [ $order->get_id() ], $this->charged_order_ids, 'The spy would have seen a charge.' );

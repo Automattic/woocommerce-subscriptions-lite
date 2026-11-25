@@ -13,6 +13,7 @@ use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\ValidationException;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
+use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\History;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\HoldAnchor;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Privacy\Eraser;
@@ -267,6 +268,15 @@ final class EraserTest extends LiteIntegrationTestCase {
 		$this->assertNull( $contract->get_next_payment_gmt() );
 		$this->assertNull( HoldAnchor::read( $contract_id ) );
 		$this->assert_erased( $contract_id );
+		$entries = $this->get_history( $contract_id, History::TYPE_CANCELLED );
+		$this->assertCount( 1, $entries, 'The cancellation is recorded as a merchant cancel.' );
+		$this->assertSame(
+			[
+				'role'    => History::ROLE_MERCHANT,
+				'user_id' => get_current_user_id(),
+			],
+			$entries[0]->get_payload()['actor']
+		);
 	}
 
 	public function test_a_draft_is_cancelled_then_anonymised(): void {

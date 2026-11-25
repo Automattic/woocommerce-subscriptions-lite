@@ -17,6 +17,7 @@ use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\SchemaInstaller;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\HeldLocks;
+use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\History;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Hold;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\HoldAnchor;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\LifecycleNotAllowedException;
@@ -253,14 +254,15 @@ final class HoldTest extends LiteIntegrationTestCase {
 	}
 
 	public function test_system_hold_writes_with_the_held_lock(): void {
-		$contract_id = $this->seed_contract();
-		( new Hold() )->hold( $contract_id );
+		$contract_id = $this->create_contract( $this->create_customer(), [ 'status' => 'on-hold' ] );
+		$cycle       = Contracts::get_cycles( $contract_id, 1 )[0];
 
-		$lock = $this->hold_lock( $contract_id, 'renewal' );
+		$lock = HeldLocks::acquire( $contract_id, 'renewal' );
+		$this->assertNotNull( $lock );
 		try {
-			Hold::system_hold( $lock, [ 'last_attempt_gmt' => '2026-02-15 00:00:00' ] );
+			Hold::system_hold( $lock, $cycle, Hold::REASON_AWAITING_PAYMENT, [ 'last_attempt_gmt' => '2026-02-15 00:00:00' ] );
 		} finally {
-			$lock->release();
+			HeldLocks::release( $lock );
 		}
 
 		$stored = $this->get_contract( $contract_id );
@@ -268,6 +270,20 @@ final class HoldTest extends LiteIntegrationTestCase {
 		$this->assertNull( $stored->get_next_payment_gmt() );
 		$this->assertSame( '2026-02-15 00:00:00', $stored->get_last_attempt_gmt() );
 		$this->assertSame( '', $this->get_stored_anchor( $contract_id ), 'The customer anchor is dropped.' );
+
+		$held = $this->get_history( $contract_id, History::TYPE_HELD );
+		$this->assertCount( 2, $held, 'The customer hold, then Lite\'s hold.' );
+		$this->assertSame( $cycle->get_id(), $held[1]->get_cycle_id() );
+		$this->assertSame(
+			[
+				'actor'  => [
+					'role'    => History::ROLE_SYSTEM,
+					'user_id' => null,
+				],
+				'reason' => Hold::REASON_AWAITING_PAYMENT,
+			],
+			$held[1]->get_payload()
+		);
 	}
 
 	public function test_a_held_action_listener_writes_with_the_held_lock(): void {

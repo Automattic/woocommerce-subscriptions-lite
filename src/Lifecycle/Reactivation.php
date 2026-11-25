@@ -95,6 +95,8 @@ final class Reactivation {
 				return null;
 			}
 
+			History::add( $reactivated_contract, History::TYPE_REACTIVATED );
+
 			HoldAnchor::clear( $lock );
 
 			/**
