@@ -26,6 +26,7 @@ use Automattic\WooCommerce\SubscriptionsEngine\Api\ContractLock;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\ContractLockedException;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\View\CycleView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 use WP_Error;
@@ -41,6 +42,16 @@ final class Hold {
 	 * Operation label of the customer hold's contract lock.
 	 */
 	public const OPERATION = 'hold';
+
+	/**
+	 * Reason of Lite's hold over a renewal that failed (its cycle is failed).
+	 */
+	public const REASON_RENEWAL_FAILED = 'renewal-failed';
+
+	/**
+	 * Reason of Lite's hold over a renewal order left pending for payment.
+	 */
+	public const REASON_AWAITING_PAYMENT = 'awaiting-payment';
 
 	/**
 	 * Hold an active contract under its lock: read and decide after acquiring, then the
@@ -90,6 +101,8 @@ final class Hold {
 				if ( null === $held_contract ) {
 					return null;
 				}
+
+				History::add( $held_contract, History::TYPE_HELD );
 			}
 
 			/**
@@ -114,15 +127,19 @@ final class Hold {
 	 * Place Lite's hold for an unpaid renewal: on hold with no due moment, and no hold anchor.
 	 * No checks and no `contract_held` action; the renewal flow calling it has decided, under
 	 * `$lock`. The anchor goes first, so a reader that sees the contract on hold never finds a
-	 * stale one.
+	 * stale one. A hold that changes the status is recorded in the history with the renewal's
+	 * cycle and `$reason`; a contract already on hold records nothing.
 	 *
-	 * @param ContractLock         $lock   The caller's lock on the contract.
-	 * @param array<string, mixed> $fields Further contract fields to write with the hold.
+	 * @param ContractLock         $lock     The caller's lock on the contract.
+	 * @param ContractView         $contract The contract as read under `$lock`.
+	 * @param CycleView            $cycle    The unpaid renewal's cycle.
+	 * @param string               $reason   Why: {@see self::REASON_RENEWAL_FAILED} or {@see self::REASON_AWAITING_PAYMENT}.
+	 * @param array<string, mixed> $fields   Further contract fields to write with the hold.
 	 * @throws ContractLockedException If the lock was lost.
 	 */
-	public static function system_hold( ContractLock $lock, array $fields = [] ): void {
+	public static function system_hold( ContractLock $lock, ContractView $contract, CycleView $cycle, string $reason, array $fields = [] ): void {
 		HoldAnchor::clear( $lock );
-		Contracts::update(
+		$held_contract = Contracts::update(
 			$lock->get_contract_id(),
 			[
 				'extension_slug'   => Package::EXTENSION_SLUG,
@@ -130,6 +147,18 @@ final class Hold {
 				'next_payment_gmt' => null,
 			] + $fields,
 			$lock
+		);
+		if ( null === $held_contract || ContractStatus::ON_HOLD === $contract->get_status() ) {
+			return;
+		}
+
+		History::add_system(
+			$held_contract->get_id(),
+			History::TYPE_HELD,
+			[
+				'cycle_id' => $cycle->get_id(),
+				'payload'  => [ 'reason' => $reason ],
+			]
 		);
 	}
 

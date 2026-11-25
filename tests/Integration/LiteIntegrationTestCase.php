@@ -28,6 +28,7 @@ use Automattic\WooCommerce\SubscriptionsEngine\Api\Payments;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Plans;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\CycleView;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\View\HistoryEntryView;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\PlanView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\CycleStatus;
@@ -491,6 +492,44 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 		$this->assertInstanceOf( ContractView::class, $contract );
 
 		return $contract;
+	}
+
+	/**
+	 * The contract's history entries, oldest first, limited to `$type` when given.
+	 *
+	 * @param int         $contract_id Contract id.
+	 * @param string|null $type        Entry type, or null for every entry.
+	 * @return array<int, HistoryEntryView>
+	 */
+	protected function get_history( int $contract_id, ?string $type = null ): array {
+		$entries = array_reverse( Contracts::get_history( $contract_id, [ 'limit' => 100 ] ) );
+		if ( null === $type ) {
+			return $entries;
+		}
+
+		return array_values(
+			array_filter(
+				$entries,
+				static function ( HistoryEntryView $entry ) use ( $type ): bool {
+					return $type === $entry->get_type();
+				}
+			)
+		);
+	}
+
+	/**
+	 * The types of the contract's history entries, oldest first.
+	 *
+	 * @param int $contract_id Contract id.
+	 * @return array<int, string>
+	 */
+	protected function get_history_types( int $contract_id ): array {
+		return array_map(
+			static function ( HistoryEntryView $entry ): string {
+				return $entry->get_type();
+			},
+			$this->get_history( $contract_id )
+		);
 	}
 
 	/**
@@ -1046,5 +1085,12 @@ abstract class LiteIntegrationTestCase extends WP_UnitTestCase {
 	 */
 	protected static function plan_read(): string {
 		return '/FROM ' . preg_quote( SchemaInstaller::get_table_name( SchemaInstaller::TABLE_PLANS ), '/' ) . ' /';
+	}
+
+	/**
+	 * Regex for the engine's history entry insert (`Contracts::add_history_entry()`), for {@see self::fail_next_query()}.
+	 */
+	protected static function history_insert(): string {
+		return '/^INSERT INTO ' . preg_quote( SchemaInstaller::get_table_name( SchemaInstaller::TABLE_CONTRACT_HISTORY ), '/' ) . ' /';
 	}
 }

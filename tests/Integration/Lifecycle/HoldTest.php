@@ -17,6 +17,7 @@ use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\SchemaInstaller;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\HeldLocks;
+use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\History;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Hold;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\HoldAnchor;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\LifecycleNotAllowedException;
@@ -253,21 +254,53 @@ final class HoldTest extends LiteIntegrationTestCase {
 	}
 
 	public function test_system_hold_writes_with_the_held_lock(): void {
-		$contract_id = $this->seed_contract();
-		( new Hold() )->hold( $contract_id );
+		$contract_id = $this->create_contract( $this->create_customer() );
+		$cycle       = Contracts::get_cycles( $contract_id, 1 )[0];
+		$this->store_hold_anchor( $contract_id, '2026-02-15 00:00:00' );
 
-		$lock = $this->hold_lock( $contract_id, 'renewal' );
+		$lock = HeldLocks::acquire( $contract_id, 'renewal' );
+		$this->assertNotNull( $lock );
 		try {
-			Hold::system_hold( $lock, [ 'last_attempt_gmt' => '2026-02-15 00:00:00' ] );
+			Hold::system_hold( $lock, $this->get_contract( $contract_id ), $cycle, Hold::REASON_AWAITING_PAYMENT, [ 'last_attempt_gmt' => '2026-02-15 00:00:00' ] );
 		} finally {
-			$lock->release();
+			HeldLocks::release( $lock );
 		}
 
 		$stored = $this->get_contract( $contract_id );
 		$this->assertSame( ContractStatus::ON_HOLD, $stored->get_status() );
 		$this->assertNull( $stored->get_next_payment_gmt() );
 		$this->assertSame( '2026-02-15 00:00:00', $stored->get_last_attempt_gmt() );
-		$this->assertSame( '', $this->get_stored_anchor( $contract_id ), 'The customer anchor is dropped.' );
+		$this->assertSame( '', $this->get_stored_anchor( $contract_id ), 'A leftover anchor is dropped.' );
+
+		$held = $this->get_history( $contract_id, History::TYPE_HELD );
+		$this->assertCount( 1, $held );
+		$this->assertSame( $cycle->get_id(), $held[0]->get_cycle_id() );
+		$this->assertSame(
+			[
+				'actor'  => [
+					'role'    => History::ROLE_SYSTEM,
+					'user_id' => null,
+				],
+				'reason' => Hold::REASON_AWAITING_PAYMENT,
+			],
+			$held[0]->get_payload()
+		);
+	}
+
+	public function test_system_hold_over_a_contract_already_on_hold_records_nothing(): void {
+		$contract_id = $this->create_contract( $this->create_customer(), [ 'status' => 'on-hold' ] );
+		$cycle       = Contracts::get_cycles( $contract_id, 1 )[0];
+
+		$lock = HeldLocks::acquire( $contract_id, 'renewal' );
+		$this->assertNotNull( $lock );
+		try {
+			Hold::system_hold( $lock, $this->get_contract( $contract_id ), $cycle, Hold::REASON_RENEWAL_FAILED );
+		} finally {
+			HeldLocks::release( $lock );
+		}
+
+		$this->assertSame( '', $this->get_stored_anchor( $contract_id ), 'Lite\'s hold replaces the customer hold.' );
+		$this->assertCount( 1, $this->get_history( $contract_id, History::TYPE_HELD ), 'Only the customer hold: the status did not change.' );
 	}
 
 	public function test_a_held_action_listener_writes_with_the_held_lock(): void {

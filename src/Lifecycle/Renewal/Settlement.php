@@ -24,6 +24,7 @@ use Automattic\WooCommerce\SubscriptionsEngine\Api\View\CycleView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\CycleStatus;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\HeldLocks;
+use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\History;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\HoldAnchor;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Hold;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
@@ -83,6 +84,13 @@ final class Settlement {
 	 * Order meta counting failed settlement retry runs; cleared on a completed run and at the cap.
 	 */
 	private const SETTLE_ATTEMPTS_META = '_wcsl_settle_attempts';
+
+	/**
+	 * Order meta holding the renewal order's payment failure attempt number, raised before each
+	 * failure is settled: each failure gets its own history entry and a re-delivered settlement
+	 * of it none. A run cut short before its cycle write can skip a number; none is reused.
+	 */
+	private const FAILURES_META = '_wcsl_renewal_failures';
 
 	/**
 	 * Failed retry runs after which the settlement is no longer rescheduled.
@@ -582,7 +590,9 @@ final class Settlement {
 	 * The paid order bills its cycle; the contract resumes or records the payment. A repeat
 	 * signal for a newest cycle this order already billed completes a contract write cut short
 	 * (the due scan never would: no due moment) and fires the paid action, so that action is
-	 * at-least-once. A paid order whose cycle can no longer be billed is flagged for a refund.
+	 * at-least-once. A repeat that finds the payment recorded only records the paid history
+	 * entry a run cut short may have missed. A paid order whose cycle can no longer be billed is
+	 * flagged for a refund.
 	 *
 	 * @param WC_Order          $order    The paid order.
 	 * @param ContractView      $contract The contract.
@@ -592,7 +602,11 @@ final class Settlement {
 	 */
 	private function settle_paid( WC_Order $order, ContractView $contract, CycleView $cycle, DateTimeImmutable $now, ContractLock $lock ): void {
 		if ( CycleStatus::BILLED === $cycle->get_status() ) {
-			if ( $order->get_id() !== $cycle->get_order_id() || ! self::is_head( $cycle ) || self::contract_records_payment( $contract, $cycle ) ) {
+			if ( $order->get_id() !== $cycle->get_order_id() ) {
+				return;
+			}
+			if ( ! self::is_head( $cycle ) || self::contract_records_payment( $contract, $cycle ) ) {
+				self::record_paid_entry( $cycle );
 				return;
 			}
 		} elseif ( ! in_array( $cycle->get_status(), self::PAYABLE_CYCLE_STATUSES, true ) ) {
@@ -621,7 +635,12 @@ final class Settlement {
 			}
 		}
 
-		$this->record_payment( $order, $contract, $cycle, $now, $lock );
+		$resumed = $this->record_payment( $order, $contract, $cycle, $now, $lock );
+		self::record_paid_entry( $cycle );
+		if ( $resumed ) {
+			// Only on the status change: a re-delivery reads the contract active and gets here with false.
+			History::add_system( $contract->get_id(), History::TYPE_REACTIVATED, [ 'cycle_id' => $cycle->get_id() ] );
+		}
 
 		$settled = $this->read_settled( $contract->get_id(), $cycle->get_id(), $order->get_id() );
 		if ( null === $settled ) {
@@ -646,14 +665,16 @@ final class Settlement {
 	 * The contract half of a paid settlement: an active contract, or one on Lite's own hold,
 	 * becomes active with the next due moment after the paid cycle; a customer hold moves its
 	 * anchor there instead; a winding-down or cancelled contract only records the payment.
+	 * Returns whether it lifted Lite's own hold (on hold to active).
 	 *
 	 * @param WC_Order          $order    The paid order.
 	 * @param ContractView      $contract The contract.
 	 * @param CycleView         $cycle    The billed cycle.
 	 * @param DateTimeImmutable $now      The current moment (UTC).
 	 * @param ContractLock      $lock     The held lock.
+	 * @return bool True when the contract moved from on hold to active.
 	 */
-	private function record_payment( WC_Order $order, ContractView $contract, CycleView $cycle, DateTimeImmutable $now, ContractLock $lock ): void {
+	private function record_payment( WC_Order $order, ContractView $contract, CycleView $cycle, DateTimeImmutable $now, ContractLock $lock ): bool {
 		$date_paid    = $order->get_date_paid();
 		$last_payment = null === $date_paid ? $now : new DateTimeImmutable( '@' . $date_paid->getTimestamp() );
 		$contract_id  = $contract->get_id();
@@ -668,7 +689,7 @@ final class Settlement {
 				],
 				$lock
 			);
-			return;
+			return false;
 		}
 
 		$terms = ContractPlans::get_billing_terms_for( $contract );
@@ -692,10 +713,10 @@ final class Settlement {
 				],
 				$lock
 			);
-			return;
+			return false;
 		}
 
-		Contracts::update(
+		$active_contract = Contracts::update(
 			$contract_id,
 			[
 				'extension_slug'   => Package::EXTENSION_SLUG,
@@ -706,6 +727,8 @@ final class Settlement {
 			$lock
 		);
 		HoldAnchor::clear( $lock );
+
+		return null !== $active_contract && ContractStatus::ON_HOLD === $status;
 	}
 
 	/**
@@ -747,8 +770,11 @@ final class Settlement {
 	}
 
 	/**
-	 * The failed order fails its cycle; an active or held contract (a customer hold included)
-	 * goes on the system hold until the customer pays.
+	 * The failed order fails its cycle, recorded in the history before an active or held
+	 * contract (a customer hold included) goes on the system hold until the customer pays. The
+	 * order's failure count goes up first, so a failure that is retried (Renew now) and fails
+	 * again gets its own entry. A repeat for a cycle this order already failed only records the
+	 * failed history entry a run cut short may have missed, under the current count.
 	 *
 	 * @param WC_Order          $order    The failed order.
 	 * @param ContractView      $contract The contract.
@@ -758,17 +784,27 @@ final class Settlement {
 	 */
 	private function settle_failed( WC_Order $order, ContractView $contract, CycleView $cycle, DateTimeImmutable $now, ContractLock $lock ): void {
 		if ( ! in_array( $cycle->get_status(), self::OPEN_CYCLE_STATUSES, true ) ) {
+			if ( CycleStatus::FAILED === $cycle->get_status() && self::REASON_PAYMENT_FAILED === $cycle->get_reason() ) {
+				self::record_failed_entry( $cycle, $order, max( 1, self::get_failure_count( $order ) ) );
+			}
 			return;
 		}
+
+		// Raised before the cycle write, so a run cut short after it never reuses an earlier
+		// failure's number; a lost compare-and-set only skips a number.
+		$attempt = self::raise_failure_count( $order );
+
 		$failed = self::fail_cycle( $cycle, self::REASON_PAYMENT_FAILED, $lock );
 		if ( ! $failed ) {
 			return;
 		}
 
+		self::record_failed_entry( $cycle, $order, $attempt );
+
 		$contract_id = $contract->get_id();
 		if ( in_array( $contract->get_status(), [ ContractStatus::ACTIVE, ContractStatus::ON_HOLD ], true ) ) {
 			// Also over a customer hold: its anchor would sit on the end of an unpaid period.
-			Hold::system_hold( $lock, [ 'last_attempt_gmt' => $now ] );
+			Hold::system_hold( $lock, $contract, $cycle, Hold::REASON_RENEWAL_FAILED, [ 'last_attempt_gmt' => $now ] );
 		}
 
 		$settled = $this->read_settled( $contract_id, $cycle->get_id(), $order->get_id() );
@@ -843,8 +879,71 @@ final class Settlement {
 		}
 
 		if ( in_array( $contract->get_status(), [ ContractStatus::ACTIVE, ContractStatus::ON_HOLD ], true ) ) {
-			Hold::system_hold( $lock );
+			Hold::system_hold( $lock, $contract, $cycle, Hold::REASON_RENEWAL_FAILED );
 		}
+	}
+
+	/**
+	 * Record the paid renewal in the history, once per cycle: a cycle is billed once.
+	 *
+	 * @param CycleView $cycle The billed cycle.
+	 */
+	private static function record_paid_entry( CycleView $cycle ): void {
+		History::add_system(
+			$cycle->get_contract_id(),
+			History::TYPE_RENEWAL_PAID,
+			[
+				'cycle_id'     => $cycle->get_id(),
+				'creation_key' => sprintf( 'renewal-paid-%d', $cycle->get_id() ),
+			]
+		);
+	}
+
+	/**
+	 * Record the failed renewal order in the history, once per cycle, order and failure: a
+	 * re-delivered failure records nothing, another failure of the order or another order on the
+	 * cycle does.
+	 *
+	 * @param CycleView $cycle   The failed cycle.
+	 * @param WC_Order  $order   The failed renewal order.
+	 * @param int       $attempt The order's failure number, from 1.
+	 */
+	private static function record_failed_entry( CycleView $cycle, WC_Order $order, int $attempt ): void {
+		History::add_system(
+			$cycle->get_contract_id(),
+			History::TYPE_RENEWAL_FAILED,
+			[
+				'cycle_id'     => $cycle->get_id(),
+				'payload'      => [ 'order_id' => $order->get_id() ],
+				'creation_key' => sprintf( 'renewal-failed-%d-%d-%d', $cycle->get_id(), $order->get_id(), $attempt ),
+			]
+		);
+	}
+
+	/**
+	 * The order's latest payment failure attempt number (0 before any), read from the database
+	 * rather than the copy of the order loaded before the lock. It can skip a number.
+	 *
+	 * @param WC_Order $order The renewal order.
+	 */
+	private static function get_failure_count( WC_Order $order ): int {
+		$order->read_meta_data( true );
+
+		return (int) $order->get_meta( self::FAILURES_META );
+	}
+
+	/**
+	 * Raise the order's payment failure attempt number and save it.
+	 *
+	 * @param WC_Order $order The renewal order.
+	 * @return int The new attempt number.
+	 */
+	private static function raise_failure_count( WC_Order $order ): int {
+		$attempt = self::get_failure_count( $order ) + 1;
+		$order->update_meta_data( self::FAILURES_META, (string) $attempt );
+		$order->save_meta_data();
+
+		return $attempt;
 	}
 
 	/**

@@ -90,6 +90,8 @@ final class Cancellation {
 					return null;
 				}
 
+				History::add( $cancelled_contract, History::TYPE_CANCELLED );
+
 				HoldAnchor::clear( $lock );
 			}
 
@@ -149,6 +151,8 @@ final class Cancellation {
 				if ( null === $pending_contract ) {
 					return null;
 				}
+
+				History::add( $pending_contract, History::TYPE_CANCELLATION_SCHEDULED, [ 'payload' => [ 'end_gmt' => $pending_contract->get_end_gmt() ] ] );
 
 				HoldAnchor::clear( $lock );
 			}

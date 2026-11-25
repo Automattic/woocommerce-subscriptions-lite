@@ -32,6 +32,7 @@ use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\CycleStatus;
 use Automattic\WooCommerce\SubscriptionsLite\Contracts\AddressFields;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\HeldLocks;
+use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\History;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Payments\RenewalGateways;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ProductPlanResolver;
@@ -634,7 +635,7 @@ final class ContractCreationHandler {
 
 	/**
 	 * Cycle 1 (unless the draft already has it) up to the first renewal, the billing day and
-	 * activation of a draft, under its lock.
+	 * activation of a draft, under its lock, then the `created` history entry (once per contract).
 	 *
 	 * @param WC_Order          $order         The paid order.
 	 * @param BillingTerms      $terms         The plan's billing terms.
@@ -664,7 +665,7 @@ final class ContractCreationHandler {
 
 		BillingDay::store( $lock, $terms->get_billing_day_from( $start ) );
 
-		return Contracts::update(
+		$activated = Contracts::update(
 			$contract_id,
 			[
 				'extension_slug'   => Package::EXTENSION_SLUG,
@@ -673,6 +674,11 @@ final class ContractCreationHandler {
 			],
 			$lock
 		);
+		if ( null !== $activated ) {
+			History::add( $activated, History::TYPE_CREATED, [ 'creation_key' => 'created' ] );
+		}
+
+		return $activated;
 	}
 
 	/**

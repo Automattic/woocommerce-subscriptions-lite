@@ -25,6 +25,7 @@ use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\PlanStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\PlanRepository;
 use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\SchemaInstaller;
 use Automattic\WooCommerce\SubscriptionsLite\Checkout\ContractCreationHandler;
+use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\History;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\RenewalOrderBuilder;
 use Automattic\WooCommerce\SubscriptionsLite\Plans\ApplicabilityStore;
@@ -643,6 +644,7 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 		$this->assertCount( 1, Contracts::find_by_origin_order( $order->get_id() ) );
 		$this->assertCount( 1, $this->get_order_notes_containing( $order->get_id(), 'activated after its creation was interrupted' ) );
 		$this->assertSame( [], $this->pending_resumes( $order->get_id() ), 'The resume is dropped once active.' );
+		$this->assertSame( [ History::TYPE_CREATED ], $this->get_history_types( $draft_id ), 'The resumed creation records one entry.' );
 	}
 
 	/**
@@ -681,6 +683,52 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 		$this->assertNull( $contract->get_lock_state() );
 		$this->assertCount( 1, Contracts::get_cycles( $drafts[0]->get_id() ), 'No second cycle.' );
 		$this->assertCount( 1, $this->get_order_notes_containing( $order->get_id(), 'activated after its creation was interrupted' ) );
+		$this->assertSame( [ History::TYPE_CREATED ], $this->get_history_types( $contract->get_id() ), 'The resumed creation records one entry.' );
+	}
+
+	/**
+	 * Action Scheduler's async runner forwards the cookies of the request that started it, so a
+	 * resume run there carries that user; the created entry is still the system's.
+	 */
+	public function test_a_resume_in_the_action_scheduler_queue_records_the_created_entry_as_the_system(): void {
+		$customer_id = $this->create_customer();
+		$plan        = $this->make_plan();
+		$order       = $this->create_subscription_order( $customer_id );
+		$this->apply_and_stamp( $order, $plan );
+
+		$contracts = SchemaInstaller::get_table_name( SchemaInstaller::TABLE_CONTRACTS );
+		$die       = static function ( string $query ) use ( $contracts ): string {
+			return 0 === strpos( $query, "UPDATE `{$contracts}`" ) && false !== strpos( $query, "'" . ContractStatus::ACTIVE . "'" ) ? '' : $query;
+		};
+		add_filter( 'query', $die );
+		try {
+			$order->update_status( OrderStatus::PROCESSING );
+		} finally {
+			remove_filter( 'query', $die );
+		}
+		$drafts = Contracts::find_by_origin_order( $order->get_id() );
+		$this->assertCount( 1, $drafts );
+
+		wp_set_current_user( self::factory()->user->create( [ 'role' => 'administrator' ] ) );
+		remove_all_actions( 'action_scheduler_run_queue' );
+		add_action(
+			'action_scheduler_run_queue',
+			static function () use ( $order ): void {
+				do_action( 'woocommerce_subscriptions_lite_resume_checkout', $order->get_id() );
+			}
+		);
+		do_action( 'action_scheduler_run_queue', 'Async Request' );
+
+		$this->assertSame( ContractStatus::ACTIVE, $this->get_contract( $drafts[0]->get_id() )->get_status() );
+		$created = $this->get_history( $drafts[0]->get_id(), History::TYPE_CREATED );
+		$this->assertCount( 1, $created );
+		$this->assertSame(
+			[
+				'role'    => History::ROLE_SYSTEM,
+				'user_id' => null,
+			],
+			$created[0]->get_payload()['actor']
+		);
 	}
 
 	public function test_a_successful_creation_leaves_no_resume_action_and_the_action_is_a_no_op(): void {
