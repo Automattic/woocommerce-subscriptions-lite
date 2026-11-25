@@ -62,6 +62,11 @@ final class History {
 	public const TYPE_RENEWAL_FAILED = 'renewal-failed';
 
 	/**
+	 * Entry type: a store manager added a note; its payload carries the `text`.
+	 */
+	public const TYPE_NOTE = 'note';
+
+	/**
 	 * Actor role: the subscription's customer.
 	 */
 	public const ROLE_CUSTOMER = 'customer';
@@ -91,9 +96,10 @@ final class History {
 	 * @param ContractView         $contract The contract the entry is about.
 	 * @param string               $type     Entry type, one of the `TYPE_*` constants.
 	 * @param array<string, mixed> $fields   Optional `cycle_id`, `payload` (beyond the actor) and `creation_key`.
+	 * @return bool Whether the entry was recorded; false after a logged failure or a taken creation key.
 	 */
-	public static function add( ContractView $contract, string $type, array $fields = [] ): void {
-		self::write( $contract->get_id(), $type, $fields, $contract );
+	public static function add( ContractView $contract, string $type, array $fields = [] ): bool {
+		return self::write( $contract->get_id(), $type, $fields, $contract );
 	}
 
 	/**
@@ -146,8 +152,9 @@ final class History {
 	 * @param string               $type        Entry type.
 	 * @param array<string, mixed> $fields      Optional `cycle_id`, `payload` and `creation_key`.
 	 * @param ContractView|null    $contract    The contract the current user acted on, or null for Lite itself.
+	 * @return bool Whether the entry was recorded.
 	 */
-	private static function write( int $contract_id, string $type, array $fields, ?ContractView $contract ): void {
+	private static function write( int $contract_id, string $type, array $fields, ?ContractView $contract ): bool {
 		try {
 			$args = [
 				'extension_slug' => Package::EXTENSION_SLUG,
@@ -161,7 +168,7 @@ final class History {
 				$args['creation_key'] = $fields['creation_key'];
 			}
 
-			Contracts::add_history_entry( $contract_id, $args, HeldLocks::get( $contract_id ) );
+			$entry = Contracts::add_history_entry( $contract_id, $args, HeldLocks::get( $contract_id ) );
 		} catch ( Throwable $e ) {
 			wc_get_logger()->error(
 				sprintf( 'History: the %s entry of contract %d could not be recorded: %s', $type, $contract_id, $e->getMessage() ),
@@ -171,6 +178,9 @@ final class History {
 					'type'        => $type,
 				]
 			);
+			return false;
 		}
+
+		return null !== $entry;
 	}
 }

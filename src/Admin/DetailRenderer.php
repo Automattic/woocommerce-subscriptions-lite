@@ -4,12 +4,12 @@
  *
  * A WordPress meta-box screen for `?page=...&action=view&id=N`, modelled on
  * WooCommerce's order edit screen: each section (details, addresses, items,
- * billing history in the main column; actions, schedule, customer on the side) is
+ * billing history, history in the main column; actions, schedule, customer on the side) is
  * a postbox registered on this page's screen id and rendered with
  * `do_meta_boxes()`, so the screen inherits wp-admin's collapsible two-column
  * layout and exposes an `add_meta_boxes_<screen>` extension point. The boxes are a
- * fixed order (drag-reorder is disabled), collapse only. Read + actions only - not
- * an editable save form. All data comes through the engine's public API.
+ * fixed order (drag-reorder is disabled), collapse only. Read + actions (and notes) only -
+ * not an editable save form. All data comes through the engine's public API.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Admin
  */
@@ -23,6 +23,7 @@ use Automattic\WooCommerce\SubscriptionsLite\Admin\MetaBoxes\Actions;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\MetaBoxes\Addresses;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\MetaBoxes\BillingHistory;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\MetaBoxes\Customer;
+use Automattic\WooCommerce\SubscriptionsLite\Admin\MetaBoxes\History;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\MetaBoxes\Items;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\MetaBoxes\Schedule;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\MetaBoxes\SubscriptionData;
@@ -35,6 +36,11 @@ defined( 'ABSPATH' ) || exit;
  * Meta-box screen controller for the subscription detail page.
  */
 final class DetailRenderer {
+
+	/**
+	 * Element id of the History box, the add-note handler's redirect anchor.
+	 */
+	const HISTORY_BOX_ID = 'wc-subs-lite-contract-history';
 
 	/**
 	 * Per-request cache of fetched contracts, so the load-time setup and the
@@ -69,7 +75,7 @@ final class DetailRenderer {
 		);
 
 		// Main column, all normal/high in registration order, so it reads
-		// details -> addresses -> items -> billing history like the order edit screen.
+		// details -> addresses -> items -> billing history -> history like the order edit screen.
 		add_meta_box(
 			'wc-subs-lite-data',
 			__( 'Subscription details', 'woocommerce-subscriptions-lite' ),
@@ -98,6 +104,14 @@ final class DetailRenderer {
 			'wc-subs-lite-history',
 			__( 'Billing history', 'woocommerce-subscriptions-lite' ),
 			[ BillingHistory::class, 'output' ],
+			$screen_id,
+			'normal',
+			'default'
+		);
+		add_meta_box(
+			self::HISTORY_BOX_ID,
+			__( 'History', 'woocommerce-subscriptions-lite' ),
+			[ History::class, 'output' ],
 			$screen_id,
 			'normal',
 			'default'

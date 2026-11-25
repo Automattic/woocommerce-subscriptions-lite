@@ -115,11 +115,13 @@ final class Bootstrap {
 		Privacy\Eraser::register();
 
 		// Admin (back office only): the WooCommerce > Subscriptions list + detail
-		// page and its Renew now / Cancel handlers (Lite's renewal and cancel flows).
+		// page, its Renew now / Cancel handlers (Lite's renewal and cancel flows)
+		// and its add-note handler.
 		// Front-end requests never need this.
 		if ( is_admin() ) {
 			Admin\PageController::register();
 			Admin\RowActionController::register();
+			Admin\NoteController::register();
 
 			// Register the WooCommerce Settings > Subscriptions tab (plans manager).
 			Admin\SettingsPage::register();
