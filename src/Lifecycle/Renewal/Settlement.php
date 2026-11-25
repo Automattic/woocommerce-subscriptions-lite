@@ -86,8 +86,9 @@ final class Settlement {
 	private const SETTLE_ATTEMPTS_META = '_wcsl_settle_attempts';
 
 	/**
-	 * Order meta counting the renewal order's settled payment failures, so each one gets its own
-	 * history entry and a re-delivered settlement of the same failure gets none.
+	 * Order meta holding the renewal order's payment failure attempt number, raised before each
+	 * failure is settled: each failure gets its own history entry and a re-delivered settlement
+	 * of it none. A run cut short before its cycle write can skip a number; none is reused.
 	 */
 	private const FAILURES_META = '_wcsl_renewal_failures';
 
@@ -781,11 +782,9 @@ final class Settlement {
 			return;
 		}
 
-		// Counted before the cycle write, so a run cut short after it never reuses an earlier
+		// Raised before the cycle write, so a run cut short after it never reuses an earlier
 		// failure's number; a lost compare-and-set only skips a number.
-		$attempt = self::get_failure_count( $order ) + 1;
-		$order->update_meta_data( self::FAILURES_META, (string) $attempt );
-		$order->save_meta_data();
+		$attempt = self::raise_failure_count( $order );
 
 		$failed = self::fail_cycle( $cycle, self::REASON_PAYMENT_FAILED, $lock );
 		if ( ! $failed ) {
@@ -797,7 +796,7 @@ final class Settlement {
 		$contract_id = $contract->get_id();
 		if ( in_array( $contract->get_status(), [ ContractStatus::ACTIVE, ContractStatus::ON_HOLD ], true ) ) {
 			// Also over a customer hold: its anchor would sit on the end of an unpaid period.
-			Hold::system_hold( $lock, $cycle, Hold::REASON_RENEWAL_FAILED, [ 'last_attempt_gmt' => $now ] );
+			Hold::system_hold( $lock, $contract, $cycle, Hold::REASON_RENEWAL_FAILED, [ 'last_attempt_gmt' => $now ] );
 		}
 
 		$settled = $this->read_settled( $contract_id, $cycle->get_id(), $order->get_id() );
@@ -872,7 +871,7 @@ final class Settlement {
 		}
 
 		if ( in_array( $contract->get_status(), [ ContractStatus::ACTIVE, ContractStatus::ON_HOLD ], true ) ) {
-			Hold::system_hold( $lock, $cycle, Hold::REASON_RENEWAL_FAILED );
+			Hold::system_hold( $lock, $contract, $cycle, Hold::REASON_RENEWAL_FAILED );
 		}
 	}
 
@@ -914,8 +913,8 @@ final class Settlement {
 	}
 
 	/**
-	 * The order's settled payment failures so far, read from the database rather than the copy
-	 * of the order loaded before the lock.
+	 * The order's latest payment failure attempt number (0 before any), read from the database
+	 * rather than the copy of the order loaded before the lock. It can skip a number.
 	 *
 	 * @param WC_Order $order The renewal order.
 	 */
@@ -923,6 +922,20 @@ final class Settlement {
 		$order->read_meta_data( true );
 
 		return (int) $order->get_meta( self::FAILURES_META );
+	}
+
+	/**
+	 * Raise the order's payment failure attempt number and save it.
+	 *
+	 * @param WC_Order $order The renewal order.
+	 * @return int The new attempt number.
+	 */
+	private static function raise_failure_count( WC_Order $order ): int {
+		$attempt = self::get_failure_count( $order ) + 1;
+		$order->update_meta_data( self::FAILURES_META, (string) $attempt );
+		$order->save_meta_data();
+
+		return $attempt;
 	}
 
 	/**

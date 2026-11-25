@@ -440,10 +440,7 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 
 		$this->assertNull( $this->renew( $contract_id, $this->from_now( '+1 hour' ) ) );
 		$this->assertSame( 1, $this->charge_count() );
-		$held = $this->get_history( $contract_id, History::TYPE_HELD );
-		$this->assertCount( 2, $held, 'The re-applied hold is recorded too.' );
-		$this->assertSame( $this->head( $contract_id )->get_id(), $held[1]->get_cycle_id() );
-		$this->assertSame( Hold::REASON_RENEWAL_FAILED, $held[1]->get_payload()['reason'] );
+		$this->assertCount( 1, $this->get_history( $contract_id, History::TYPE_HELD ), 'The hold re-applied over a held contract records nothing.' );
 	}
 
 	public function test_a_manual_retry_of_a_failed_renewal_charges_the_same_order(): void {
@@ -462,6 +459,14 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 		$contract = $this->get_contract( $contract_id );
 		$this->assertSame( ContractStatus::ACTIVE, $contract->get_status() );
 		$this->assertSame( $this->period_end, $contract->get_next_payment_gmt() );
+
+		( new Settlement() )->settle( wc_get_order( $order->get_id() ) );
+		$this->assertSame(
+			[ History::TYPE_CREATED, History::TYPE_RENEWAL_FAILED, History::TYPE_HELD, History::TYPE_RENEWAL_PAID ],
+			$this->get_history_types( $contract_id ),
+			'One paid entry, also after a re-delivered settlement.'
+		);
+		$this->assertSame( $this->head( $contract_id )->get_id(), $this->get_history( $contract_id, History::TYPE_RENEWAL_PAID )[0]->get_cycle_id() );
 	}
 
 	public function test_a_repeat_failure_on_a_retry_fails_the_cycle_again(): void {
@@ -488,9 +493,9 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 
 		$this->assertSame( 2, $this->charge_count() );
 		$this->assertSame(
-			[ History::TYPE_CREATED, History::TYPE_RENEWAL_FAILED, History::TYPE_HELD, History::TYPE_RENEWAL_FAILED, History::TYPE_HELD ],
+			[ History::TYPE_CREATED, History::TYPE_RENEWAL_FAILED, History::TYPE_HELD, History::TYPE_RENEWAL_FAILED ],
 			$this->get_history_types( $contract_id ),
-			'Each failure of the same order gets one entry; a re-delivered settlement records nothing more.'
+			'Each failure of the same order gets one entry; the contract stays on hold; a re-delivered settlement records nothing more.'
 		);
 		$cycle_id = $this->head( $contract_id )->get_id();
 		foreach ( $this->get_history( $contract_id, History::TYPE_RENEWAL_FAILED ) as $failure ) {

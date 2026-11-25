@@ -127,15 +127,17 @@ final class Hold {
 	 * Place Lite's hold for an unpaid renewal: on hold with no due moment, and no hold anchor.
 	 * No checks and no `contract_held` action; the renewal flow calling it has decided, under
 	 * `$lock`. The anchor goes first, so a reader that sees the contract on hold never finds a
-	 * stale one. The hold is recorded in the history with the renewal's cycle and `$reason`.
+	 * stale one. A hold that changes the status is recorded in the history with the renewal's
+	 * cycle and `$reason`; a contract already on hold records nothing.
 	 *
-	 * @param ContractLock         $lock   The caller's lock on the contract.
-	 * @param CycleView            $cycle  The unpaid renewal's cycle.
-	 * @param string               $reason Why: {@see self::REASON_RENEWAL_FAILED} or {@see self::REASON_AWAITING_PAYMENT}.
-	 * @param array<string, mixed> $fields Further contract fields to write with the hold.
+	 * @param ContractLock         $lock     The caller's lock on the contract.
+	 * @param ContractView         $contract The contract as read under `$lock`.
+	 * @param CycleView            $cycle    The unpaid renewal's cycle.
+	 * @param string               $reason   Why: {@see self::REASON_RENEWAL_FAILED} or {@see self::REASON_AWAITING_PAYMENT}.
+	 * @param array<string, mixed> $fields   Further contract fields to write with the hold.
 	 * @throws ContractLockedException If the lock was lost.
 	 */
-	public static function system_hold( ContractLock $lock, CycleView $cycle, string $reason, array $fields = [] ): void {
+	public static function system_hold( ContractLock $lock, ContractView $contract, CycleView $cycle, string $reason, array $fields = [] ): void {
 		HoldAnchor::clear( $lock );
 		$held_contract = Contracts::update(
 			$lock->get_contract_id(),
@@ -146,7 +148,7 @@ final class Hold {
 			] + $fields,
 			$lock
 		);
-		if ( null === $held_contract ) {
+		if ( null === $held_contract || ContractStatus::ON_HOLD === $contract->get_status() ) {
 			return;
 		}
 

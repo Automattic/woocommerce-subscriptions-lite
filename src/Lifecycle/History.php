@@ -72,7 +72,9 @@ final class History {
 	public const ROLE_MERCHANT = 'merchant';
 
 	/**
-	 * Actor role: Lite itself (renewals, settlement) or a request with no user.
+	 * Actor role: Lite itself (renewals, settlement, background runs) with no user id, or a
+	 * logged-in user who is neither the subscription's customer nor a store manager, with that
+	 * user's id.
 	 */
 	public const ROLE_SYSTEM = 'system';
 
@@ -83,14 +85,15 @@ final class History {
 
 	/**
 	 * Record an entry done by the current user: the customer when it is the subscription's
-	 * customer, a merchant when it can manage WooCommerce, else the system.
+	 * customer, a merchant when it can manage WooCommerce, else the system. Inside a background
+	 * run (WP-Cron or the Action Scheduler queue) it is the system, whatever user the run carries.
 	 *
 	 * @param ContractView         $contract The contract the entry is about.
 	 * @param string               $type     Entry type, one of the `TYPE_*` constants.
 	 * @param array<string, mixed> $fields   Optional `cycle_id`, `payload` (beyond the actor) and `creation_key`.
 	 */
 	public static function add( ContractView $contract, string $type, array $fields = [] ): void {
-		self::write( $contract->get_id(), $type, $fields, self::get_current_actor( $contract ) );
+		self::write( $contract->get_id(), $type, $fields, $contract );
 	}
 
 	/**
@@ -101,26 +104,20 @@ final class History {
 	 * @param array<string, mixed> $fields      Optional `cycle_id`, `payload` (beyond the actor) and `creation_key`.
 	 */
 	public static function add_system( int $contract_id, string $type, array $fields = [] ): void {
-		self::write(
-			$contract_id,
-			$type,
-			$fields,
-			[
-				'role'    => self::ROLE_SYSTEM,
-				'user_id' => null,
-			]
-		);
+		self::write( $contract_id, $type, $fields, null );
 	}
 
 	/**
-	 * The actor of an entry the current user caused.
+	 * The actor of an entry: Lite's own when there is no acting contract view, the request has no
+	 * user or it runs in the background; else the current user's role on the contract.
 	 *
-	 * @param ContractView $contract The contract the entry is about.
+	 * @param ContractView|null $contract The contract the current user acted on, or null for Lite itself.
 	 * @return array{role: string, user_id: int|null}
 	 */
-	private static function get_current_actor( ContractView $contract ): array {
+	private static function get_actor( ?ContractView $contract ): array {
 		$user_id = get_current_user_id();
-		if ( $user_id <= 0 ) {
+		// A background run may carry the cookies of whoever's request started it.
+		if ( null === $contract || $user_id <= 0 || wp_doing_cron() || doing_action( 'action_scheduler_run_queue' ) ) {
 			return [
 				'role'    => self::ROLE_SYSTEM,
 				'user_id' => null,
@@ -141,28 +138,29 @@ final class History {
 	}
 
 	/**
-	 * Write the entry with the lock held on the contract in this request, if any. A failure is
-	 * logged with the contract id, the entry type and the message, and not thrown.
+	 * Write the entry with the lock held on the contract in this request, if any. Any failure,
+	 * the actor lookup included, is logged with the contract id, the entry type and the message,
+	 * and not thrown.
 	 *
-	 * @param int                                    $contract_id Contract id.
-	 * @param string                                 $type        Entry type.
-	 * @param array<string, mixed>                   $fields      Optional `cycle_id`, `payload` and `creation_key`.
-	 * @param array{role: string, user_id: int|null} $actor       The actor.
+	 * @param int                  $contract_id Contract id.
+	 * @param string               $type        Entry type.
+	 * @param array<string, mixed> $fields      Optional `cycle_id`, `payload` and `creation_key`.
+	 * @param ContractView|null    $contract    The contract the current user acted on, or null for Lite itself.
 	 */
-	private static function write( int $contract_id, string $type, array $fields, array $actor ): void {
-		$args = [
-			'extension_slug' => Package::EXTENSION_SLUG,
-			'type'           => $type,
-			'payload'        => [ 'actor' => $actor ] + (array) ( $fields['payload'] ?? [] ),
-		];
-		if ( isset( $fields['cycle_id'] ) ) {
-			$args['cycle_id'] = $fields['cycle_id'];
-		}
-		if ( isset( $fields['creation_key'] ) ) {
-			$args['creation_key'] = $fields['creation_key'];
-		}
-
+	private static function write( int $contract_id, string $type, array $fields, ?ContractView $contract ): void {
 		try {
+			$args = [
+				'extension_slug' => Package::EXTENSION_SLUG,
+				'type'           => $type,
+				'payload'        => [ 'actor' => self::get_actor( $contract ) ] + (array) ( $fields['payload'] ?? [] ),
+			];
+			if ( isset( $fields['cycle_id'] ) ) {
+				$args['cycle_id'] = $fields['cycle_id'];
+			}
+			if ( isset( $fields['creation_key'] ) ) {
+				$args['creation_key'] = $fields['creation_key'];
+			}
+
 			Contracts::add_history_entry( $contract_id, $args, HeldLocks::get( $contract_id ) );
 		} catch ( Throwable $e ) {
 			wc_get_logger()->error(

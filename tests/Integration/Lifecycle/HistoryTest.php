@@ -99,6 +99,62 @@ final class HistoryTest extends LiteIntegrationTestCase {
 		);
 	}
 
+	public function test_an_entry_inside_wp_cron_is_the_systems_whatever_user_the_run_carries(): void {
+		$contract_id = $this->seed_contract( [ 'customer_id' => $this->create_customer() ] );
+		wp_set_current_user( self::factory()->user->create( [ 'role' => 'administrator' ] ) );
+		add_filter( 'wp_doing_cron', '__return_true' );
+
+		History::add( $this->get_contract( $contract_id ), History::TYPE_HELD );
+
+		$this->assertSame(
+			[
+				'role'    => History::ROLE_SYSTEM,
+				'user_id' => null,
+			],
+			$this->get_history( $contract_id )[0]->get_payload()['actor']
+		);
+	}
+
+	public function test_an_entry_inside_the_action_scheduler_queue_is_the_systems_whatever_user_the_run_carries(): void {
+		$customer_id = $this->create_customer();
+		$contract_id = $this->seed_contract( [ 'customer_id' => $customer_id ] );
+		wp_set_current_user( $customer_id );
+		remove_all_actions( 'action_scheduler_run_queue' );
+		add_action(
+			'action_scheduler_run_queue',
+			function () use ( $contract_id ): void {
+				History::add( $this->get_contract( $contract_id ), History::TYPE_CANCELLED );
+			}
+		);
+
+		do_action( 'action_scheduler_run_queue', 'Async Request' );
+
+		$this->assertSame(
+			[
+				'role'    => History::ROLE_SYSTEM,
+				'user_id' => null,
+			],
+			$this->get_history( $contract_id )[0]->get_payload()['actor']
+		);
+	}
+
+	public function test_an_actor_lookup_that_throws_is_logged_and_not_thrown(): void {
+		$contract_id = $this->seed_contract( [ 'customer_id' => $this->create_customer() ] );
+		wp_set_current_user( self::factory()->user->create( [ 'role' => 'shop_manager' ] ) );
+		add_filter(
+			'user_has_cap',
+			static function (): array {
+				throw new \RuntimeException( 'A capability filter failed.' );
+			}
+		);
+		$this->capture_log();
+
+		History::add( $this->get_contract( $contract_id ), History::TYPE_HELD );
+
+		$this->assertSame( [], $this->get_history( $contract_id ) );
+		$this->assertTrue( $this->has_logged( 'A capability filter failed.' ) );
+	}
+
 	public function test_a_system_entry_ignores_the_current_user_and_stores_its_fields(): void {
 		$customer_id = $this->create_customer();
 		$contract_id = $this->create_contract( $customer_id );

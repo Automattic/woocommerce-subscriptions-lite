@@ -16,6 +16,7 @@ use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\CycleView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\CycleStatus;
+use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\SchemaInstaller;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Cancellation;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\HeldLocks;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\History;
@@ -223,14 +224,15 @@ final class HistoryEntriesTest extends LiteIntegrationTestCase {
 		$this->assert_lock_released( $contract_id );
 	}
 
-	public function test_the_flow_entry_is_fenced_by_the_flows_lock(): void {
+	public function test_the_flow_entry_is_written_with_the_flows_lock(): void {
 		$contract_id = $this->create_contract( $this->create_customer() );
-		$fenced      = null;
+		$lock_states = [];
 		add_filter(
 			'query',
-			function ( $query ) use ( $contract_id, &$fenced ) {
+			function ( $query ) use ( $contract_id, &$lock_states ) {
 				if ( is_string( $query ) && 1 === preg_match( self::history_insert(), $query ) ) {
-					$fenced = null !== HeldLocks::get( $contract_id ) && false === strpos( $query, 'extension_slug' );
+					$held          = HeldLocks::get( $contract_id );
+					$lock_states[] = null === $held ? null : $held->get_operation();
 				}
 				return $query;
 			}
@@ -238,7 +240,7 @@ final class HistoryEntriesTest extends LiteIntegrationTestCase {
 
 		( new Hold() )->hold( $contract_id );
 
-		$this->assertTrue( $fenced, 'The insert ran with the held lock, not as an owner-scoped unlocked insert.' );
+		$this->assertSame( [ Hold::OPERATION ], $lock_states, 'The entry was written while the hold held its lock, which History passes to the engine.' );
 	}
 
 	public function test_a_paid_renewal_records_one_renewal_paid_entry_for_its_cycle(): void {
@@ -323,6 +325,22 @@ final class HistoryEntriesTest extends LiteIntegrationTestCase {
 		( new Settlement() )->settle( $order, $this->utc( '2026-02-16 12:00:00' ) );
 
 		$this->assertSame( [ History::TYPE_CREATED, History::TYPE_HELD, History::TYPE_RENEWAL_FAILED ], $this->get_history_types( $contract_id ) );
+	}
+
+	public function test_a_run_cut_short_before_the_cycle_write_records_one_failure_on_re_delivery(): void {
+		[ $contract_id, $order ] = $this->seed_renewal();
+		$cycles                  = SchemaInstaller::get_table_name( SchemaInstaller::TABLE_CYCLES );
+		$this->fail_next_query( '/^UPDATE ' . preg_quote( $cycles, '/' ) . ' SET .*\'' . CycleStatus::FAILED . '\'/' );
+		$order->update_status( OrderStatus::FAILED ); // The bound listener raises the count, then its cycle write fails.
+		$this->assertSame( CycleStatus::PENDING, $this->head( $contract_id )->get_status() );
+		$this->assertSame( '1', wc_get_order( $order->get_id() )->get_meta( '_wcsl_renewal_failures' ) );
+
+		( new Settlement() )->settle( wc_get_order( $order->get_id() ), $this->utc( '2026-02-16 12:00:00' ) );
+		( new Settlement() )->settle( wc_get_order( $order->get_id() ), $this->utc( '2026-02-16 12:00:00' ) );
+
+		$this->assertSame( CycleStatus::FAILED, $this->head( $contract_id )->get_status() );
+		$this->assertSame( '2', wc_get_order( $order->get_id() )->get_meta( '_wcsl_renewal_failures' ), 'The cut-short run skipped a number; the re-delivery reused none.' );
+		$this->assertSame( [ History::TYPE_CREATED, History::TYPE_RENEWAL_FAILED, History::TYPE_HELD ], $this->get_history_types( $contract_id ) );
 	}
 
 	public function test_a_failure_of_a_second_order_on_the_same_cycle_records_a_second_entry(): void {

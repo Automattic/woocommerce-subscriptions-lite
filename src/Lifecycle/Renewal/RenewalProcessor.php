@@ -258,7 +258,7 @@ final class RenewalProcessor {
 	 */
 	private function reapply_hold( ContractView $contract, CycleView $head, ContractLock $lock ): void {
 		$this->log( 'warning', sprintf( 'contract %d is due while its newest renewal failed; it is put on hold until the renewal is paid.', $contract->get_id() ), $contract->get_id() );
-		Hold::system_hold( $lock, $head, Hold::REASON_RENEWAL_FAILED );
+		Hold::system_hold( $lock, $contract, $head, Hold::REASON_RENEWAL_FAILED );
 	}
 
 	/**
@@ -294,7 +294,7 @@ final class RenewalProcessor {
 				$lock
 			);
 			if ( $failed ) {
-				Hold::system_hold( $lock, $cycle, Hold::REASON_RENEWAL_FAILED );
+				Hold::system_hold( $lock, $contract, $cycle, Hold::REASON_RENEWAL_FAILED );
 			}
 			return null;
 		}
@@ -413,7 +413,7 @@ final class RenewalProcessor {
 			return;
 		}
 
-		Hold::system_hold( $lock, $cycle, Hold::REASON_AWAITING_PAYMENT );
+		Hold::system_hold( $lock, $contract, $cycle, Hold::REASON_AWAITING_PAYMENT );
 	}
 
 	/**
