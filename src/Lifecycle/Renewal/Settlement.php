@@ -635,8 +635,12 @@ final class Settlement {
 			}
 		}
 
-		$this->record_payment( $order, $contract, $cycle, $now, $lock );
+		$resumed = $this->record_payment( $order, $contract, $cycle, $now, $lock );
 		self::record_paid_entry( $cycle );
+		if ( $resumed ) {
+			// Only on the status change: a re-delivery reads the contract active and gets here with false.
+			History::add_system( $contract->get_id(), History::TYPE_REACTIVATED, [ 'cycle_id' => $cycle->get_id() ] );
+		}
 
 		$settled = $this->read_settled( $contract->get_id(), $cycle->get_id(), $order->get_id() );
 		if ( null === $settled ) {
@@ -661,14 +665,16 @@ final class Settlement {
 	 * The contract half of a paid settlement: an active contract, or one on Lite's own hold,
 	 * becomes active with the next due moment after the paid cycle; a customer hold moves its
 	 * anchor there instead; a winding-down or cancelled contract only records the payment.
+	 * Returns whether it lifted Lite's own hold (on hold to active).
 	 *
 	 * @param WC_Order          $order    The paid order.
 	 * @param ContractView      $contract The contract.
 	 * @param CycleView         $cycle    The billed cycle.
 	 * @param DateTimeImmutable $now      The current moment (UTC).
 	 * @param ContractLock      $lock     The held lock.
+	 * @return bool True when the contract moved from on hold to active.
 	 */
-	private function record_payment( WC_Order $order, ContractView $contract, CycleView $cycle, DateTimeImmutable $now, ContractLock $lock ): void {
+	private function record_payment( WC_Order $order, ContractView $contract, CycleView $cycle, DateTimeImmutable $now, ContractLock $lock ): bool {
 		$date_paid    = $order->get_date_paid();
 		$last_payment = null === $date_paid ? $now : new DateTimeImmutable( '@' . $date_paid->getTimestamp() );
 		$contract_id  = $contract->get_id();
@@ -683,7 +689,7 @@ final class Settlement {
 				],
 				$lock
 			);
-			return;
+			return false;
 		}
 
 		$terms = ContractPlans::get_billing_terms_for( $contract );
@@ -707,10 +713,10 @@ final class Settlement {
 				],
 				$lock
 			);
-			return;
+			return false;
 		}
 
-		Contracts::update(
+		$active_contract = Contracts::update(
 			$contract_id,
 			[
 				'extension_slug'   => Package::EXTENSION_SLUG,
@@ -721,6 +727,8 @@ final class Settlement {
 			$lock
 		);
 		HoldAnchor::clear( $lock );
+
+		return null !== $active_contract && ContractStatus::ON_HOLD === $status;
 	}
 
 	/**

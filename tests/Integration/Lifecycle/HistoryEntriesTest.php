@@ -375,6 +375,58 @@ final class HistoryEntriesTest extends LiteIntegrationTestCase {
 		$this->assertSame( [ $cycle->get_id(), $cycle->get_id() ], [ $failures[0]->get_cycle_id(), $failures[1]->get_cycle_id() ] );
 	}
 
+	public function test_paying_a_failed_renewal_records_renewal_paid_then_reactivated_once(): void {
+		[ $contract_id, $order ] = $this->seed_renewal();
+		$order->update_status( OrderStatus::FAILED );
+		$this->assertSame( ContractStatus::ON_HOLD, $this->get_contract( $contract_id )->get_status() );
+
+		$order->payment_complete(); // The bound listener settles the payment.
+		( new Settlement() )->settle( wc_get_order( $order->get_id() ), $this->utc( '2026-02-16 12:00:00' ) );
+
+		$this->assertSame( ContractStatus::ACTIVE, $this->get_contract( $contract_id )->get_status() );
+		$this->assertSame(
+			[ History::TYPE_CREATED, History::TYPE_RENEWAL_FAILED, History::TYPE_HELD, History::TYPE_RENEWAL_PAID, History::TYPE_REACTIVATED ],
+			$this->get_history_types( $contract_id ),
+			'A re-delivered settlement records nothing more.'
+		);
+		$reactivated = $this->get_history( $contract_id, History::TYPE_REACTIVATED )[0];
+		$this->assertSame( $this->head( $contract_id )->get_id(), $reactivated->get_cycle_id() );
+		$this->assertSame( [ 'actor' => self::system_actor() ], $reactivated->get_payload() );
+	}
+
+	public function test_a_paid_renewal_during_a_customer_hold_records_no_reactivated_entry(): void {
+		$customer_id = $this->create_customer();
+		$contract_id = $this->create_contract(
+			$customer_id,
+			[
+				'payment_method' => 'cod',
+				'status'         => 'on-hold',
+			]
+		);
+		$order       = $this->create_renewal_order(
+			$contract_id,
+			$customer_id,
+			[
+				'status'       => OrderStatus::PENDING,
+				'cycle_status' => CycleStatus::PENDING,
+			]
+		);
+
+		$order->payment_complete();
+		( new Settlement() )->settle( wc_get_order( $order->get_id() ), $this->utc( '2026-02-16 12:00:00' ) );
+
+		$this->assertSame( ContractStatus::ON_HOLD, $this->get_contract( $contract_id )->get_status() );
+		$this->assertSame( [ History::TYPE_CREATED, History::TYPE_HELD, History::TYPE_RENEWAL_PAID ], $this->get_history_types( $contract_id ) );
+	}
+
+	public function test_a_paid_renewal_of_an_active_contract_records_no_reactivated_entry(): void {
+		[ $contract_id, $order ] = $this->seed_renewal();
+
+		$order->payment_complete();
+
+		$this->assertSame( [ History::TYPE_CREATED, History::TYPE_RENEWAL_PAID ], $this->get_history_types( $contract_id ) );
+	}
+
 	public function test_a_dead_renewal_order_records_lites_hold_for_the_failed_renewal(): void {
 		[ $contract_id, $order ] = $this->seed_renewal();
 

@@ -462,9 +462,9 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 
 		( new Settlement() )->settle( wc_get_order( $order->get_id() ) );
 		$this->assertSame(
-			[ History::TYPE_CREATED, History::TYPE_RENEWAL_FAILED, History::TYPE_HELD, History::TYPE_RENEWAL_PAID ],
+			[ History::TYPE_CREATED, History::TYPE_RENEWAL_FAILED, History::TYPE_HELD, History::TYPE_RENEWAL_PAID, History::TYPE_REACTIVATED ],
 			$this->get_history_types( $contract_id ),
-			'One paid entry, also after a re-delivered settlement.'
+			'One paid and one reactivated entry, also after a re-delivered settlement.'
 		);
 		$this->assertSame( $this->head( $contract_id )->get_id(), $this->get_history( $contract_id, History::TYPE_RENEWAL_PAID )[0]->get_cycle_id() );
 	}
@@ -639,6 +639,26 @@ final class RenewalProcessorTest extends LiteIntegrationTestCase {
 
 		Payments::process_scheduled_payment( $reloaded );
 		$this->assertSame( [ $order->get_id() ], $this->charged_order_ids, 'The spy would have seen a charge.' );
+	}
+
+	public function test_paying_a_renewal_order_left_for_payment_records_renewal_paid_then_reactivated_once(): void {
+		$this->spy_charge_attempts( 'cod' );
+		$contract_id = $this->make_contract();
+		$order       = $this->renew( $contract_id );
+		$this->assertInstanceOf( WC_Order::class, $order );
+		$this->assertSame( ContractStatus::ON_HOLD, $this->get_contract( $contract_id )->get_status() );
+
+		wc_get_order( $order->get_id() )->payment_complete(); // The bound listener settles the payment.
+		( new Settlement() )->settle( wc_get_order( $order->get_id() ) );
+
+		$this->assertSame( ContractStatus::ACTIVE, $this->get_contract( $contract_id )->get_status() );
+		$this->assertSame(
+			[ History::TYPE_CREATED, History::TYPE_HELD, History::TYPE_RENEWAL_PAID, History::TYPE_REACTIVATED ],
+			$this->get_history_types( $contract_id ),
+			'A re-delivered settlement records nothing more.'
+		);
+		$this->assertSame( Hold::REASON_AWAITING_PAYMENT, $this->get_history( $contract_id, History::TYPE_HELD )[0]->get_payload()['reason'] );
+		$this->assertSame( $this->head( $contract_id )->get_id(), $this->get_history( $contract_id, History::TYPE_REACTIVATED )[0]->get_cycle_id() );
 	}
 
 	public function test_an_engine_gateway_without_the_renewal_feature_gets_a_manual_renewal_order(): void {
