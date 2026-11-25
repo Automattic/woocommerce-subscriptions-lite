@@ -20,6 +20,7 @@ use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Hold;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Reactivation;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\RenewalProcessor;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\Settlement;
+use Automattic\WooCommerce\SubscriptionsLite\Privacy\Eraser;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -96,6 +97,8 @@ final class StatusLabels {
 				return __( 'putting on hold', 'woocommerce-subscriptions-lite' );
 			case Reactivation::OPERATION:
 				return __( 'reactivation', 'woocommerce-subscriptions-lite' );
+			case Eraser::OPERATION:
+				return __( 'personal data erasure', 'woocommerce-subscriptions-lite' );
 			default:
 				return __( 'update', 'woocommerce-subscriptions-lite' );
 		}

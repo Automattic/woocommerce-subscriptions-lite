@@ -107,6 +107,13 @@ final class Bootstrap {
 		CustomerPortal\Assets::register();
 		Lifecycle\CustomerActions::register();
 
+		// Privacy: the subscription erasure setting (also read by WooCommerce's settings REST
+		// route), the suggested privacy policy text, and the personal data exporter and eraser.
+		Privacy\ErasureSetting::register();
+		Privacy\PolicyContent::register();
+		Privacy\Exporter::register();
+		Privacy\Eraser::register();
+
 		// Admin (back office only): the WooCommerce > Subscriptions list + detail
 		// page and its Renew now / Cancel handlers (Lite's renewal and cancel flows).
 		// Front-end requests never need this.
