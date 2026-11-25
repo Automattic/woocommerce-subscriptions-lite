@@ -175,7 +175,7 @@ final class Eraser {
 
 	/**
 	 * Cancel a running contract, then anonymise it, under its lock. Exceptions are reported as
-	 * a failure for the contract, never thrown.
+	 * a failure for the contract, never thrown; each failure is logged with the step it hit.
 	 *
 	 * @param int $contract_id Contract id.
 	 * @return array{message: string, removed: bool, failed: bool}|null The outcome; null when the
@@ -183,6 +183,7 @@ final class Eraser {
 	 */
 	private function erase_contract( int $contract_id ): ?array {
 		$lock = null;
+		$step = 'lock';
 		try {
 			$lock = HeldLocks::acquire( $contract_id, self::OPERATION );
 			if ( null === $lock ) {
@@ -191,11 +192,13 @@ final class Eraser {
 					return null;
 				}
 
-				self::log_failure( $contract_id, 'its lock is held by another operation' );
+				$data = $conflict->get_error_data();
+				self::log_failure( $contract_id, $step, sprintf( 'held by %s', (string) ( $data['operation'] ?? 'unknown' ) ) );
 
-				return self::get_failure( self::get_locked_message( $contract_id ) );
+				return self::get_failure( self::get_locked_message( $conflict ) );
 			}
 
+			$step     = 'read';
 			$contract = Contracts::get( $contract_id );
 			if ( null === $contract ) {
 				return null;
@@ -212,15 +215,19 @@ final class Eraser {
 
 			$was_running = Cancellation::can_cancel( $status );
 			if ( $was_running ) {
+				$step      = 'cancel';
 				$cancelled = ( new Cancellation() )->cancel( $contract_id );
 				if ( ! $cancelled instanceof ContractView ) {
-					self::log_failure( $contract_id, 'the cancellation did not complete' );
+					self::log_failure( $contract_id, $step, $cancelled instanceof WP_Error ? $cancelled->get_error_code() : 'not found' );
 
 					return self::get_failure( self::get_failed_message( $contract_id ) );
 				}
 			}
 
+			$step = 'anonymise';
 			$this->anonymise( $contract, $lock );
+			$step = 'unlink';
+			$this->unlink( $contract, $lock );
 
 			return [
 				'message' => $was_running
@@ -232,11 +239,12 @@ final class Eraser {
 				'failed'  => false,
 			];
 		} catch ( ContractLockedException $e ) {
-			self::log_failure( $contract_id, 'a write was refused because another operation holds its lock' );
+			$conflict = HeldLocks::get_refused_conflict( $e );
+			self::log_failure( $contract_id, $step, sprintf( 'held by %s', $e->get_operation() ?? 'unknown' ) );
 
-			return self::get_failure( self::get_locked_message( $contract_id ) );
+			return self::get_failure( self::get_locked_message( $conflict ) );
 		} catch ( Throwable $e ) {
-			self::log_failure( $contract_id, get_class( $e ) );
+			self::log_failure( $contract_id, $step, sprintf( '%s, code %s', get_class( $e ), (string) $e->getCode() ) );
 
 			return self::get_failure( self::get_failed_message( $contract_id ) );
 		} finally {
@@ -247,19 +255,16 @@ final class Eraser {
 	}
 
 	/**
-	 * Anonymise the addresses and clear the payment references, then clear the customer link in
-	 * a second, final write. Until the link is cleared the account lookup still finds the
-	 * contract, so a failure in either write leaves it for a rerun to complete.
+	 * Anonymise the addresses and clear the payment references. The customer link stays until
+	 * {@see self::unlink()}, so the account lookup still finds the contract if a later step fails.
 	 *
 	 * @param ContractView $contract The contract as read under the lock, with its addresses.
 	 * @param ContractLock $lock     The held lock.
-	 * @throws RuntimeException If a write finds the contract missing.
+	 * @throws RuntimeException If the write finds the contract missing.
 	 */
 	private function anonymise( ContractView $contract, ContractLock $lock ): void {
-		$contract_id = $contract->get_id();
-
 		$anonymised = Contracts::update(
-			$contract_id,
+			$contract->get_id(),
 			[
 				'extension_slug'       => Package::EXTENSION_SLUG,
 				'addresses'            => self::anonymise_addresses( $contract->get_addresses() ?? [] ),
@@ -271,13 +276,23 @@ final class Eraser {
 		if ( null === $anonymised ) {
 			throw new RuntimeException( 'The contract was not found for the anonymising write.' );
 		}
+	}
 
+	/**
+	 * Clear the customer link: the final write, after which the account lookup no longer finds
+	 * the contract.
+	 *
+	 * @param ContractView $contract The contract as read under the lock.
+	 * @param ContractLock $lock     The held lock.
+	 * @throws RuntimeException If the write finds the contract missing.
+	 */
+	private function unlink( ContractView $contract, ContractLock $lock ): void {
 		if ( null === $contract->get_customer_id() ) {
 			return;
 		}
 
 		$unlinked = Contracts::update(
-			$contract_id,
+			$contract->get_id(),
 			[
 				'extension_slug' => Package::EXTENSION_SLUG,
 				'customer_id'    => null,
@@ -329,16 +344,13 @@ final class Eraser {
 	}
 
 	/**
-	 * The message for a contract whose lock another operation holds.
+	 * The message for a contract whose lock another operation holds: the shared lock-conflict
+	 * wording, plus the erasure's retry advice.
 	 *
-	 * @param int $contract_id Contract id.
+	 * @param WP_Error $conflict The lock conflict from {@see HeldLocks}.
 	 */
-	private static function get_locked_message( int $contract_id ): string {
-		return sprintf(
-			/* translators: %d: subscription number. */
-			__( 'Subscription #%d is being updated, so its personal data was not removed. Run the erasure again in a few minutes.', 'woocommerce-subscriptions-lite' ),
-			$contract_id
-		);
+	private static function get_locked_message( WP_Error $conflict ): string {
+		return $conflict->get_error_message() . ' ' . __( 'Its personal data was not removed. Run the erasure again in a few minutes.', 'woocommerce-subscriptions-lite' );
 	}
 
 	/**
@@ -369,17 +381,20 @@ final class Eraser {
 	}
 
 	/**
-	 * Log a failed erasure with the contract id and the reason only: no personal data.
+	 * Log a failed erasure as an error, since the request still completes: the contract id,
+	 * the step that failed and the reason only, no personal data.
 	 *
 	 * @param int    $contract_id Contract id.
-	 * @param string $reason      Reason, or the exception class.
+	 * @param string $step        The failing step: lock, read, cancel, anonymise or unlink.
+	 * @param string $reason      Reason: the lock holder, an error code or the exception class and code.
 	 */
-	private static function log_failure( int $contract_id, string $reason ): void {
-		wc_get_logger()->warning(
-			sprintf( 'Privacy erasure: personal data was not removed from contract %d (%s).', $contract_id, $reason ),
+	private static function log_failure( int $contract_id, string $step, string $reason ): void {
+		wc_get_logger()->error(
+			sprintf( 'Privacy erasure: personal data was not removed from contract %d at the %s step (%s).', $contract_id, $step, $reason ),
 			[
 				'source'      => Package::EXTENSION_SLUG,
 				'contract_id' => $contract_id,
+				'step'        => $step,
 			]
 		);
 	}

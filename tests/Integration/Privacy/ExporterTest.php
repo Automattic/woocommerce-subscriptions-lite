@@ -80,17 +80,53 @@ final class ExporterTest extends LiteIntegrationTestCase {
 		$this->assertIsCallable( $exporters[ Package::EXTENSION_SLUG ]['callback'] );
 	}
 
-	public function test_a_contract_exports_every_field(): void {
-		$contract_id = $this->create_contract(
-			$this->customer_id,
+	public function test_a_contract_exports_every_field_in_the_store_time_zone(): void {
+		$this->set_store_timezone( 'America/New_York' );
+		$contract_id = $this->seed_contract(
 			[
-				'product_name'         => 'Coffee Box',
-				'quantity'             => 2,
+				'customer_id'          => $this->customer_id,
+				'status'               => ContractStatus::PENDING_CANCELLATION,
+				'start_gmt'            => '2026-01-01 00:00:00',
+				'next_payment_gmt'     => '2026-07-01 03:30:00',
+				'end_gmt'              => '2026-08-01 12:00:00',
+				'billing_total'        => '19.99',
 				'payment_method_title' => 'Visa ending in 4242',
-				'shipping'             => [ 'phone' => '020 7946 0999' ],
+				'items'                => [
+					[
+						'item_name' => 'Coffee Box',
+						'item_type' => 'line_item',
+						'quantity'  => 2,
+						'subtotal'  => '19.99',
+						'total'     => '19.99',
+					],
+				],
+				'addresses'            => [
+					'billing'  => [
+						'first_name' => 'Ada',
+						'last_name'  => 'Lovelace',
+						'company'    => 'Analytical Engines Ltd',
+						'address_1'  => '12 Analytical Row',
+						'address_2'  => 'Flat 3',
+						'city'       => 'London',
+						'state'      => 'Greater London',
+						'postcode'   => 'N1 9GU',
+						'country'    => 'GB',
+						'email'      => 'ada@example.com',
+						'phone'      => '020 7946 0018',
+					],
+					'shipping' => [
+						'first_name' => 'Ada',
+						'last_name'  => 'Lovelace',
+						'address_1'  => '1 Engine Court',
+						'city'       => 'London',
+						'postcode'   => 'SW1A 1AA',
+						'country'    => 'GB',
+						'email'      => 'ada.shipping@example.com',
+						'phone'      => '020 7946 0999',
+					],
+				],
 			]
 		);
-		$contract    = $this->get_contract( $contract_id );
 
 		$response = $this->assert_export( $this->export() );
 
@@ -103,20 +139,130 @@ final class ExporterTest extends LiteIntegrationTestCase {
 
 		$this->assertSame(
 			[
-				'Subscription number'   => '#' . $contract_id,
-				'Status'                => 'Active',
-				'Start date'            => wp_date( 'Y-m-d H:i', (int) strtotime( (string) $contract->get_start_gmt() . ' UTC' ) ),
-				'Next payment'          => wp_date( 'Y-m-d H:i', (int) strtotime( (string) $contract->get_next_payment_gmt() . ' UTC' ) ),
-				'Recurring total'       => html_entity_decode( wp_strip_all_tags( wc_price( $contract->get_billing_total(), [ 'currency' => 'USD' ] ) ), ENT_QUOTES, 'UTF-8' ),
-				'Items'                 => 'Coffee Box x 2',
-				'Billing address'       => 'Ada Lovelace, 12 Analytical Row, London, N1 9GU, United Kingdom (UK)',
-				'Shipping address'      => 'Ada Lovelace, 1 Engine Court, London, SW1A 1AA, United Kingdom (UK)',
-				'Email address'         => 'ada@example.com',
-				'Phone number'          => '020 7946 0018',
-				'Shipping phone number' => '020 7946 0999',
-				'Payment method'        => 'Visa ending in 4242',
+				[ 'Subscription number', '#' . $contract_id ],
+				[ 'Status', 'Pending cancellation' ],
+				[ 'Start date', '2025-12-31 19:00' ],
+				[ 'Next payment', '2026-06-30 23:30' ],
+				[ 'End date', '2026-08-01 08:00' ],
+				[ 'Recurring total', '$19.99' ],
+				[ 'Items', 'Coffee Box x 2' ],
+				[ 'Billing address', 'Ada Lovelace, Analytical Engines Ltd, 12 Analytical Row, Flat 3, London, Greater London, N1 9GU, United Kingdom (UK)' ],
+				[ 'Shipping address', 'Ada Lovelace, 1 Engine Court, London, SW1A 1AA, United Kingdom (UK)' ],
+				[ 'Email address', 'ada@example.com' ],
+				[ 'Phone number', '020 7946 0018' ],
+				[ 'Shipping email address', 'ada.shipping@example.com' ],
+				[ 'Shipping phone number', '020 7946 0999' ],
+				[ 'Payment method', 'Visa ending in 4242' ],
 			],
-			$this->rows_of( $item )
+			array_map(
+				static function ( array $row ): array {
+					return [ $row['name'], $row['value'] ];
+				},
+				$item['data']
+			)
+		);
+	}
+
+	public function test_a_checkout_created_contract_exports_its_items_addresses_and_payment_method(): void {
+		$this->create_contract(
+			$this->customer_id,
+			[
+				'product_name'         => 'Coffee Box',
+				'quantity'             => 2,
+				'payment_method_title' => 'Visa ending in 4242',
+				'shipping'             => [ 'phone' => '020 7946 0999' ],
+			]
+		);
+
+		$rows = $this->rows_of( $this->assert_export( $this->export() )['data'][0] );
+
+		$this->assertSame( 'Active', $rows['Status'] );
+		$this->assertSame( 'Coffee Box x 2', $rows['Items'] );
+		$this->assertSame( 'Ada Lovelace, 12 Analytical Row, London, N1 9GU, United Kingdom (UK)', $rows['Billing address'] );
+		$this->assertSame( 'Ada Lovelace, 1 Engine Court, London, SW1A 1AA, United Kingdom (UK)', $rows['Shipping address'] );
+		$this->assertSame( 'ada@example.com', $rows['Email address'] );
+		$this->assertSame( '020 7946 0018', $rows['Phone number'] );
+		$this->assertSame( '020 7946 0999', $rows['Shipping phone number'] );
+		$this->assertSame( 'Visa ending in 4242', $rows['Payment method'] );
+		$this->assertArrayHasKey( 'Start date', $rows );
+		$this->assertArrayHasKey( 'Next payment', $rows );
+		$this->assertArrayHasKey( 'Recurring total', $rows );
+	}
+
+	public function test_the_store_base_country_stays_in_the_address(): void {
+		update_option( 'woocommerce_default_country', 'GB' );
+		$this->seed_contract(
+			[
+				'customer_id' => $this->customer_id,
+				'addresses'   => [ 'billing' => self::BILLING_ADDRESS ],
+			]
+		);
+
+		$rows = $this->rows_of( $this->assert_export( $this->export() )['data'][0] );
+
+		$this->assertSame( 'Ada Lovelace, 12 Analytical Row, London, N1 9GU, United Kingdom (UK)', $rows['Billing address'] );
+		$this->assertFalse( apply_filters( 'woocommerce_formatted_address_force_country_display', false ), 'The country is forced for the export only.' );
+	}
+
+	public function test_a_state_the_address_format_leaves_out_gets_its_own_row(): void {
+		$this->seed_contract(
+			[
+				'customer_id' => $this->customer_id,
+				'addresses'   => [
+					'shipping' => [
+						'first_name' => 'Ada',
+						'last_name'  => 'Lovelace',
+						'address_1'  => 'Marienplatz 1',
+						'city'       => 'Munich',
+						'state'      => 'DE-BY',
+						'postcode'   => '80331',
+						'country'    => 'DE',
+					],
+				],
+			]
+		);
+
+		$rows = $this->rows_of( $this->assert_export( $this->export() )['data'][0] );
+
+		$this->assertSame( 'Ada Lovelace, Marienplatz 1, 80331 Munich, Germany', $rows['Shipping address'] );
+		$this->assertSame( 'Bavaria', $rows['Shipping state'] );
+		$this->assertArrayNotHasKey( 'Shipping country', $rows, 'Fields the format shows get no row of their own.' );
+	}
+
+	public function test_two_labels_translated_alike_keep_both_rows(): void {
+		$this->seed_contract(
+			[
+				'customer_id' => $this->customer_id,
+				'addresses'   => [
+					'billing'  => [ 'phone' => '020 7946 0018' ],
+					'shipping' => [ 'phone' => '020 7946 0999' ],
+				],
+			]
+		);
+		add_filter(
+			'gettext_woocommerce-subscriptions-lite',
+			static function ( string $translation, string $text ): string {
+				return in_array( $text, [ 'Phone number', 'Shipping phone number' ], true ) ? 'Telefon' : $translation;
+			},
+			10,
+			2
+		);
+
+		$item = $this->assert_export( $this->export() )['data'][0];
+
+		$this->assertSame(
+			[ '020 7946 0018', '020 7946 0999' ],
+			array_values(
+				array_column(
+					array_filter(
+						$item['data'],
+						static function ( array $row ): bool {
+							return 'Telefon' === $row['name'];
+						}
+					),
+					'value'
+				)
+			)
 		);
 	}
 

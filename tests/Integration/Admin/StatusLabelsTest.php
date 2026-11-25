@@ -16,6 +16,7 @@ use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\CycleStatus;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\StatusLabels;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\RenewalProcessor;
+use Automattic\WooCommerce\SubscriptionsLite\Privacy\Eraser;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
 
 /**
@@ -41,6 +42,10 @@ final class StatusLabelsTest extends LiteIntegrationTestCase {
 	public function test_lock_operation_label_reads_a_scheduled_renewal_as_a_renewal(): void {
 		$this->assertSame( 'renewal', StatusLabels::get_lock_operation_label( 'engine_due_dispatch' ) );
 		$this->assertSame( 'renewal', StatusLabels::get_lock_operation_label( RenewalProcessor::OPERATION ) );
+	}
+
+	public function test_lock_operation_label_names_the_personal_data_erasure(): void {
+		$this->assertSame( 'personal data erasure', StatusLabels::get_lock_operation_label( Eraser::OPERATION ) );
 	}
 
 	public function test_lock_operation_label_falls_back_to_a_generic_label(): void {

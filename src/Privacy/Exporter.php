@@ -2,9 +2,13 @@
 /**
  * Exporter - adds the person's subscriptions to WordPress's personal data export.
  *
- * One "Subscriptions" group with an item per Lite contract: its facts, items, addresses,
- * contact details and payment method title. Ten contracts per page; the set does not change
- * during an export, so a page is a slice of it.
+ * One "Subscriptions" group with an item per Lite contract: its number, status, start, next
+ * payment and end dates, recurring total, items, every stored address field and payment method
+ * title. That covers what WooCommerce Subscriptions exports for a subscription, except the
+ * created date, IP address and browser user agent, which a contract does not store. Like that
+ * export, it leaves out the last payment, last attempt and trial end dates and the discount,
+ * shipping and tax totals. Ten contracts per page; the set does not change during an export,
+ * so a page is a slice of it.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Privacy
  */
@@ -16,6 +20,7 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Privacy;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\StatusLabels;
+use Automattic\WooCommerce\SubscriptionsLite\Contracts\AddressFields;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Throwable;
 use WP_Error;
@@ -120,7 +125,8 @@ final class Exporter {
 	}
 
 	/**
-	 * The name and value rows of one contract; empty values are left out.
+	 * The name and value rows of one contract; empty values are left out. Rows are built by a
+	 * stable key, so two labels a translation renders alike never overwrite each other.
 	 *
 	 * @param ContractView $contract The contract, with items and addresses.
 	 * @return array<int, array{name: string, value: string}>
@@ -131,32 +137,142 @@ final class Exporter {
 		$shipping  = $addresses['shipping'] ?? [];
 
 		$values = [
-			__( 'Subscription number', 'woocommerce-subscriptions-lite' ) => '#' . $contract->get_id(),
-			__( 'Status', 'woocommerce-subscriptions-lite' )          => StatusLabels::contract_label( $contract->get_status() ),
-			__( 'Start date', 'woocommerce-subscriptions-lite' )      => self::format_date( $contract->get_start_gmt() ),
-			__( 'Next payment', 'woocommerce-subscriptions-lite' )    => self::format_date( $contract->get_next_payment_gmt() ),
-			__( 'End date', 'woocommerce-subscriptions-lite' )        => self::format_date( $contract->get_end_gmt() ),
-			__( 'Recurring total', 'woocommerce-subscriptions-lite' ) => self::format_price( $contract->get_billing_total(), (string) $contract->get_currency() ),
-			__( 'Items', 'woocommerce-subscriptions-lite' )           => self::format_items( $contract->get_items() ?? [] ),
-			__( 'Billing address', 'woocommerce-subscriptions-lite' ) => self::format_address( $billing ),
-			__( 'Shipping address', 'woocommerce-subscriptions-lite' ) => self::format_address( $shipping ),
-			__( 'Email address', 'woocommerce-subscriptions-lite' )   => self::get_text( $billing, 'email' ),
-			__( 'Phone number', 'woocommerce-subscriptions-lite' )    => self::get_text( $billing, 'phone' ),
-			__( 'Shipping phone number', 'woocommerce-subscriptions-lite' ) => self::get_text( $shipping, 'phone' ),
-			__( 'Payment method', 'woocommerce-subscriptions-lite' )  => trim( (string) $contract->get_payment_method_title() ),
+			'number'           => [ __( 'Subscription number', 'woocommerce-subscriptions-lite' ), '#' . $contract->get_id() ],
+			'status'           => [ __( 'Status', 'woocommerce-subscriptions-lite' ), StatusLabels::contract_label( $contract->get_status() ) ],
+			'start_date'       => [ __( 'Start date', 'woocommerce-subscriptions-lite' ), self::format_date( $contract->get_start_gmt() ) ],
+			'next_payment'     => [ __( 'Next payment', 'woocommerce-subscriptions-lite' ), self::format_date( $contract->get_next_payment_gmt() ) ],
+			'end_date'         => [ __( 'End date', 'woocommerce-subscriptions-lite' ), self::format_date( $contract->get_end_gmt() ) ],
+			'recurring_total'  => [ __( 'Recurring total', 'woocommerce-subscriptions-lite' ), self::format_price( $contract->get_billing_total(), (string) $contract->get_currency() ) ],
+			'items'            => [ __( 'Items', 'woocommerce-subscriptions-lite' ), self::format_items( $contract->get_items() ?? [] ) ],
+			'billing_address'  => [ __( 'Billing address', 'woocommerce-subscriptions-lite' ), self::format_address( $billing ) ],
+			'shipping_address' => [ __( 'Shipping address', 'woocommerce-subscriptions-lite' ), self::format_address( $shipping ) ],
 		];
 
+		$values = array_merge(
+			$values,
+			self::get_unformatted_field_values( 'billing', $billing ),
+			self::get_unformatted_field_values( 'shipping', $shipping ),
+			[ 'payment_method' => [ __( 'Payment method', 'woocommerce-subscriptions-lite' ), trim( (string) $contract->get_payment_method_title() ) ] ]
+		);
+
 		$rows = [];
-		foreach ( $values as $name => $value ) {
-			if ( '' !== $value ) {
+		foreach ( $values as $value ) {
+			if ( '' !== $value[1] ) {
 				$rows[] = [
-					'name'  => (string) $name,
-					'value' => $value,
+					'name'  => $value[0],
+					'value' => $value[1],
 				];
 			}
 		}
 
 		return $rows;
+	}
+
+	/**
+	 * Name and value pairs, keyed `{type}_{field}`, for the stored address fields the formatted
+	 * address does not show: always email and phone, and any field the country's address format
+	 * leaves out (a German address has no `{state}`, for example). With the formatted address,
+	 * every field in {@see AddressFields::FIELDS} is exported.
+	 *
+	 * @param string               $type    `billing` or `shipping`.
+	 * @param array<string, mixed> $address Address fields.
+	 * @return array<string, array{0: string, 1: string}>
+	 */
+	private static function get_unformatted_field_values( string $type, array $address ): array {
+		$country = self::get_text( $address, 'country' );
+		$formats = WC()->countries->get_address_formats();
+		$format  = '' !== $country && isset( $formats[ $country ] ) ? (string) $formats[ $country ] : (string) $formats['default'];
+
+		$values = [];
+		foreach ( AddressFields::FIELDS as $field ) {
+			if ( self::is_in_address_format( $field, $format ) ) {
+				continue;
+			}
+			$values[ $type . '_' . $field ] = [ self::get_field_label( $type, $field ), self::get_field_value( $address, $field ) ];
+		}
+
+		return $values;
+	}
+
+	/**
+	 * Whether WooCommerce's address `$format` shows `$field`, through any of its placeholders
+	 * (`{state}`, `{state_upper}`, `{state_code}`; first and last names also through `{name}`).
+	 *
+	 * @param string $field  Address field.
+	 * @param string $format WooCommerce address format.
+	 */
+	private static function is_in_address_format( string $field, string $format ): bool {
+		$placeholders = in_array( $field, [ 'first_name', 'last_name' ], true ) ? [ '{' . $field, '{name' ] : [ '{' . $field ];
+		foreach ( $placeholders as $placeholder ) {
+			if ( false !== strpos( $format, $placeholder ) ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	/**
+	 * A stored address field as text: state and country by their WooCommerce names.
+	 *
+	 * @param array<string, mixed> $address Address fields.
+	 * @param string               $field   Field name.
+	 */
+	private static function get_field_value( array $address, string $field ): string {
+		$value   = self::get_text( $address, $field );
+		$country = self::get_text( $address, 'country' );
+		if ( '' === $value ) {
+			return '';
+		}
+
+		if ( 'state' === $field ) {
+			$states = '' !== $country ? WC()->countries->get_states( $country ) : [];
+			$value  = is_array( $states ) && isset( $states[ $value ] ) ? (string) $states[ $value ] : $value;
+		} elseif ( 'country' === $field ) {
+			$countries = WC()->countries->get_countries();
+			$value     = isset( $countries[ $value ] ) ? (string) $countries[ $value ] : $value;
+		}
+
+		return html_entity_decode( $value, ENT_QUOTES, 'UTF-8' );
+	}
+
+	/**
+	 * The export label of an address field. The billing email and phone keep the labels
+	 * WooCommerce's order export gives them.
+	 *
+	 * @param string $type  `billing` or `shipping`.
+	 * @param string $field Field name.
+	 */
+	private static function get_field_label( string $type, string $field ): string {
+		$labels = 'billing' === $type
+			? [
+				'first_name' => __( 'Billing first name', 'woocommerce-subscriptions-lite' ),
+				'last_name'  => __( 'Billing last name', 'woocommerce-subscriptions-lite' ),
+				'company'    => __( 'Billing company', 'woocommerce-subscriptions-lite' ),
+				'address_1'  => __( 'Billing address line 1', 'woocommerce-subscriptions-lite' ),
+				'address_2'  => __( 'Billing address line 2', 'woocommerce-subscriptions-lite' ),
+				'city'       => __( 'Billing city', 'woocommerce-subscriptions-lite' ),
+				'state'      => __( 'Billing state', 'woocommerce-subscriptions-lite' ),
+				'postcode'   => __( 'Billing postcode', 'woocommerce-subscriptions-lite' ),
+				'country'    => __( 'Billing country', 'woocommerce-subscriptions-lite' ),
+				'email'      => __( 'Email address', 'woocommerce-subscriptions-lite' ),
+				'phone'      => __( 'Phone number', 'woocommerce-subscriptions-lite' ),
+			]
+			: [
+				'first_name' => __( 'Shipping first name', 'woocommerce-subscriptions-lite' ),
+				'last_name'  => __( 'Shipping last name', 'woocommerce-subscriptions-lite' ),
+				'company'    => __( 'Shipping company', 'woocommerce-subscriptions-lite' ),
+				'address_1'  => __( 'Shipping address line 1', 'woocommerce-subscriptions-lite' ),
+				'address_2'  => __( 'Shipping address line 2', 'woocommerce-subscriptions-lite' ),
+				'city'       => __( 'Shipping city', 'woocommerce-subscriptions-lite' ),
+				'state'      => __( 'Shipping state', 'woocommerce-subscriptions-lite' ),
+				'postcode'   => __( 'Shipping postcode', 'woocommerce-subscriptions-lite' ),
+				'country'    => __( 'Shipping country', 'woocommerce-subscriptions-lite' ),
+				'email'      => __( 'Shipping email address', 'woocommerce-subscriptions-lite' ),
+				'phone'      => __( 'Shipping phone number', 'woocommerce-subscriptions-lite' ),
+			];
+
+		return $labels[ $field ] ?? $field;
 	}
 
 	/**
@@ -198,7 +314,8 @@ final class Exporter {
 	}
 
 	/**
-	 * An address formatted by WooCommerce, on one line.
+	 * An address formatted by WooCommerce, on one line. The country is shown even when it is
+	 * the store's base country, which WooCommerce otherwise leaves out.
 	 *
 	 * @param array<string, mixed> $address Address fields.
 	 */
@@ -211,7 +328,15 @@ final class Exporter {
 		);
 		unset( $fields['email'], $fields['phone'] );
 
-		$formatted = (string) WC()->countries->get_formatted_address( $fields );
+		$force_country = static function (): bool {
+			return true;
+		};
+		add_filter( 'woocommerce_formatted_address_force_country_display', $force_country, PHP_INT_MAX );
+		try {
+			$formatted = (string) WC()->countries->get_formatted_address( $fields );
+		} finally {
+			remove_filter( 'woocommerce_formatted_address_force_country_display', $force_country, PHP_INT_MAX );
+		}
 
 		return trim( (string) preg_replace( '#<br\s*/?>#i', ', ', $formatted ) );
 	}

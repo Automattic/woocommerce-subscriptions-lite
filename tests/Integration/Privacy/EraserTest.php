@@ -33,6 +33,8 @@ final class EraserTest extends LiteIntegrationTestCase {
 
 	private const WARNING = 'This erasure may remove the customer\'s saved payment methods, so the subscription\'s automatic renewals may fail.';
 
+	private const LOCKED = 'Another change to subscription #%d is in progress (renewal). Its personal data was not removed. Run the erasure again in a few minutes.';
+
 	/**
 	 * The requester's account.
 	 *
@@ -193,6 +195,26 @@ final class EraserTest extends LiteIntegrationTestCase {
 		$this->assertSame( $before->get_payment_method(), $after->get_payment_method() );
 		$this->assertSame( $before->get_selling_plan_id(), $after->get_selling_plan_id() );
 		$this->assertEquals( $cycles, Contracts::get_cycles( $contract_id ) );
+	}
+
+	public function test_a_stored_shipping_email_is_anonymised(): void {
+		$this->set_erasure( true );
+		$contract_id = $this->seed_contract(
+			[
+				'customer_id' => $this->customer_id,
+				'status'      => ContractStatus::CANCELLED,
+				'addresses'   => [
+					'billing'  => self::BILLING_ADDRESS,
+					'shipping' => array_merge( self::SHIPPING_ADDRESS, [ 'email' => 'ada.shipping@example.com' ] ),
+				],
+			]
+		);
+
+		$this->erase();
+
+		$addresses = (array) $this->get_contract( $contract_id )->get_addresses();
+		$this->assertSame( 'deleted@site.invalid', $addresses['shipping']['email'] );
+		$this->assertSame( 'deleted@site.invalid', $addresses['billing']['email'] );
 	}
 
 	public function test_an_expired_subscription_is_anonymised(): void {
@@ -378,13 +400,13 @@ final class EraserTest extends LiteIntegrationTestCase {
 		$response = $this->erase();
 
 		$this->assertSame(
-			[ sprintf( 'Subscription #%d is being updated, so its personal data was not removed. Run the erasure again in a few minutes.', $contract_id ) ],
+			[ sprintf( self::LOCKED, $contract_id ) ],
 			$response['messages']
 		);
 		$this->assertTrue( $response['items_retained'] );
 		$this->assertTrue( $response['done'] );
 		$this->assert_intact( $contract_id );
-		$this->assertTrue( $this->has_logged( sprintf( 'Privacy erasure: personal data was not removed from contract %d', $contract_id ) ) );
+		$this->assertTrue( $this->has_logged( sprintf( 'Privacy erasure: personal data was not removed from contract %d at the lock step (held by renewal).', $contract_id ) ) );
 
 		$lock->release();
 		$this->erase_all();
@@ -395,6 +417,7 @@ final class EraserTest extends LiteIntegrationTestCase {
 	public function test_a_lock_lost_mid_erasure_is_reported_as_held(): void {
 		$this->set_erasure( true );
 		$contract_id = $this->create_contract( $this->customer_id );
+		$this->capture_log();
 		add_action(
 			'woocommerce_subscriptions_lite_contract_cancelled',
 			function () use ( $contract_id ): void {
@@ -406,16 +429,31 @@ final class EraserTest extends LiteIntegrationTestCase {
 		$response = $this->erase();
 
 		$this->assertSame(
-			[ sprintf( 'Subscription #%d is being updated, so its personal data was not removed. Run the erasure again in a few minutes.', $contract_id ) ],
+			[ sprintf( self::LOCKED, $contract_id ) ],
 			$response['messages']
 		);
 		$this->assertTrue( $response['done'] );
 		$this->assertSame( $this->customer_id, $this->get_contract( $contract_id )->get_customer_id() );
+		$this->assertTrue( $this->has_logged( sprintf( 'Privacy erasure: personal data was not removed from contract %d at the anonymise step (held by renewal).', $contract_id ) ) );
+		$this->assertTrue( $this->has_logged( sprintf( 'HeldLocks: a write to contract %d was refused mid-flow; another operation (renewal) holds its lock.', $contract_id ) ) );
 	}
 
 	public function test_a_failed_address_write_leaves_the_contract_linked_and_a_rerun_completes_it(): void {
 		$this->set_erasure( true );
 		$contract_id = $this->create_contract( $this->customer_id, [ 'status' => 'cancelled' ] );
+		$this->capture_log();
+		$levels = [];
+		add_filter(
+			'woocommerce_logger_log_message',
+			static function ( $message, $level ) use ( &$levels ) {
+				if ( false !== strpos( (string) $message, 'Privacy erasure:' ) ) {
+					$levels[] = $level;
+				}
+				return $message;
+			},
+			10,
+			2
+		);
 		$this->fail_next_query( '/INSERT INTO \S*wc_subscription_contract_addresses/' );
 
 		$response = $this->erase();
@@ -427,6 +465,8 @@ final class EraserTest extends LiteIntegrationTestCase {
 		$this->assertTrue( $response['done'] );
 		$this->assert_intact( $contract_id );
 		$this->assert_lock_released( $contract_id );
+		$this->assertTrue( $this->has_logged( sprintf( 'Privacy erasure: personal data was not removed from contract %d at the anonymise step (RuntimeException, code 0).', $contract_id ) ) );
+		$this->assertSame( [ 'error' ], array_unique( $levels ), 'A per-contract failure is logged as an error.' );
 
 		$this->erase_all();
 
@@ -436,11 +476,13 @@ final class EraserTest extends LiteIntegrationTestCase {
 	public function test_a_failed_unlinking_write_leaves_the_contract_linked_and_a_rerun_completes_it(): void {
 		$this->set_erasure( true );
 		$contract_id = $this->create_contract( $this->customer_id, [ 'status' => 'cancelled' ] );
+		$this->capture_log();
 		$this->fail_next_query( '/UPDATE `\S*wc_subscription_contracts` SET .*`customer_id` = NULL/' );
 
 		$response = $this->erase();
 
 		$this->assertStringStartsWith( 'Personal data could not be removed from subscription #', $response['messages'][0] );
+		$this->assertTrue( $this->has_logged( sprintf( 'Privacy erasure: personal data was not removed from contract %d at the unlink step', $contract_id ) ) );
 		$this->assertTrue( $response['done'] );
 		$contract = $this->get_contract( $contract_id );
 		$this->assertSame( $this->customer_id, $contract->get_customer_id(), 'Still found by the account lookup.' );
@@ -509,14 +551,14 @@ final class EraserTest extends LiteIntegrationTestCase {
 			$response['messages'],
 			'The rest of the batch is still erased.'
 		);
-		$this->assertTrue( $this->has_logged( sprintf( 'Privacy erasure: personal data was not removed from contract %d (%s).', $failing, get_class( $exception ) ) ) );
+		$this->assertTrue( $this->has_logged( sprintf( 'Privacy erasure: personal data was not removed from contract %d at the cancel step (%s, code %s).', $failing, get_class( $exception ), (string) $exception->getCode() ) ) );
 		$this->assertSame( [ Package::EXTENSION_SLUG ], array_unique( $this->logged_sources_of( 'Privacy erasure' ) ) );
 		$this->assertFalse( $this->has_logged( 'ada@example.com' ) );
 		$this->assertFalse( $this->has_logged( self::EMAIL ) );
 		$this->assert_lock_released( $failing );
 	}
 
-	public function test_a_failure_with_more_eligible_left_still_ends_the_request(): void {
+	public function test_a_failure_at_the_batch_boundary_with_more_eligible_left_ends_the_request_and_a_rerun_completes_it(): void {
 		$this->set_erasure( true );
 		$ids = [];
 		for ( $i = 0; $i < 11; $i++ ) {
@@ -527,13 +569,34 @@ final class EraserTest extends LiteIntegrationTestCase {
 				]
 			);
 		}
-		$lock = $this->hold_lock( $ids[0] );
+		$lock = $this->hold_lock( $ids[9], 'renewal' );
 
 		$response = $this->erase();
 		$lock->release();
 
-		$this->assertTrue( $response['done'] );
+		$this->assertTrue( $response['done'], 'A failure ends the request although an eleventh contract is eligible.' );
+		$this->assertTrue( $response['items_removed'] );
+		$this->assertTrue( $response['items_retained'] );
 		$this->assertCount( 10, $response['messages'] );
+		$this->assertSame( sprintf( self::LOCKED, $ids[9] ), $response['messages'][9], 'The tenth contract, the last of the batch, failed.' );
+		foreach ( array_slice( $ids, 0, 9 ) as $id ) {
+			$this->assertNull( $this->get_contract( $id )->get_customer_id(), 'The contracts before the failure are erased.' );
+		}
+		$this->assertSame( $this->customer_id, $this->get_contract( $ids[9] )->get_customer_id(), 'The locked contract stays linked.' );
+		$this->assertSame( $this->customer_id, $this->get_contract( $ids[10] )->get_customer_id(), 'The contract past the batch stays linked.' );
+
+		$rerun = $this->erase_all();
+
+		$this->assertCount( 1, $rerun );
+		$this->assertSame(
+			[
+				sprintf( 'Removed personal data from subscription #%d.', $ids[9] ),
+				sprintf( 'Removed personal data from subscription #%d.', $ids[10] ),
+			],
+			$rerun[0]['messages']
+		);
+		$this->assertNull( $this->get_contract( $ids[9] )->get_customer_id() );
+		$this->assertNull( $this->get_contract( $ids[10] )->get_customer_id() );
 	}
 
 	public function test_a_failed_read_returns_an_error_and_logs_no_personal_data(): void {
