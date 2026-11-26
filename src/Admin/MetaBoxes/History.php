@@ -3,8 +3,11 @@
  * History meta box - what happened to the subscription, and the "Add note" form.
  *
  * Lists the contract's history entries newest first, a page at a time, read through the engine
- * facade: what happened, when (site time zone), by whom, and a note's text. Below the list, a
- * form posts a merchant note to {@see NoteController}. Degrades to a notice when the read fails.
+ * facade: what happened, when (site time zone), by whom, and a note's text. Lite's labels, note
+ * text and actor format apply only to a Lite-owned contract; another owner's entries show their
+ * type slug. On a Lite-owned contract, a form below the list posts a merchant note to
+ * {@see NoteController}, and the note's outcome shows above the form. Degrades to a notice when
+ * the read fails.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Admin\MetaBoxes
  */
@@ -20,6 +23,7 @@ use Automattic\WooCommerce\SubscriptionsEngine\Api\View\HistoryEntryView;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\DetailRenderer;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\NoteController;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\PageController;
+use Automattic\WooCommerce\SubscriptionsLite\Admin\RowActionResult;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\History as LifecycleHistory;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Utilities\Formatter;
@@ -42,12 +46,18 @@ final class History {
 	const PAGE_ARG = 'history_page';
 
 	/**
+	 * Element id of the add-note textarea.
+	 */
+	private const FIELD_ID = 'woocommerce_subscriptions_lite_note';
+
+	/**
 	 * Render the box body.
 	 *
 	 * @param ContractView $contract The contract being viewed.
 	 */
 	public static function output( ContractView $contract ): void {
 		$contract_id = (int) $contract->get_id();
+		$is_lite     = Package::EXTENSION_SLUG === $contract->get_extension_slug();
 		$page        = self::get_current_page();
 
 		try {
@@ -73,34 +83,48 @@ final class History {
 
 		if ( null === $entries ) {
 			echo '<p>' . esc_html__( 'History could not be loaded. Check the WooCommerce logs for details.', 'woocommerce-subscriptions-lite' ) . '</p>';
+		} elseif ( [] === $entries && 1 === $page ) {
+			echo '<p>' . esc_html__( 'Nothing has been recorded for this subscription yet.', 'woocommerce-subscriptions-lite' ) . '</p>';
 		} elseif ( [] === $entries ) {
-			echo '<p>' . esc_html( 1 === $page ? __( 'Nothing has been recorded for this subscription yet.', 'woocommerce-subscriptions-lite' ) : __( 'No older entries.', 'woocommerce-subscriptions-lite' ) ) . '</p>';
-			self::pagination( $contract_id, $page, false );
+			echo '<p>' . esc_html__( 'No older entries.', 'woocommerce-subscriptions-lite' ) . '</p>';
+			self::render_first_page_link( $contract_id );
 		} else {
 			$has_older = count( $entries ) > self::PER_PAGE;
-			self::table( array_slice( $entries, 0, self::PER_PAGE ) );
-			self::pagination( $contract_id, $page, $has_older );
+			self::render_table( array_slice( $entries, 0, self::PER_PAGE ), $is_lite );
+			self::render_pagination( $contract_id, $page, $has_older );
 		}
 
-		self::note_form( $contract_id );
+		$notice = NoteController::consume_notice( $contract_id );
+		if ( null !== $notice ) {
+			self::render_note_notice( $notice );
+		}
+
+		if ( $is_lite ) {
+			self::render_note_form( $contract_id, null !== $notice && $notice['invalid'] );
+		}
 	}
 
 	/**
-	 * The 1-based history page from the request; 1 when absent or invalid.
+	 * The 1-based history page from the request: 1 when absent, invalid or below 1, and capped so
+	 * the read's offset stays an integer.
 	 */
 	private static function get_current_page(): int {
 		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only paging.
-		$page = isset( $_GET[ self::PAGE_ARG ] ) ? absint( wp_unslash( $_GET[ self::PAGE_ARG ] ) ) : 1;
+		$page = isset( $_GET[ self::PAGE_ARG ] ) ? intval( wp_unslash( $_GET[ self::PAGE_ARG ] ) ) : 1;
 
-		return max( 1, $page );
+		return min( max( 1, $page ), intdiv( PHP_INT_MAX, self::PER_PAGE ) );
 	}
 
 	/**
 	 * Render the entries table.
 	 *
 	 * @param array<int, HistoryEntryView> $entries Entries newest first.
+	 * @param bool                         $is_lite Whether the contract is Lite's, so its entries use Lite's format.
 	 */
-	private static function table( array $entries ): void {
+	private static function render_table( array $entries, bool $is_lite ): void {
+		if ( $is_lite ) {
+			self::prime_merchant_users( $entries );
+		}
 		?>
 		<table class="widefat striped wc-subs-lite-contract-history-table">
 			<thead>
@@ -112,7 +136,7 @@ final class History {
 			</thead>
 			<tbody>
 				<?php foreach ( $entries as $entry ) : ?>
-					<?php self::row( $entry ); ?>
+					<?php self::render_row( $entry, $is_lite ); ?>
 				<?php endforeach; ?>
 			</tbody>
 		</table>
@@ -120,31 +144,51 @@ final class History {
 	}
 
 	/**
-	 * Render one entry row; a note's text sits under its label.
+	 * Load the store managers named on the page's entries in one query.
 	 *
-	 * @param HistoryEntryView $entry One history entry.
+	 * @param array<int, HistoryEntryView> $entries Entries on the page.
 	 */
-	private static function row( HistoryEntryView $entry ): void {
+	private static function prime_merchant_users( array $entries ): void {
+		$user_ids = [];
+		foreach ( $entries as $entry ) {
+			$actor = ( $entry->get_payload() ?? [] )['actor'] ?? null;
+			if ( is_array( $actor ) && LifecycleHistory::ROLE_MERCHANT === ( $actor['role'] ?? null ) && isset( $actor['user_id'] ) && (int) $actor['user_id'] > 0 ) {
+				$user_ids[] = (int) $actor['user_id'];
+			}
+		}
+
+		if ( [] !== $user_ids ) {
+			cache_users( array_values( array_unique( $user_ids ) ) );
+		}
+	}
+
+	/**
+	 * Render one entry row; on a Lite-owned contract a note's text sits under its label.
+	 *
+	 * @param HistoryEntryView $entry   One history entry.
+	 * @param bool             $is_lite Whether the contract is Lite's.
+	 */
+	private static function render_row( HistoryEntryView $entry, bool $is_lite ): void {
 		$payload = $entry->get_payload() ?? [];
-		$note    = LifecycleHistory::TYPE_NOTE === $entry->get_type() && isset( $payload['text'] ) && is_string( $payload['text'] )
+		$note    = $is_lite && LifecycleHistory::TYPE_NOTE === $entry->get_type() && isset( $payload['text'] ) && is_string( $payload['text'] )
 			? $payload['text']
 			: null;
 		?>
 		<tr>
 			<td><?php echo esc_html( self::get_date_label( $entry->get_date_created_gmt() ) ); ?></td>
 			<td>
-				<?php echo esc_html( self::get_type_label( $entry->get_type() ) ); ?>
+				<?php echo esc_html( $is_lite ? self::get_type_label( $entry->get_type() ) : $entry->get_type() ); ?>
 				<?php if ( null !== $note ) : ?>
 					<p class="wc-subs-lite-contract-history-note"><?php echo nl2br( esc_html( $note ) ); ?></p>
 				<?php endif; ?>
 			</td>
-			<td><?php echo esc_html( self::get_actor_label( $payload['actor'] ?? null ) ); ?></td>
+			<td><?php echo esc_html( $is_lite ? self::get_actor_label( $payload['actor'] ?? null ) : Formatter::PLACEHOLDER ); ?></td>
 		</tr>
 		<?php
 	}
 
 	/**
-	 * When an entry was stored, in the site time zone and WordPress date and time formats.
+	 * When an entry was stored, in the site time zone and WooCommerce's date and time formats.
 	 *
 	 * @param string $gmt GMT `Y-m-d H:i:s`.
 	 */
@@ -154,7 +198,7 @@ final class History {
 			return Formatter::PLACEHOLDER;
 		}
 
-		return (string) wp_date( get_option( 'date_format' ) . ' ' . get_option( 'time_format' ), $timestamp );
+		return (string) wp_date( wc_date_format() . ' ' . wc_time_format(), $timestamp );
 	}
 
 	/**
@@ -209,7 +253,7 @@ final class History {
 	 * @param int  $page        Current 1-based page.
 	 * @param bool $has_older   Whether an older page exists.
 	 */
-	private static function pagination( int $contract_id, int $page, bool $has_older ): void {
+	private static function render_pagination( int $contract_id, int $page, bool $has_older ): void {
 		if ( 1 === $page && ! $has_older ) {
 			return;
 		}
@@ -217,11 +261,26 @@ final class History {
 		<div class="tablenav bottom">
 			<div class="tablenav-pages">
 				<?php if ( $page > 1 ) : ?>
-					<a class="button" href="<?php echo esc_url( self::page_url( $contract_id, $page - 1 ) ); ?>"><?php esc_html_e( 'Newer entries', 'woocommerce-subscriptions-lite' ); ?></a>
+					<a class="button" href="<?php echo esc_url( self::get_page_url( $contract_id, $page - 1 ) ); ?>"><?php esc_html_e( 'Newer entries', 'woocommerce-subscriptions-lite' ); ?></a>
 				<?php endif; ?>
 				<?php if ( $has_older ) : ?>
-					<a class="button" href="<?php echo esc_url( self::page_url( $contract_id, $page + 1 ) ); ?>"><?php esc_html_e( 'Older entries', 'woocommerce-subscriptions-lite' ); ?></a>
+					<a class="button" href="<?php echo esc_url( self::get_page_url( $contract_id, $page + 1 ) ); ?>"><?php esc_html_e( 'Older entries', 'woocommerce-subscriptions-lite' ); ?></a>
 				<?php endif; ?>
+			</div>
+		</div>
+		<?php
+	}
+
+	/**
+	 * A link back to the newest entries, for a page past the end.
+	 *
+	 * @param int $contract_id Contract id.
+	 */
+	private static function render_first_page_link( int $contract_id ): void {
+		?>
+		<div class="tablenav bottom">
+			<div class="tablenav-pages">
+				<a class="button" href="<?php echo esc_url( self::get_page_url( $contract_id, 1 ) ); ?>"><?php esc_html_e( 'Newest entries', 'woocommerce-subscriptions-lite' ); ?></a>
 			</div>
 		</div>
 		<?php
@@ -233,7 +292,7 @@ final class History {
 	 * @param int $contract_id Contract id.
 	 * @param int $page        1-based page; page 1 carries no paging arg.
 	 */
-	private static function page_url( int $contract_id, int $page ): string {
+	private static function get_page_url( int $contract_id, int $page ): string {
 		$args = [
 			'action' => 'view',
 			'id'     => $contract_id,
@@ -246,19 +305,39 @@ final class History {
 	}
 
 	/**
-	 * The "Add note" form, prefilled with the text of a note that was just refused.
+	 * The outcome of the note just submitted, as an inline wp-admin notice above the form.
 	 *
-	 * @param int $contract_id Contract id.
+	 * @param array{type: string, message: string, invalid: bool} $notice The kept outcome.
 	 */
-	private static function note_form( int $contract_id ): void {
-		$field_id = 'woocommerce_subscriptions_lite_note';
+	private static function render_note_notice( array $notice ): void {
+		$classes = [
+			RowActionResult::SUCCESS => 'notice-success',
+			RowActionResult::ERROR   => 'notice-error',
+		];
+		printf(
+			'<div id="%1$s" class="notice %2$s inline wc-subs-lite-note-notice"><p>%3$s</p></div>',
+			esc_attr( self::FIELD_ID . '_notice' ),
+			esc_attr( $classes[ $notice['type'] ] ?? 'notice-info' ),
+			esc_html( $notice['message'] )
+		);
+	}
+
+	/**
+	 * Render the "Add note" form, prefilled with the text of a note that was just refused.
+	 *
+	 * @param int  $contract_id Contract id.
+	 * @param bool $is_invalid  Whether the note just refused was refused for its text, so the field is marked.
+	 */
+	private static function render_note_form( int $contract_id, bool $is_invalid ): void {
+		$description_id = self::FIELD_ID . '_description';
+		$described_by   = $is_invalid ? self::FIELD_ID . '_notice ' . $description_id : $description_id;
 		?>
 		<form class="wc-subs-lite-note-form" method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
 			<p>
-				<label for="<?php echo esc_attr( $field_id ); ?>"><strong><?php esc_html_e( 'Add note', 'woocommerce-subscriptions-lite' ); ?></strong></label>
+				<label for="<?php echo esc_attr( self::FIELD_ID ); ?>"><strong><?php esc_html_e( 'Add note', 'woocommerce-subscriptions-lite' ); ?></strong></label>
 			</p>
-			<textarea id="<?php echo esc_attr( $field_id ); ?>" name="<?php echo esc_attr( NoteController::FIELD_NOTE ); ?>" class="large-text" rows="3" aria-describedby="<?php echo esc_attr( $field_id . '_description' ); ?>"><?php echo esc_textarea( NoteController::consume_draft( $contract_id ) ); ?></textarea>
-			<p class="description" id="<?php echo esc_attr( $field_id . '_description' ); ?>">
+			<textarea id="<?php echo esc_attr( self::FIELD_ID ); ?>" name="<?php echo esc_attr( NoteController::FIELD_NOTE ); ?>" class="large-text" rows="3" aria-describedby="<?php echo esc_attr( $described_by ); ?>"<?php echo $is_invalid ? ' aria-invalid="true"' : ''; ?>><?php echo esc_textarea( NoteController::consume_draft( $contract_id ) ); ?></textarea>
+			<p class="description" id="<?php echo esc_attr( $description_id ); ?>">
 				<?php
 				/* translators: %d: maximum number of characters in a note. */
 				echo esc_html( sprintf( __( 'Private to store managers. Up to %d characters.', 'woocommerce-subscriptions-lite' ), NoteController::MAX_LENGTH ) );

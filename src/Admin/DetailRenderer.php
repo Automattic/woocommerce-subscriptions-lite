@@ -116,6 +116,16 @@ final class DetailRenderer {
 			'normal',
 			'default'
 		);
+		// A note's outcome shows inside the History box, so open the box for that render even
+		// when the merchant collapsed it. The saved collapsed state is kept.
+		if ( NoteController::has_notice( $contract_id ) ) {
+			add_filter(
+				'postbox_classes_' . $screen_id . '_' . self::HISTORY_BOX_ID,
+				static function ( array $classes ): array {
+					return array_values( array_diff( $classes, [ 'closed' ] ) );
+				}
+			);
+		}
 
 		// Side column: actions on top (always registered - it carries the back-to-list
 		// link and the status-gated Renew now / Cancel controls), then the schedule and

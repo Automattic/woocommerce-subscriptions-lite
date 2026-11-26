@@ -2,9 +2,11 @@
 /**
  * History - records what happened to a subscription as entries in its engine contract history.
  *
- * Every entry carries Lite's `actor` (a role and a user id) in its payload. The write uses the
- * lock this request holds on the contract ({@see HeldLocks}), so a flow that lost its lock
- * records nothing. An entry describes a contract write that has already happened, so a failed
+ * Every entry carries Lite's `actor` (a role and a user id) in its payload: a store manager
+ * acting in wp-admin is the merchant, even on their own subscription; elsewhere the
+ * subscription's customer is the customer. The write uses the lock this request holds on the
+ * contract ({@see HeldLocks}), so a flow that lost its lock records nothing; a note, written
+ * outside any flow, holds no lock. An entry describes a contract write that has already happened, so a failed
  * history write is logged and never fails the flow that called it.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Lifecycle
@@ -89,9 +91,10 @@ final class History {
 	private const MERCHANT_CAPABILITY = 'manage_woocommerce';
 
 	/**
-	 * Record an entry done by the current user: the customer when it is the subscription's
-	 * customer, a merchant when it can manage WooCommerce, else the system. Inside a background
-	 * run (WP-Cron or the Action Scheduler queue) it is the system, whatever user the run carries.
+	 * Record an entry done by the current user: a merchant when a store manager acts in wp-admin,
+	 * else the customer when it is the subscription's customer, a merchant when it can manage
+	 * WooCommerce, or the system. Inside a background run (WP-Cron or the Action Scheduler queue)
+	 * it is the system, whatever user the run carries.
 	 *
 	 * @param ContractView         $contract The contract the entry is about.
 	 * @param string               $type     Entry type, one of the `TYPE_*` constants.
@@ -115,7 +118,10 @@ final class History {
 
 	/**
 	 * The actor of an entry: Lite's own when there is no acting contract view, the request has no
-	 * user or it runs in the background; else the current user's role on the contract.
+	 * user or it runs in the background. In wp-admin (admin-post.php included, admin-ajax.php not)
+	 * a store manager is the merchant; this changes the result only for a store manager who is
+	 * the subscription's customer. Elsewhere the subscription's customer is the customer, a store
+	 * manager the merchant, and any other user the system with that user's id.
 	 *
 	 * @param ContractView|null $contract The contract the current user acted on, or null for Lite itself.
 	 * @return array{role: string, user_id: int|null}
@@ -130,10 +136,15 @@ final class History {
 			];
 		}
 
+		$is_merchant = user_can( $user_id, self::MERCHANT_CAPABILITY );
+		$in_wp_admin = is_admin() && ! wp_doing_ajax();
+
 		$role = self::ROLE_SYSTEM;
-		if ( $contract->get_customer_id() === $user_id ) {
+		if ( $is_merchant && $in_wp_admin ) {
+			$role = self::ROLE_MERCHANT;
+		} elseif ( $contract->get_customer_id() === $user_id ) {
 			$role = self::ROLE_CUSTOMER;
-		} elseif ( user_can( $user_id, self::MERCHANT_CAPABILITY ) ) {
+		} elseif ( $is_merchant ) {
 			$role = self::ROLE_MERCHANT;
 		}
 

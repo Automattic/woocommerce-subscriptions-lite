@@ -58,14 +58,23 @@ final class RowActionResult {
 	private $message;
 
 	/**
+	 * Why a failure happened, when the handler needs to tell: '', `not_found` or `invalid_input`.
+	 *
+	 * @var string
+	 */
+	private $reason;
+
+	/**
 	 * Use a named constructor ({@see self::success()} etc.).
 	 *
 	 * @param string $type    One of the type constants.
 	 * @param string $message Message text.
+	 * @param string $reason  Failure reason, or ''.
 	 */
-	private function __construct( string $type, string $message ) {
+	private function __construct( string $type, string $message, string $reason = '' ) {
 		$this->type    = $type;
 		$this->message = $message;
+		$this->reason  = $reason;
 	}
 
 	/**
@@ -84,6 +93,24 @@ final class RowActionResult {
 	 */
 	public static function failed( string $message ): self {
 		return new self( self::ERROR, $message );
+	}
+
+	/**
+	 * A failure because the subscription does not exist.
+	 *
+	 * @param string $message Message text.
+	 */
+	public static function not_found( string $message ): self {
+		return new self( self::ERROR, $message, 'not_found' );
+	}
+
+	/**
+	 * A failure because the submitted input itself was refused (empty, too long, unreadable).
+	 *
+	 * @param string $message Message text.
+	 */
+	public static function invalid_input( string $message ): self {
+		return new self( self::ERROR, $message, 'invalid_input' );
 	}
 
 	/**
@@ -130,5 +157,19 @@ final class RowActionResult {
 	 */
 	public function is_forbidden(): bool {
 		return self::FORBIDDEN === $this->type;
+	}
+
+	/**
+	 * Whether the failure is a subscription that does not exist.
+	 */
+	public function is_not_found(): bool {
+		return 'not_found' === $this->reason;
+	}
+
+	/**
+	 * Whether the failure is input the user has to correct.
+	 */
+	public function is_invalid_input(): bool {
+		return 'invalid_input' === $this->reason;
 	}
 }

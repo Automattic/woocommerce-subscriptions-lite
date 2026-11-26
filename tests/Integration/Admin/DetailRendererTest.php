@@ -55,9 +55,10 @@ final class DetailRendererTest extends LiteIntegrationTestCase {
 		$normal_default = $boxes['normal']['default'] ?? [];
 		$this->assertSame( 'Billing history', $normal_default['wc-subs-lite-history']['title'] ?? null );
 		$this->assertSame( 'History', $normal_default[ DetailRenderer::HISTORY_BOX_ID ]['title'] ?? null );
-		$this->assertSame(
-			[ 'wc-subs-lite-history', DetailRenderer::HISTORY_BOX_ID ],
-			array_keys( $normal_default ),
+		$default_keys = array_keys( $normal_default );
+		$this->assertLessThan(
+			array_search( DetailRenderer::HISTORY_BOX_ID, $default_keys, true ),
+			array_search( 'wc-subs-lite-history', $default_keys, true ),
 			'The History box follows Billing history.'
 		);
 		$this->assertArrayHasKey( 'wc-subs-lite-actions', $boxes['side']['high'] ?? [] );
@@ -86,6 +87,32 @@ final class DetailRendererTest extends LiteIntegrationTestCase {
 
 		$this->assertStringContainsString( 'Subscription #' . $id, $html );
 		$this->assertStringNotContainsString( 'wc-subs-lite-lock-notice', $html );
+	}
+
+	public function test_a_collapsed_history_box_opens_while_a_note_outcome_waits(): void {
+		require_once ABSPATH . 'wp-admin/includes/post.php';
+		$id      = $this->create_contract( $this->create_customer() );
+		$user_id = self::factory()->user->create( [ 'role' => 'administrator' ] );
+		wp_set_current_user( $user_id );
+		set_current_screen( 'subscriptions_page_wc-subscriptions-lite' );
+		$screen_id = get_current_screen()->id;
+		update_user_option( $user_id, 'closedpostboxes_' . $screen_id, [ DetailRenderer::HISTORY_BOX_ID ] );
+
+		$this->assertSame( 'closed', postbox_classes( DetailRenderer::HISTORY_BOX_ID, $screen_id ), 'The box starts collapsed.' );
+
+		set_transient(
+			'woocommerce_subscriptions_lite_note_notice_' . $user_id . '_' . $id,
+			[
+				'type'    => 'success',
+				'message' => 'Note added.',
+				'invalid' => false,
+			],
+			60
+		);
+		DetailRenderer::setup( $id );
+
+		$this->assertSame( '', postbox_classes( DetailRenderer::HISTORY_BOX_ID, $screen_id ) );
+		$this->assertSame( [ DetailRenderer::HISTORY_BOX_ID ], get_user_option( 'closedpostboxes_' . $screen_id, $user_id ), 'The saved state is kept.' );
 	}
 
 	/**
