@@ -328,7 +328,7 @@ final class History {
 	 *
 	 * @param int  $contract_id Contract id.
 	 * @param bool $is_invalid  Whether the note just refused was refused for its text, so the field is
-	 *                          marked and focused.
+	 *                          marked invalid.
 	 */
 	private static function render_note_form( int $contract_id, bool $is_invalid ): void {
 		$description_id = self::FIELD_ID . '_description';
@@ -338,7 +338,7 @@ final class History {
 			<p>
 				<label for="<?php echo esc_attr( self::FIELD_ID ); ?>"><strong><?php esc_html_e( 'Add note', 'woocommerce-subscriptions-lite' ); ?></strong></label>
 			</p>
-			<textarea id="<?php echo esc_attr( self::FIELD_ID ); ?>" name="<?php echo esc_attr( NoteController::FIELD_NOTE ); ?>" class="large-text" rows="3" aria-describedby="<?php echo esc_attr( $described_by ); ?>"<?php echo $is_invalid ? ' aria-invalid="true" autofocus' : ''; ?>><?php echo esc_textarea( NoteController::consume_draft( $contract_id ) ); ?></textarea>
+			<textarea id="<?php echo esc_attr( self::FIELD_ID ); ?>" name="<?php echo esc_attr( NoteController::FIELD_NOTE ); ?>" class="large-text" rows="3" aria-describedby="<?php echo esc_attr( $described_by ); ?>"<?php echo $is_invalid ? ' aria-invalid="true"' : ''; ?>><?php echo esc_textarea( NoteController::consume_draft( $contract_id ) ); ?></textarea>
 			<p class="description" id="<?php echo esc_attr( $description_id ); ?>">
 				<?php
 				/* translators: %d: maximum number of characters in a note. */
