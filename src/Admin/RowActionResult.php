@@ -44,6 +44,16 @@ final class RowActionResult {
 	const FORBIDDEN = 'forbidden';
 
 	/**
+	 * Failure reason: the subscription does not exist.
+	 */
+	private const REASON_NOT_FOUND = 'not_found';
+
+	/**
+	 * Failure reason: the submitted input itself was refused.
+	 */
+	private const REASON_INVALID_INPUT = 'invalid_input';
+
+	/**
 	 * The notice type (one of the constants above).
 	 *
 	 * @var string
@@ -58,7 +68,7 @@ final class RowActionResult {
 	private $message;
 
 	/**
-	 * Why a failure happened, when the handler needs to tell: '', `not_found` or `invalid_input`.
+	 * Why a failure happened, when the handler needs to tell: '' or one of the `REASON_*` constants.
 	 *
 	 * @var string
 	 */
@@ -101,7 +111,7 @@ final class RowActionResult {
 	 * @param string $message Message text.
 	 */
 	public static function not_found( string $message ): self {
-		return new self( self::ERROR, $message, 'not_found' );
+		return new self( self::ERROR, $message, self::REASON_NOT_FOUND );
 	}
 
 	/**
@@ -110,7 +120,7 @@ final class RowActionResult {
 	 * @param string $message Message text.
 	 */
 	public static function invalid_input( string $message ): self {
-		return new self( self::ERROR, $message, 'invalid_input' );
+		return new self( self::ERROR, $message, self::REASON_INVALID_INPUT );
 	}
 
 	/**
@@ -163,13 +173,13 @@ final class RowActionResult {
 	 * Whether the failure is a subscription that does not exist.
 	 */
 	public function is_not_found(): bool {
-		return 'not_found' === $this->reason;
+		return self::REASON_NOT_FOUND === $this->reason;
 	}
 
 	/**
 	 * Whether the failure is input the user has to correct.
 	 */
 	public function is_invalid_input(): bool {
-		return 'invalid_input' === $this->reason;
+		return self::REASON_INVALID_INPUT === $this->reason;
 	}
 }

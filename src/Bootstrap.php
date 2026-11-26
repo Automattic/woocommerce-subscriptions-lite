@@ -97,6 +97,9 @@ final class Bootstrap {
 		// every request.
 		Lifecycle\Renewal\Settlement::register();
 
+		// History: an entry written inside any Action Scheduler action is the system's.
+		Lifecycle\History::register();
+
 		// Customer portal (My Account): the subscriptions list + single
 		// subscription detail, with the lifecycle actions (cancel / hold /
 		// reactivate) over the namespaced Interactivity API store. Endpoints

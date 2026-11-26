@@ -597,6 +597,45 @@ final class ContractCreationHandlerTest extends LiteIntegrationTestCase {
 		return array_keys( $this->get_pending_actions( 'woocommerce_subscriptions_lite_resume_checkout', [ 'order_id' => $order_id ] ) );
 	}
 
+	public function test_a_resume_run_by_hand_from_wp_admin_records_the_created_entry_as_the_system(): void {
+		$manager_id = $this->create_customer( [ 'role' => 'administrator' ] );
+		$plan       = $this->make_plan();
+		$order      = $this->create_subscription_order( $manager_id );
+		$this->apply_and_stamp( $order, $plan );
+		$created  = Contracts::create(
+			[
+				'extension_slug'  => Package::EXTENSION_SLUG,
+				'creation_key'    => 'order:' . $order->get_id(),
+				'status'          => ContractStatus::DRAFT,
+				'customer_id'     => $manager_id,
+				'currency'        => 'USD',
+				'selling_plan_id' => $plan->get_id(),
+				'origin_order_id' => $order->get_id(),
+				'billing_total'   => '19.99',
+			],
+			[ 'operation' => ContractCreationHandler::OPERATION ]
+		);
+		$draft_id = $created['contract']->get_id();
+		$order->update_status( OrderStatus::PROCESSING ); // Refused while locked: schedules a resume.
+		$resumes = $this->pending_resumes( $order->get_id() );
+		$this->assertCount( 1, $resumes );
+		$this->expire_held_locks();
+
+		// The store manager, who is also the customer, clicks "Run" under Tools > Scheduled Actions.
+		wp_set_current_user( $manager_id );
+		set_current_screen( 'tools_page_action-scheduler' );
+		\ActionScheduler::runner()->process_action( $resumes[0], 'WP Admin' );
+
+		$this->assertSame( ContractStatus::ACTIVE, $this->get_contract( $draft_id )->get_status() );
+		$this->assertSame(
+			[
+				'role'    => History::ROLE_SYSTEM,
+				'user_id' => null,
+			],
+			$this->get_history( $draft_id, History::TYPE_CREATED )[0]->get_payload()['actor']
+		);
+	}
+
 	/**
 	 * A creation that died right after the locked insert leaves a locked draft: a paid signal
 	 * meanwhile is refused and schedules a resume; once the lock expires, the next paid status

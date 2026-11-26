@@ -115,6 +115,31 @@ final class DetailRendererTest extends LiteIntegrationTestCase {
 		$this->assertSame( [ DetailRenderer::HISTORY_BOX_ID ], get_user_option( 'closedpostboxes_' . $screen_id, $user_id ), 'The saved state is kept.' );
 	}
 
+	public function test_a_hidden_history_box_shows_while_a_note_outcome_waits(): void {
+		$id      = $this->create_contract( $this->create_customer() );
+		$user_id = self::factory()->user->create( [ 'role' => 'administrator' ] );
+		wp_set_current_user( $user_id );
+		set_current_screen( 'subscriptions_page_wc-subscriptions-lite' );
+		$screen = get_current_screen();
+		update_user_option( $user_id, 'metaboxhidden_' . $screen->id, [ DetailRenderer::HISTORY_BOX_ID, 'wc-subs-lite-items' ] );
+
+		$this->assertContains( DetailRenderer::HISTORY_BOX_ID, get_hidden_meta_boxes( $screen ), 'The box starts hidden.' );
+
+		set_transient(
+			'woocommerce_subscriptions_lite_note_notice_' . $user_id . '_' . $id,
+			[
+				'type'    => 'error',
+				'message' => 'The note is empty. Type a note before adding it.',
+				'invalid' => true,
+			],
+			60
+		);
+		DetailRenderer::setup( $id );
+
+		$this->assertSame( [ 'wc-subs-lite-items' ], get_hidden_meta_boxes( $screen ), 'Only the History box is shown; other hidden boxes stay hidden.' );
+		$this->assertSame( [ DetailRenderer::HISTORY_BOX_ID, 'wc-subs-lite-items' ], get_user_option( 'metaboxhidden_' . $screen->id, $user_id ), 'The saved preference is kept.' );
+	}
+
 	/**
 	 * Render the detail screen for a contract as an administrator.
 	 *

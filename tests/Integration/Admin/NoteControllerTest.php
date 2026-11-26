@@ -238,7 +238,7 @@ final class NoteControllerTest extends LiteIntegrationTestCase {
 		}
 	}
 
-	public function test_a_request_records_the_note_flashes_and_redirects_to_the_history_box(): void {
+	public function test_a_request_records_the_note_shows_its_outcome_in_the_box_and_redirects_to_it(): void {
 		$contract_id = $this->seed_contract();
 		$this->set_request( $contract_id, 'Through the form.', wp_create_nonce( PageController::ACTION_ADD_NOTE . '_' . $contract_id ) );
 
@@ -258,7 +258,9 @@ final class NoteControllerTest extends LiteIntegrationTestCase {
 		$html = $this->render_box( $contract_id );
 		$this->assertStringContainsString( '<div id="woocommerce_subscriptions_lite_note_notice" class="notice notice-success inline wc-subs-lite-note-notice"><p>Note added.</p></div>', $html );
 		$this->assertStringNotContainsString( 'aria-invalid', $html );
-		$this->assertLessThan( strpos( $html, '<form' ), strpos( $html, 'wc-subs-lite-note-notice' ), 'The outcome shows above the form.' );
+		$this->assertStringStartsWith( '<div id="woocommerce_subscriptions_lite_note_notice"', ltrim( $html ), 'The outcome shows at the top of the box, where the redirect anchor lands.' );
+		$this->assertLessThan( strpos( $html, '<table' ), strpos( $html, 'wc-subs-lite-note-notice' ) );
+		$this->assertStringNotContainsString( 'autofocus', $html );
 		$this->assertStringNotContainsString( 'wc-subs-lite-note-notice', $this->render_box( $contract_id ), 'The outcome shows once.' );
 	}
 
@@ -270,7 +272,7 @@ final class NoteControllerTest extends LiteIntegrationTestCase {
 		$this->assertSame( '', $this->render_flash() );
 		$html = $this->render_box( $contract_id );
 		$this->assertStringContainsString( 'class="notice notice-error inline wc-subs-lite-note-notice"><p>The note is empty. Type a note before adding it.</p>', $html );
-		$this->assertStringContainsString( 'aria-describedby="woocommerce_subscriptions_lite_note_notice woocommerce_subscriptions_lite_note_description" aria-invalid="true"', $html );
+		$this->assertStringContainsString( 'aria-describedby="woocommerce_subscriptions_lite_note_notice woocommerce_subscriptions_lite_note_description" aria-invalid="true" autofocus>', $html );
 		$this->assertSame( [], $this->get_history( $contract_id ) );
 	}
 
@@ -284,6 +286,7 @@ final class NoteControllerTest extends LiteIntegrationTestCase {
 		$html = $this->render_box( $contract_id );
 		$this->assertStringContainsString( 'The note could not be added.', $html );
 		$this->assertStringNotContainsString( 'aria-invalid', $html );
+		$this->assertStringNotContainsString( 'autofocus', $html );
 		$this->assertStringContainsString( 'aria-describedby="woocommerce_subscriptions_lite_note_description"', $html );
 		$this->assertStringContainsString( '>Lost note.</textarea>', $html );
 	}
@@ -340,6 +343,16 @@ final class NoteControllerTest extends LiteIntegrationTestCase {
 		$this->assertSame( 'The note contains characters that could not be read. Remove them and try again.', $notice['message'] ?? null );
 		$this->assertTrue( $notice['invalid'] );
 		$this->assertSame( '', NoteController::consume_draft( $contract_id ) );
+	}
+
+	public function test_invalid_utf8_is_refused_whatever_the_site_charset_option(): void {
+		$contract_id = $this->seed_contract();
+		update_option( 'blog_charset', 'ISO-8859-1' );
+
+		$this->request_note( $contract_id, "Bad \xC3\x28 bytes" );
+
+		$this->assertSame( [], $this->get_history( $contract_id ) );
+		$this->assertTrue( NoteController::consume_notice( $contract_id )['invalid'] ?? false );
 	}
 
 	public function test_a_request_counts_a_crlf_line_break_as_one_character_and_stores_lf(): void {

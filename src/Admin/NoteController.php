@@ -128,7 +128,8 @@ final class NoteController {
 		}
 
 		// Refused, not repaired: stripping the invalid bytes would change the text silently.
-		if ( '' !== $text && '' === wp_check_invalid_utf8( $text ) ) {
+		// A regex with the u modifier fails on invalid UTF-8 whatever the site's charset option says.
+		if ( 1 !== preg_match( '//u', $text ) ) {
 			return RowActionResult::invalid_input( __( 'The note contains characters that could not be read. Remove them and try again.', 'woocommerce-subscriptions-lite' ) );
 		}
 

@@ -4,10 +4,11 @@
  *
  * Every entry carries Lite's `actor` (a role and a user id) in its payload: a store manager
  * acting in wp-admin is the merchant, even on their own subscription; elsewhere the
- * subscription's customer is the customer. The write uses the lock this request holds on the
- * contract ({@see HeldLocks}), so a flow that lost its lock records nothing; a note, written
- * outside any flow, holds no lock. An entry describes a contract write that has already happened, so a failed
- * history write is logged and never fails the flow that called it.
+ * subscription's customer is the customer; a background run is the system. The write uses the
+ * lock this request holds on the contract ({@see HeldLocks}), so a flow that lost its lock
+ * records nothing; a note, written outside any flow, holds no lock. An entry describes a
+ * contract write that has already happened, so a failed history write is logged and never
+ * fails the flow that called it.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Lifecycle
  */
@@ -91,10 +92,43 @@ final class History {
 	private const MERCHANT_CAPABILITY = 'manage_woocommerce';
 
 	/**
+	 * Whether an Action Scheduler action is running in this request, from any runner (the queue,
+	 * WP-CLI or a "Run" link under Tools > Scheduled Actions).
+	 *
+	 * @var bool
+	 */
+	private static $in_scheduled_action = false;
+
+	/**
+	 * Track Action Scheduler executions, so an entry written inside one is the system's.
+	 */
+	public static function register(): void {
+		add_action( 'action_scheduler_begin_execute', [ self::class, 'mark_scheduled_action_started' ] );
+		add_action( 'action_scheduler_after_execute', [ self::class, 'mark_scheduled_action_ended' ] );
+		add_action( 'action_scheduler_failed_execution', [ self::class, 'mark_scheduled_action_ended' ] );
+		// A corrupted action is cancelled after `begin_execute` with neither of the two above.
+		add_action( 'action_scheduler_canceled_corrupted_action', [ self::class, 'mark_scheduled_action_ended' ] );
+	}
+
+	/**
+	 * Note that an Action Scheduler action started running.
+	 */
+	public static function mark_scheduled_action_started(): void {
+		self::$in_scheduled_action = true;
+	}
+
+	/**
+	 * Note that the running Action Scheduler action ended.
+	 */
+	public static function mark_scheduled_action_ended(): void {
+		self::$in_scheduled_action = false;
+	}
+
+	/**
 	 * Record an entry done by the current user: a merchant when a store manager acts in wp-admin,
 	 * else the customer when it is the subscription's customer, a merchant when it can manage
-	 * WooCommerce, or the system. Inside a background run (WP-Cron or the Action Scheduler queue)
-	 * it is the system, whatever user the run carries.
+	 * WooCommerce, or the system. Inside a background run (WP-Cron or any Action Scheduler action,
+	 * also one run by hand from wp-admin) it is the system, whatever user the run carries.
 	 *
 	 * @param ContractView         $contract The contract the entry is about.
 	 * @param string               $type     Entry type, one of the `TYPE_*` constants.
@@ -118,7 +152,7 @@ final class History {
 
 	/**
 	 * The actor of an entry: Lite's own when there is no acting contract view, the request has no
-	 * user or it runs in the background. In wp-admin (admin-post.php included, admin-ajax.php not)
+	 * user, it runs in WP-Cron or inside an Action Scheduler action. In wp-admin (admin-post.php included, admin-ajax.php not)
 	 * a store manager is the merchant; this changes the result only for a store manager who is
 	 * the subscription's customer. Elsewhere the subscription's customer is the customer, a store
 	 * manager the merchant, and any other user the system with that user's id.
@@ -129,7 +163,7 @@ final class History {
 	private static function get_actor( ?ContractView $contract ): array {
 		$user_id = get_current_user_id();
 		// A background run may carry the cookies of whoever's request started it.
-		if ( null === $contract || $user_id <= 0 || wp_doing_cron() || doing_action( 'action_scheduler_run_queue' ) ) {
+		if ( null === $contract || $user_id <= 0 || wp_doing_cron() || self::$in_scheduled_action || doing_action( 'action_scheduler_run_queue' ) ) {
 			return [
 				'role'    => self::ROLE_SYSTEM,
 				'user_id' => null,

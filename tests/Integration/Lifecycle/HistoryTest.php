@@ -213,6 +213,39 @@ final class HistoryTest extends LiteIntegrationTestCase {
 		);
 	}
 
+	/**
+	 * @testWith ["action_scheduler_after_execute"]
+	 *           ["action_scheduler_failed_execution"]
+	 *           ["action_scheduler_canceled_corrupted_action"]
+	 *
+	 * @param string $end_hook Action Scheduler hook that ends the execution.
+	 */
+	public function test_an_entry_inside_a_scheduled_action_is_the_systems_until_it_ends( string $end_hook ): void {
+		$manager_id  = self::factory()->user->create( [ 'role' => 'administrator' ] );
+		$contract_id = $this->seed_contract( [ 'customer_id' => $manager_id ] );
+		wp_set_current_user( $manager_id );
+		set_current_screen( 'tools_page_action-scheduler' );
+
+		do_action( 'action_scheduler_begin_execute', 1, 'WP Admin' );
+		History::add( $this->get_contract( $contract_id ), History::TYPE_HELD );
+		$end_args = [
+			'action_scheduler_after_execute'             => [ 1, new \ActionScheduler_NullAction(), 'WP Admin' ],
+			'action_scheduler_failed_execution'          => [ 1, new \Exception( 'Failed.' ), 'WP Admin' ],
+			'action_scheduler_canceled_corrupted_action' => [ 1 ],
+		];
+		do_action( $end_hook, ...$end_args[ $end_hook ] );
+		History::add( $this->get_contract( $contract_id ), History::TYPE_REACTIVATED );
+
+		$this->assertSame(
+			[
+				'role'    => History::ROLE_SYSTEM,
+				'user_id' => null,
+			],
+			$this->get_history( $contract_id, History::TYPE_HELD )[0]->get_payload()['actor']
+		);
+		$this->assertSame( History::ROLE_MERCHANT, $this->get_history( $contract_id, History::TYPE_REACTIVATED )[0]->get_payload()['actor']['role'], 'The flag clears when the action ends.' );
+	}
+
 	public function test_an_actor_lookup_that_throws_is_logged_and_not_thrown(): void {
 		$contract_id = $this->seed_contract( [ 'customer_id' => $this->create_customer() ] );
 		wp_set_current_user( self::factory()->user->create( [ 'role' => 'shop_manager' ] ) );

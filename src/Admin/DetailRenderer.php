@@ -19,6 +19,7 @@ declare( strict_types=1 );
 namespace Automattic\WooCommerce\SubscriptionsLite\Admin;
 
 use Throwable;
+use WP_Screen;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\MetaBoxes\Actions;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\MetaBoxes\Addresses;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\MetaBoxes\BillingHistory;
@@ -116,9 +117,20 @@ final class DetailRenderer {
 			'normal',
 			'default'
 		);
-		// A note's outcome shows inside the History box, so open the box for that render even
-		// when the merchant collapsed it. The saved collapsed state is kept.
+		// A note's outcome shows inside the History box, so show and open the box for that render
+		// even when the merchant hid it (Screen Options) or collapsed it. The saved choices are kept.
 		if ( NoteController::has_notice( $contract_id ) ) {
+			add_filter(
+				'hidden_meta_boxes',
+				static function ( $hidden, $hidden_screen ) use ( $screen_id ) {
+					if ( ! is_array( $hidden ) || ! $hidden_screen instanceof WP_Screen || $screen_id !== $hidden_screen->id ) {
+						return $hidden;
+					}
+					return array_values( array_diff( $hidden, [ self::HISTORY_BOX_ID ] ) );
+				},
+				10,
+				2
+			);
 			add_filter(
 				'postbox_classes_' . $screen_id . '_' . self::HISTORY_BOX_ID,
 				static function ( array $classes ): array {

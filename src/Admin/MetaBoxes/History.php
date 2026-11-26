@@ -6,7 +6,7 @@
  * facade: what happened, when (site time zone), by whom, and a note's text. Lite's labels, note
  * text and actor format apply only to a Lite-owned contract; another owner's entries show their
  * type slug. On a Lite-owned contract, a form below the list posts a merchant note to
- * {@see NoteController}, and the note's outcome shows above the form. Degrades to a notice when
+ * {@see NoteController}, and the note's outcome shows at the top of the box. Degrades to a notice when
  * the read fails.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Admin\MetaBoxes
@@ -60,6 +60,12 @@ final class History {
 		$is_lite     = Package::EXTENSION_SLUG === $contract->get_extension_slug();
 		$page        = self::get_current_page();
 
+		// The outcome of a note just submitted sits at the top, where the redirect anchor lands.
+		$notice = NoteController::consume_notice( $contract_id );
+		if ( null !== $notice ) {
+			self::render_note_notice( $notice );
+		}
+
 		try {
 			// One entry past the page tells whether an older page exists.
 			$entries = Contracts::get_history(
@@ -92,11 +98,6 @@ final class History {
 			$has_older = count( $entries ) > self::PER_PAGE;
 			self::render_table( array_slice( $entries, 0, self::PER_PAGE ), $is_lite );
 			self::render_pagination( $contract_id, $page, $has_older );
-		}
-
-		$notice = NoteController::consume_notice( $contract_id );
-		if ( null !== $notice ) {
-			self::render_note_notice( $notice );
 		}
 
 		if ( $is_lite ) {
@@ -305,7 +306,7 @@ final class History {
 	}
 
 	/**
-	 * The outcome of the note just submitted, as an inline wp-admin notice above the form.
+	 * The outcome of the note just submitted, as an inline wp-admin notice at the top of the box.
 	 *
 	 * @param array{type: string, message: string, invalid: bool} $notice The kept outcome.
 	 */
@@ -326,7 +327,8 @@ final class History {
 	 * Render the "Add note" form, prefilled with the text of a note that was just refused.
 	 *
 	 * @param int  $contract_id Contract id.
-	 * @param bool $is_invalid  Whether the note just refused was refused for its text, so the field is marked.
+	 * @param bool $is_invalid  Whether the note just refused was refused for its text, so the field is
+	 *                          marked and focused.
 	 */
 	private static function render_note_form( int $contract_id, bool $is_invalid ): void {
 		$description_id = self::FIELD_ID . '_description';
@@ -336,7 +338,7 @@ final class History {
 			<p>
 				<label for="<?php echo esc_attr( self::FIELD_ID ); ?>"><strong><?php esc_html_e( 'Add note', 'woocommerce-subscriptions-lite' ); ?></strong></label>
 			</p>
-			<textarea id="<?php echo esc_attr( self::FIELD_ID ); ?>" name="<?php echo esc_attr( NoteController::FIELD_NOTE ); ?>" class="large-text" rows="3" aria-describedby="<?php echo esc_attr( $described_by ); ?>"<?php echo $is_invalid ? ' aria-invalid="true"' : ''; ?>><?php echo esc_textarea( NoteController::consume_draft( $contract_id ) ); ?></textarea>
+			<textarea id="<?php echo esc_attr( self::FIELD_ID ); ?>" name="<?php echo esc_attr( NoteController::FIELD_NOTE ); ?>" class="large-text" rows="3" aria-describedby="<?php echo esc_attr( $described_by ); ?>"<?php echo $is_invalid ? ' aria-invalid="true" autofocus' : ''; ?>><?php echo esc_textarea( NoteController::consume_draft( $contract_id ) ); ?></textarea>
 			<p class="description" id="<?php echo esc_attr( $description_id ); ?>">
 				<?php
 				/* translators: %d: maximum number of characters in a note. */
