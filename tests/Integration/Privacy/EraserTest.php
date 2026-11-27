@@ -113,6 +113,7 @@ final class EraserTest extends LiteIntegrationTestCase {
 		$this->assertNull( $contract->get_payment_method_title() );
 		$this->assertNull( $contract->get_customer_id() );
 		$this->assert_lock_released( $contract_id );
+		$this->assertSame( [ History::TYPE_PERSONAL_DATA_REMOVED ], $this->get_history_types( $contract_id ), 'One removal entry replaces the history.' );
 	}
 
 	/**
@@ -320,7 +321,7 @@ final class EraserTest extends LiteIntegrationTestCase {
 		);
 	}
 
-	public function test_a_store_manager_erasing_their_own_subscription_through_admin_ajax_is_recorded_as_the_customer(): void {
+	public function test_a_store_manager_erasing_their_own_subscription_through_admin_ajax_is_recorded_as_the_merchant(): void {
 		$this->set_erasure( true );
 		$manager_id  = (int) get_current_user_id();
 		$contract_id = $this->seed_contract(
@@ -337,12 +338,100 @@ final class EraserTest extends LiteIntegrationTestCase {
 
 		$this->assertSame(
 			[
-				'role'    => History::ROLE_CUSTOMER,
+				'role'    => History::ROLE_MERCHANT,
 				'user_id' => $manager_id,
 			],
 			$this->get_history( $contract_id, History::TYPE_PERSONAL_DATA_REMOVED )[0]->get_payload()['actor'],
-			'Outside wp-admin screens, History records the subscription\'s own customer as the customer.'
+			'An erasure is a store manager\'s action, even on their own subscription.'
 		);
+	}
+
+	public function test_a_user_who_can_erase_without_managing_woocommerce_is_recorded_as_the_merchant(): void {
+		$this->set_erasure( true );
+		$contract_id = $this->seed_contract(
+			[
+				'customer_id' => $this->customer_id,
+				'status'      => ContractStatus::CANCELLED,
+			]
+		);
+		$eraser_id   = self::factory()->user->create( [ 'role' => 'editor' ] );
+		get_userdata( $eraser_id )->add_cap( 'erase_others_personal_data' );
+		wp_set_current_user( $eraser_id );
+		$this->assertFalse( current_user_can( 'manage_woocommerce' ) ); // phpcs:ignore WordPress.WP.Capabilities.Unknown -- WooCommerce's capability.
+		set_current_screen( 'tools_page_remove_personal_data' );
+		add_filter( 'wp_doing_ajax', '__return_true' );
+
+		$this->erase();
+
+		$this->assertSame(
+			[
+				'role'    => History::ROLE_MERCHANT,
+				'user_id' => $eraser_id,
+			],
+			$this->get_history( $contract_id, History::TYPE_PERSONAL_DATA_REMOVED )[0]->get_payload()['actor']
+		);
+	}
+
+	public function test_a_lock_lost_after_the_history_delete_is_reported_as_held_and_a_rerun_completes_it(): void {
+		$this->set_erasure( true );
+		$contract_id = $this->create_contract( $this->customer_id, [ 'status' => 'cancelled' ] );
+		$this->capture_log();
+		$lock    = null;
+		$armed   = false;
+		$history = self::history_insert();
+		// Take the lock over on the first statement after the removal entry's insert.
+		$steal = function ( $query ) use ( $contract_id, $history, &$lock, &$armed, &$steal ) {
+			if ( $armed ) {
+				remove_filter( 'query', $steal );
+				$this->expire_held_locks();
+				$lock = $this->hold_lock( $contract_id, 'renewal' );
+			} elseif ( is_string( $query ) && 1 === preg_match( $history, $query ) ) {
+				$armed = true;
+			}
+			return $query;
+		};
+		add_filter( 'query', $steal );
+
+		$response = $this->erase();
+
+		$this->assertSame( [ sprintf( self::LOCKED, $contract_id ) ], $response['messages'] );
+		$this->assertTrue( $response['done'] );
+		$this->assert_intact( $contract_id );
+		$this->assertSame( [ History::TYPE_PERSONAL_DATA_REMOVED ], $this->get_history_types( $contract_id ), 'The history was replaced before the lock was lost.' );
+		$this->assertTrue( $this->has_logged( sprintf( 'Privacy erasure: personal data was not removed from contract %d at the anonymise step (held by renewal).', $contract_id ) ) );
+
+		$lock->release();
+		$this->erase_all();
+
+		$this->assert_erased( $contract_id );
+	}
+
+	public function test_another_accounts_subscription_is_unlinked_in_the_anonymising_write_so_a_rerun_after_a_failed_address_write_completes_it(): void {
+		$this->set_erasure( true );
+		$other_id    = $this->create_customer();
+		$contract_id = $this->seed_contract(
+			[
+				'customer_id' => $other_id,
+				'status'      => ContractStatus::CANCELLED,
+				'addresses'   => [
+					'billing'  => array_merge( self::BILLING_ADDRESS, [ 'email' => self::EMAIL ] ),
+					'shipping' => self::SHIPPING_ADDRESS,
+				],
+			]
+		);
+		$this->fail_next_query( '/INSERT INTO \S*wc_subscription_contract_addresses/' );
+
+		$response = $this->erase();
+
+		$this->assertStringStartsWith( 'Personal data could not be removed from subscription #', $response['messages'][0] );
+		$contract = $this->get_contract( $contract_id );
+		$this->assertNull( $contract->get_customer_id(), 'The customer is cleared with the contract row.' );
+		$this->assertSame( self::EMAIL, ( (array) $contract->get_addresses() )['billing']['email'], 'The email that finds it is kept.' );
+
+		$this->erase_all();
+
+		$this->assert_erased( $contract_id );
+		$this->assertSame( 'deleted@site.invalid', ( (array) $this->get_contract( $contract_id )->get_addresses() )['billing']['email'] );
 	}
 
 	public function test_a_failure_after_the_history_delete_leaves_the_contract_findable_and_a_rerun_completes_it(): void {
@@ -621,6 +710,29 @@ final class EraserTest extends LiteIntegrationTestCase {
 			'Erased contracts leave the email read, so the second call erases the rest.'
 		);
 		$this->assertSame( [], $this->find_by_request_email() );
+	}
+
+	public function test_a_subscription_with_only_the_shipping_email_is_not_erased(): void {
+		$this->set_erasure( true );
+		$other_id    = $this->create_customer();
+		$contract_id = $this->seed_contract(
+			[
+				'customer_id' => $other_id,
+				'status'      => ContractStatus::CANCELLED,
+				'addresses'   => [
+					'billing'  => self::BILLING_ADDRESS,
+					'shipping' => array_merge( self::SHIPPING_ADDRESS, [ 'email' => self::EMAIL ] ),
+				],
+			]
+		);
+
+		$responses = $this->erase_all();
+
+		$this->assertSame( [], $responses[0]['messages'] );
+		$contract = $this->get_contract( $contract_id );
+		$this->assertSame( $other_id, $contract->get_customer_id() );
+		$this->assertSame( 'ada@example.com', ( (array) $contract->get_addresses() )['billing']['email'] );
+		$this->assertSame( self::EMAIL, ( (array) $contract->get_addresses() )['shipping']['email'] );
 	}
 
 	public function test_a_guest_subscription_is_retained_with_erasure_off(): void {

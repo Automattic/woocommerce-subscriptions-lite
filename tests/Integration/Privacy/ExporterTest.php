@@ -12,6 +12,7 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Privacy;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\HistoryEntryView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
+use Automattic\WooCommerce\SubscriptionsEngine\Integration\Storage\SchemaInstaller;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Cancellation;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\History;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Hold;
@@ -433,21 +434,33 @@ final class ExporterTest extends LiteIntegrationTestCase {
 		$this->assertSame( [ 'contract-' . $other ], array_column( $response['data'], 'item_id' ) );
 	}
 
-	public function test_the_address_email_matches_a_shipping_email_and_ignores_case(): void {
-		$shipping = $this->seed_contract(
+	public function test_a_contract_with_only_the_shipping_email_is_left_out(): void {
+		$this->seed_contract(
 			[
-				'customer_id' => null,
-				'addresses'   => [ 'shipping' => array_merge( self::SHIPPING_ADDRESS, [ 'email' => self::EMAIL ] ) ],
+				'customer_id' => $this->create_customer(),
+				'addresses'   => [
+					'billing'  => self::BILLING_ADDRESS,
+					'shipping' => array_merge( self::SHIPPING_ADDRESS, [ 'email' => self::EMAIL ] ),
+				],
 			]
 		);
-		$upper    = $this->seed_contract_with_email( null, strtoupper( self::EMAIL ) );
+		$billed = $this->seed_contract_with_email( null, self::EMAIL );
+
+		$response = $this->assert_export( $this->export() );
+
+		$this->assertSame( [ 'contract-' . $billed ], array_column( $response['data'], 'item_id' ), 'Only the billing email matches.' );
+	}
+
+	public function test_the_billing_email_matches_without_regard_to_case_accents_or_spaces(): void {
+		$upper    = $this->seed_contract_with_email( null, strtoupper( self::EMAIL ) . ' ' );
+		$accented = $this->seed_contract_with_email( null, 'gráce@example.com' );
 
 		$response = $this->assert_export( $this->export( 'nobody-' . self::EMAIL ) );
 		$this->assertSame( [], $response['data'], 'Another email matches nothing.' );
 
-		$response = $this->assert_export( $this->export() );
+		$response = $this->assert_export( $this->export( ' ' . self::EMAIL ) );
 
-		$this->assertSame( [ 'contract-' . $shipping, 'contract-' . $upper ], array_column( $response['data'], 'item_id' ) );
+		$this->assertSame( [ 'contract-' . $upper, 'contract-' . $accented ], array_column( $response['data'], 'item_id' ) );
 	}
 
 	public function test_another_extensions_contract_with_the_email_is_left_out(): void {
@@ -509,6 +522,19 @@ final class ExporterTest extends LiteIntegrationTestCase {
 	}
 
 	/**
+	 * Store a history entry's creation date.
+	 *
+	 * @param int    $entry_id History entry id.
+	 * @param string $gmt      GMT `Y-m-d H:i:s`.
+	 */
+	private function set_entry_date( int $entry_id, string $gmt ): void {
+		global $wpdb;
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+		$wpdb->update( SchemaInstaller::get_table_name( SchemaInstaller::TABLE_CONTRACT_HISTORY ), [ 'date_created_gmt' => $gmt ], [ 'id' => $entry_id ] );
+	}
+
+	/**
 	 * Add a history entry straight through the engine, as another Lite version might.
 	 *
 	 * @param int                  $contract_id Contract id.
@@ -528,6 +554,7 @@ final class ExporterTest extends LiteIntegrationTestCase {
 	}
 
 	public function test_history_entries_export_with_labels_dates_and_by_you_for_the_requesters_own_actions(): void {
+		$this->set_store_timezone( 'UTC' );
 		$contract_id = $this->create_contract( $this->customer_id );
 		wp_set_current_user( $this->customer_id );
 		( new Hold() )->hold( $contract_id );
@@ -535,6 +562,10 @@ final class ExporterTest extends LiteIntegrationTestCase {
 		( new Cancellation() )->cancel( $contract_id );
 		$this->add_raw_entry( $contract_id, 'some-future-type' );
 		$entries = Contracts::get_history( $contract_id );
+		$dates   = [ '2026-04-01 11:45:00', '2026-03-01 10:30:00', '2026-02-01 09:15:00', '2026-01-01 08:00:00' ];
+		foreach ( $entries as $index => $entry ) {
+			$this->set_entry_date( $entry->get_id(), $dates[ $index ] );
+		}
 
 		$response = $this->assert_export( $this->export() );
 
@@ -546,19 +577,19 @@ final class ExporterTest extends LiteIntegrationTestCase {
 		$this->assertSame(
 			[
 				[
-					'name'  => $this->entry_date( $entries[0] ),
+					'name'  => '2026-04-01 11:45',
 					'value' => 'some-future-type',
 				],
 				[
-					'name'  => $this->entry_date( $entries[1] ),
+					'name'  => '2026-03-01 10:30',
 					'value' => 'Cancelled',
 				],
 				[
-					'name'  => $this->entry_date( $entries[2] ),
+					'name'  => '2026-02-01 09:15',
 					'value' => 'Put on hold, by you',
 				],
 				[
-					'name'  => $this->entry_date( $entries[3] ),
+					'name'  => '2026-01-01 08:00',
 					'value' => 'Subscription created',
 				],
 			],
@@ -614,6 +645,52 @@ final class ExporterTest extends LiteIntegrationTestCase {
 		$item = $this->history_items_of( $this->assert_export( $this->export() ) )[ 'contract-' . $contract_id . '-history' ];
 
 		$this->assertSame( 'Cancelled', $item['data'][0]['value'] );
+	}
+
+	public function test_the_requesters_own_merchant_or_system_entry_is_not_by_you(): void {
+		$contract_id = $this->seed_contract( [ 'customer_id' => $this->customer_id ] );
+		foreach ( [ History::ROLE_MERCHANT, History::ROLE_SYSTEM ] as $role ) {
+			$this->add_raw_entry(
+				$contract_id,
+				History::TYPE_CANCELLED,
+				[
+					'actor' => [
+						'role'    => $role,
+						'user_id' => $this->customer_id,
+					],
+				]
+			);
+		}
+
+		$item = $this->history_items_of( $this->assert_export( $this->export() ) )[ 'contract-' . $contract_id . '-history' ];
+
+		$this->assertSame( [ 'Cancelled', 'Cancelled' ], array_column( $item['data'], 'value' ) );
+	}
+
+	public function test_no_entry_is_by_you_for_a_requester_without_an_account(): void {
+		$email       = 'orphan@example.com';
+		$deleted_id  = $this->create_customer( [ 'user_email' => $email ] );
+		$contract_id = $this->seed_contract_with_email( $deleted_id, $email );
+		$guest_id    = $this->seed_contract_with_email( null, $email );
+		foreach ( [ $contract_id, $guest_id ] as $id ) {
+			$this->add_raw_entry(
+				$id,
+				History::TYPE_CANCELLED,
+				[
+					'actor' => [
+						'role'    => History::ROLE_CUSTOMER,
+						'user_id' => $deleted_id,
+					],
+				]
+			);
+		}
+		require_once ABSPATH . 'wp-admin/includes/user.php';
+		wp_delete_user( $deleted_id );
+
+		$items = $this->history_items_of( $this->assert_export( $this->export( $email ) ) );
+
+		$this->assertSame( 'Cancelled', $items[ 'contract-' . $contract_id . '-history' ]['data'][0]['value'], 'A deleted account\'s action is not "by you".' );
+		$this->assertSame( 'Cancelled', $items[ 'contract-' . $guest_id . '-history' ]['data'][0]['value'], 'A guest requester has no actions of their own.' );
 	}
 
 	public function test_a_contract_without_history_has_no_history_item(): void {

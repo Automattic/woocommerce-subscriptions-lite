@@ -95,9 +95,8 @@ final class Exporter {
 		$page = max( 1, $page );
 
 		try {
-			$contracts    = RequesterContracts::get_for_email( $email_address );
-			$requester    = get_user_by( 'email', $email_address );
-			$requester_id = false === $requester ? 0 : $requester->ID;
+			$requester_id = RequesterContracts::get_account_id( $email_address );
+			$contracts    = RequesterContracts::get_for_email( $email_address, $requester_id );
 			$data         = [];
 			foreach ( array_slice( $contracts, ( $page - 1 ) * self::PAGE_SIZE, self::PAGE_SIZE ) as $listed ) {
 				$contract = Contracts::get( $listed->get_id() );
@@ -194,13 +193,11 @@ final class Exporter {
 	 * @return array{name: string, value: string}
 	 */
 	private function get_history_row( HistoryEntryView $entry, int $requester_id ): array {
-		$actor        = ( $entry->get_payload() ?? [] )['actor'] ?? null;
+		$actor        = ( $entry->get_payload() ?? [] )['actor'] ?? [];
 		$label        = StatusLabels::history_type_label( $entry->get_type() );
 		$by_requester = $requester_id > 0
-			&& is_array( $actor )
 			&& History::ROLE_CUSTOMER === ( $actor['role'] ?? null )
-			&& isset( $actor['user_id'] )
-			&& $requester_id === (int) $actor['user_id'];
+			&& (int) ( $actor['user_id'] ?? 0 ) === $requester_id;
 
 		return [
 			'name'  => self::format_date( $entry->get_date_created_gmt() ),
