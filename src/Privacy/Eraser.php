@@ -4,8 +4,9 @@
  *
  * Only when the merchant has turned on {@see ErasureSetting}; otherwise every subscription is
  * reported as retained. A running subscription is cancelled through {@see Cancellation} first,
- * then anonymised like an ended one: addresses anonymised in place, payment references cleared,
- * and the customer link cleared last. Each subscription is erased under its contract lock.
+ * then erased like an ended one: its history replaced by one `personal-data-removed` entry,
+ * addresses anonymised in place, payment references cleared, and the customer link cleared
+ * last. Each subscription is erased under its contract lock.
  *
  * WordPress calls an eraser with only the email and a page, and erased subscriptions drop out
  * of the lookup, so every call reads the set afresh and erases the next eligible ones. Any
@@ -25,6 +26,7 @@ use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Cancellation;
+use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\History;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\HeldLocks;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 use RuntimeException;
@@ -42,6 +44,11 @@ final class Eraser {
 	 * Operation label of the eraser's contract lock.
 	 */
 	public const OPERATION = 'privacy-erase';
+
+	/**
+	 * `source` of the `personal-data-removed` history entry the eraser writes.
+	 */
+	private const HISTORY_SOURCE = 'erasure-request';
 
 	/**
 	 * Contracts erased per call.
@@ -174,7 +181,7 @@ final class Eraser {
 	}
 
 	/**
-	 * Cancel a running contract, then anonymise it, under its lock. Exceptions are reported as
+	 * Cancel a running contract, then replace its history and anonymise it, under its lock. Exceptions are reported as
 	 * a failure for the contract, never thrown; each failure is logged with the step it hit.
 	 *
 	 * @param int $contract_id Contract id.
@@ -224,6 +231,8 @@ final class Eraser {
 				}
 			}
 
+			$step = 'history';
+			$this->replace_history( $contract, $lock );
 			$step = 'anonymise';
 			$this->anonymise( $contract, $lock );
 			$step = 'unlink';
@@ -252,6 +261,27 @@ final class Eraser {
 				HeldLocks::release( $lock );
 			}
 		}
+	}
+
+	/**
+	 * Delete every history entry, then record one `personal-data-removed` entry by the current
+	 * user. The deletion is logged with its count. A failed marker entry is logged by
+	 * {@see History} and does not stop the erasure; the contract stays findable until it is unlinked.
+	 *
+	 * @param ContractView $contract The contract as read under the lock.
+	 * @param ContractLock $lock     The held lock.
+	 */
+	private function replace_history( ContractView $contract, ContractLock $lock ): void {
+		$deleted = Contracts::delete_history( $contract->get_id(), [ 'extension_slug' => Package::EXTENSION_SLUG ], $lock );
+		wc_get_logger()->info(
+			sprintf( 'Privacy erasure: deleted %d history entries of contract %d.', $deleted, $contract->get_id() ),
+			[
+				'source'      => Package::EXTENSION_SLUG,
+				'contract_id' => $contract->get_id(),
+			]
+		);
+
+		History::add( $contract, History::TYPE_PERSONAL_DATA_REMOVED, [ 'payload' => [ 'source' => self::HISTORY_SOURCE ] ] );
 	}
 
 	/**
@@ -385,7 +415,7 @@ final class Eraser {
 	 * the step that failed and the reason only, no personal data.
 	 *
 	 * @param int    $contract_id Contract id.
-	 * @param string $step        The failing step: lock, read, cancel, anonymise or unlink.
+	 * @param string $step        The failing step: lock, read, cancel, history, anonymise or unlink.
 	 * @param string $reason      Reason: the lock holder, an error code or the exception class and code.
 	 */
 	private static function log_failure( int $contract_id, string $step, string $reason ): void {

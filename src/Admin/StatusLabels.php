@@ -92,6 +92,7 @@ final class StatusLabels {
 			History::TYPE_RENEWAL_PAID           => __( 'Renewal paid', 'woocommerce-subscriptions-lite' ),
 			History::TYPE_RENEWAL_FAILED         => __( 'Renewal failed', 'woocommerce-subscriptions-lite' ),
 			History::TYPE_NOTE                   => __( 'Note', 'woocommerce-subscriptions-lite' ),
+			History::TYPE_PERSONAL_DATA_REMOVED  => __( 'Personal data removed', 'woocommerce-subscriptions-lite' ),
 		];
 
 		return $labels[ $type ] ?? $type;

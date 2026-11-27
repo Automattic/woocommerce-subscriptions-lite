@@ -70,6 +70,12 @@ final class History {
 	public const TYPE_NOTE = 'note';
 
 	/**
+	 * Entry type: a privacy erasure removed the subscription's personal data and every earlier
+	 * entry; its payload carries the `source`.
+	 */
+	public const TYPE_PERSONAL_DATA_REMOVED = 'personal-data-removed';
+
+	/**
 	 * Actor role: the subscription's customer.
 	 */
 	public const ROLE_CUSTOMER = 'customer';
