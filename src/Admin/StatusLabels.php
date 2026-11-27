@@ -1,9 +1,9 @@
 <?php
 /**
- * StatusLabels - labels and badge markup for engine statuses and contract locks.
+ * StatusLabels - labels and badge markup for engine statuses, history entry types and contract locks.
  *
- * Shared by the admin screens and the customer actions, so statuses and lock conflicts read
- * the same wherever they appear. Pure functions of their inputs, beyond the i18n calls.
+ * Shared by the admin screens, the customer actions and the privacy export, so statuses, history
+ * entries and lock conflicts read the same wherever they appear. Pure functions of their inputs, beyond the i18n calls.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Admin
  */
@@ -16,6 +16,7 @@ use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\CycleStatus;
 use Automattic\WooCommerce\SubscriptionsLite\Checkout\ContractCreationHandler;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Cancellation;
+use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\History;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Hold;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Reactivation;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\RenewalProcessor;
@@ -74,6 +75,26 @@ final class StatusLabels {
 			default:
 				return self::humanize( $status );
 		}
+	}
+
+	/**
+	 * Label of a Lite history entry type; any other type shows its slug.
+	 *
+	 * @param string $type Entry type, one of {@see History}'s `TYPE_*` constants.
+	 */
+	public static function history_type_label( string $type ): string {
+		$labels = [
+			History::TYPE_CREATED                => __( 'Subscription created', 'woocommerce-subscriptions-lite' ),
+			History::TYPE_HELD                   => __( 'Put on hold', 'woocommerce-subscriptions-lite' ),
+			History::TYPE_REACTIVATED            => __( 'Reactivated', 'woocommerce-subscriptions-lite' ),
+			History::TYPE_CANCELLED              => __( 'Cancelled', 'woocommerce-subscriptions-lite' ),
+			History::TYPE_CANCELLATION_SCHEDULED => __( 'Set to end with the current period', 'woocommerce-subscriptions-lite' ),
+			History::TYPE_RENEWAL_PAID           => __( 'Renewal paid', 'woocommerce-subscriptions-lite' ),
+			History::TYPE_RENEWAL_FAILED         => __( 'Renewal failed', 'woocommerce-subscriptions-lite' ),
+			History::TYPE_NOTE                   => __( 'Note', 'woocommerce-subscriptions-lite' ),
+		];
+
+		return $labels[ $type ] ?? $type;
 	}
 
 	/**

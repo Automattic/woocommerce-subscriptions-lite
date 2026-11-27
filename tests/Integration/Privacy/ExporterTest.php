@@ -9,7 +9,12 @@ declare( strict_types=1 );
 
 namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Privacy;
 
+use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\View\HistoryEntryView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
+use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Cancellation;
+use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\History;
+use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Hold;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Privacy\Exporter;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
@@ -475,6 +480,172 @@ final class ExporterTest extends LiteIntegrationTestCase {
 		$this->assertInstanceOf( WP_Error::class, $response );
 		$this->assertSame( 'woocommerce_subscriptions_lite_privacy_read_failed', $response->get_error_code() );
 		$this->assertFalse( $this->has_logged( self::EMAIL ) );
+	}
+
+	/**
+	 * The history items of an export response, by item id.
+	 *
+	 * @param array{data: array<int, array<string, mixed>>, done: bool} $response Exporter response.
+	 * @return array<string, array<string, mixed>>
+	 */
+	private function history_items_of( array $response ): array {
+		$items = [];
+		foreach ( $response['data'] as $item ) {
+			if ( Exporter::HISTORY_GROUP_ID === $item['group_id'] ) {
+				$items[ $item['item_id'] ] = $item;
+			}
+		}
+
+		return $items;
+	}
+
+	/**
+	 * The export row name of an entry: its date in the store's formats.
+	 *
+	 * @param HistoryEntryView $entry History entry.
+	 */
+	private function entry_date( HistoryEntryView $entry ): string {
+		return (string) wp_date( 'Y-m-d H:i', (int) strtotime( $entry->get_date_created_gmt() . ' UTC' ) );
+	}
+
+	/**
+	 * Add a history entry straight through the engine, as another Lite version might.
+	 *
+	 * @param int                  $contract_id Contract id.
+	 * @param string               $type        Entry type.
+	 * @param array<string, mixed> $payload     Payload.
+	 */
+	private function add_raw_entry( int $contract_id, string $type, array $payload = [] ): void {
+		$entry = Contracts::add_history_entry(
+			$contract_id,
+			[
+				'extension_slug' => Package::EXTENSION_SLUG,
+				'type'           => $type,
+				'payload'        => $payload,
+			]
+		);
+		$this->assertNotNull( $entry );
+	}
+
+	public function test_history_entries_export_with_labels_dates_and_by_you_for_the_requesters_own_actions(): void {
+		$contract_id = $this->create_contract( $this->customer_id );
+		wp_set_current_user( $this->customer_id );
+		( new Hold() )->hold( $contract_id );
+		wp_set_current_user( self::factory()->user->create( [ 'role' => 'administrator' ] ) );
+		( new Cancellation() )->cancel( $contract_id );
+		$this->add_raw_entry( $contract_id, 'some-future-type' );
+		$entries = Contracts::get_history( $contract_id );
+
+		$response = $this->assert_export( $this->export() );
+
+		$this->assertSame( 'contract-' . $contract_id, $response['data'][0]['item_id'], 'The subscription item comes first.' );
+		$items = $this->history_items_of( $response );
+		$this->assertSame( [ 'contract-' . $contract_id . '-history' ], array_keys( $items ) );
+		$item = $items[ 'contract-' . $contract_id . '-history' ];
+		$this->assertSame( 'Subscription history', $item['group_label'] );
+		$this->assertSame(
+			[
+				[
+					'name'  => $this->entry_date( $entries[0] ),
+					'value' => 'some-future-type',
+				],
+				[
+					'name'  => $this->entry_date( $entries[1] ),
+					'value' => 'Cancelled',
+				],
+				[
+					'name'  => $this->entry_date( $entries[2] ),
+					'value' => 'Put on hold, by you',
+				],
+				[
+					'name'  => $this->entry_date( $entries[3] ),
+					'value' => 'Subscription created',
+				],
+			],
+			$item['data'],
+			'Newest first; an unknown type shows its slug; only the customer\'s own action is "by you".'
+		);
+	}
+
+	public function test_a_note_exports_its_label_and_date_without_its_text(): void {
+		$contract_id = $this->seed_contract( [ 'customer_id' => $this->customer_id ] );
+		$this->add_raw_entry(
+			$contract_id,
+			History::TYPE_NOTE,
+			[
+				'actor' => [
+					'role'    => History::ROLE_MERCHANT,
+					'user_id' => 1,
+				],
+				'text'  => 'Called <b>Grace</b> about her card.',
+			]
+		);
+		$entry = Contracts::get_history( $contract_id )[0];
+
+		$response = $this->assert_export( $this->export() );
+
+		$item = $this->history_items_of( $response )[ 'contract-' . $contract_id . '-history' ];
+		$this->assertSame(
+			[
+				[
+					'name'  => $this->entry_date( $entry ),
+					'value' => 'Note',
+				],
+			],
+			$item['data']
+		);
+		$this->assertStringNotContainsString( 'Called', (string) wp_json_encode( $response ) );
+	}
+
+	public function test_another_accounts_customer_action_is_not_by_you(): void {
+		$other_id    = $this->create_customer();
+		$contract_id = $this->seed_contract_with_email( $other_id, self::EMAIL );
+		$this->add_raw_entry(
+			$contract_id,
+			History::TYPE_CANCELLED,
+			[
+				'actor' => [
+					'role'    => History::ROLE_CUSTOMER,
+					'user_id' => $other_id,
+				],
+			]
+		);
+
+		$item = $this->history_items_of( $this->assert_export( $this->export() ) )[ 'contract-' . $contract_id . '-history' ];
+
+		$this->assertSame( 'Cancelled', $item['data'][0]['value'] );
+	}
+
+	public function test_a_contract_without_history_has_no_history_item(): void {
+		$this->seed_contract( [ 'customer_id' => $this->customer_id ] );
+
+		$response = $this->assert_export( $this->export() );
+
+		$this->assertCount( 1, $response['data'] );
+		$this->assertSame( [], $this->history_items_of( $response ) );
+	}
+
+	public function test_history_past_the_first_engine_read_is_exported(): void {
+		$contract_id = $this->seed_contract( [ 'customer_id' => $this->customer_id ] );
+		for ( $i = 0; $i < 101; $i++ ) {
+			$this->add_raw_entry( $contract_id, History::TYPE_RENEWAL_PAID );
+		}
+
+		$item = $this->history_items_of( $this->assert_export( $this->export() ) )[ 'contract-' . $contract_id . '-history' ];
+
+		$this->assertCount( 101, $item['data'] );
+	}
+
+	public function test_a_failed_history_read_returns_an_error(): void {
+		$contract_id = $this->seed_contract( [ 'customer_id' => $this->customer_id ] );
+		$this->add_raw_entry( $contract_id, History::TYPE_RENEWAL_PAID );
+		$this->capture_log();
+		$this->fail_next_query( '/FROM \S*wc_subscription_contract_history\b/' );
+
+		$response = $this->export();
+
+		$this->assertInstanceOf( WP_Error::class, $response );
+		$this->assertTrue( $this->has_logged( 'Privacy export: subscriptions could not be read' ) );
 	}
 
 	public function test_a_failed_read_returns_an_error_and_logs_no_personal_data(): void {

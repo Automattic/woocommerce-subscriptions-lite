@@ -15,6 +15,7 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\Admin;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\CycleStatus;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\StatusLabels;
+use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\History;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Renewal\RenewalProcessor;
 use Automattic\WooCommerce\SubscriptionsLite\Privacy\Eraser;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
@@ -37,6 +38,12 @@ final class StatusLabelsTest extends LiteIntegrationTestCase {
 	public function test_cycle_label_uses_merchant_wording(): void {
 		$this->assertSame( 'Billed', StatusLabels::cycle_label( CycleStatus::BILLED ) );
 		$this->assertSame( 'Failed', StatusLabels::cycle_label( CycleStatus::FAILED ) );
+	}
+
+	public function test_history_type_label_names_lite_types_and_shows_any_other_slug(): void {
+		$this->assertSame( 'Put on hold', StatusLabels::history_type_label( History::TYPE_HELD ) );
+		$this->assertSame( 'Note', StatusLabels::history_type_label( History::TYPE_NOTE ) );
+		$this->assertSame( 'some-future-type', StatusLabels::history_type_label( 'some-future-type' ) );
 	}
 
 	public function test_lock_operation_label_reads_a_scheduled_renewal_as_a_renewal(): void {
