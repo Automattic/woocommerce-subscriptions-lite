@@ -365,6 +365,118 @@ final class ExporterTest extends LiteIntegrationTestCase {
 		$this->assertTrue( $response['done'] );
 	}
 
+	/**
+	 * Seed a Lite contract whose billing address email is `$email`.
+	 *
+	 * @param int|null             $customer_id Customer id, or null for a guest contract.
+	 * @param string               $email       Billing address email.
+	 * @param array<string, mixed> $args        Contract fields overriding the defaults.
+	 * @return int Contract id.
+	 */
+	private function seed_contract_with_email( ?int $customer_id, string $email, array $args = [] ): int {
+		return $this->seed_contract(
+			array_merge(
+				[
+					'customer_id' => $customer_id,
+					'addresses'   => [ 'billing' => array_merge( self::BILLING_ADDRESS, [ 'email' => $email ] ) ],
+				],
+				$args
+			)
+		);
+	}
+
+	public function test_a_guest_contract_is_found_by_its_address_email(): void {
+		$guest = $this->seed_contract_with_email( null, self::EMAIL );
+
+		$response = $this->assert_export( $this->export() );
+
+		$this->assertSame( [ 'contract-' . $guest ], array_column( $response['data'], 'item_id' ) );
+		$this->assertSame( self::EMAIL, $this->rows_of( $response['data'][0] )['Email address'] );
+	}
+
+	public function test_a_contract_whose_account_was_deleted_is_found_by_its_address_email(): void {
+		$email       = 'orphan@example.com';
+		$customer_id = $this->create_customer( [ 'user_email' => $email ] );
+		$orphan      = $this->seed_contract_with_email( $customer_id, $email );
+		require_once ABSPATH . 'wp-admin/includes/user.php';
+		wp_delete_user( $customer_id );
+
+		$response = $this->assert_export( $this->export( $email ) );
+
+		$this->assertSame( [ 'contract-' . $orphan ], array_column( $response['data'], 'item_id' ) );
+	}
+
+	public function test_a_contract_found_by_both_reads_is_exported_once_in_id_order(): void {
+		$account_only = $this->seed_contract( [ 'customer_id' => $this->customer_id ] );
+		$both         = $this->seed_contract_with_email( $this->customer_id, self::EMAIL );
+		$guest        = $this->seed_contract_with_email( null, self::EMAIL );
+
+		$response = $this->assert_export( $this->export() );
+
+		$this->assertSame(
+			[ 'contract-' . $account_only, 'contract-' . $both, 'contract-' . $guest ],
+			array_column( $response['data'], 'item_id' )
+		);
+		$this->assertTrue( $response['done'] );
+	}
+
+	public function test_another_accounts_contract_with_the_email_is_exported(): void {
+		$other = $this->seed_contract_with_email( $this->create_customer(), self::EMAIL );
+
+		$response = $this->assert_export( $this->export() );
+
+		$this->assertSame( [ 'contract-' . $other ], array_column( $response['data'], 'item_id' ) );
+	}
+
+	public function test_the_address_email_matches_a_shipping_email_and_ignores_case(): void {
+		$shipping = $this->seed_contract(
+			[
+				'customer_id' => null,
+				'addresses'   => [ 'shipping' => array_merge( self::SHIPPING_ADDRESS, [ 'email' => self::EMAIL ] ) ],
+			]
+		);
+		$upper    = $this->seed_contract_with_email( null, strtoupper( self::EMAIL ) );
+
+		$response = $this->assert_export( $this->export( 'nobody-' . self::EMAIL ) );
+		$this->assertSame( [], $response['data'], 'Another email matches nothing.' );
+
+		$response = $this->assert_export( $this->export() );
+
+		$this->assertSame( [ 'contract-' . $shipping, 'contract-' . $upper ], array_column( $response['data'], 'item_id' ) );
+	}
+
+	public function test_another_extensions_contract_with_the_email_is_left_out(): void {
+		$this->seed_contract_with_email( null, self::EMAIL, [ 'extension_slug' => self::FOREIGN_EXTENSION_SLUG ] );
+
+		$response = $this->assert_export( $this->export() );
+
+		$this->assertSame( [], $response['data'] );
+	}
+
+	public function test_guest_contracts_past_the_first_engine_read_are_exported(): void {
+		$ids = [];
+		for ( $i = 0; $i < 51; $i++ ) {
+			$ids[] = $this->seed_contract_with_email( null, self::EMAIL );
+		}
+
+		$last = $this->assert_export( $this->export( self::EMAIL, 6 ) );
+
+		$this->assertSame( [ 'contract-' . end( $ids ) ], array_column( $last['data'], 'item_id' ), 'The 51st contract is on page six.' );
+		$this->assertTrue( $last['done'] );
+	}
+
+	public function test_a_failed_address_email_read_returns_an_error(): void {
+		$this->seed_contract_with_email( null, self::EMAIL );
+		$this->capture_log();
+		$this->fail_next_query( '/FROM \S*wc_subscription_contract_addresses\b.*email/s' );
+
+		$response = $this->export();
+
+		$this->assertInstanceOf( WP_Error::class, $response );
+		$this->assertSame( 'woocommerce_subscriptions_lite_privacy_read_failed', $response->get_error_code() );
+		$this->assertFalse( $this->has_logged( self::EMAIL ) );
+	}
+
 	public function test_a_failed_read_returns_an_error_and_logs_no_personal_data(): void {
 		$this->seed_contract( [ 'customer_id' => $this->customer_id ] );
 		$this->capture_log();

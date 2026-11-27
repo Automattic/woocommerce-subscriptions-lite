@@ -418,6 +418,131 @@ final class EraserTest extends LiteIntegrationTestCase {
 		);
 	}
 
+	/**
+	 * Seed a Lite contract whose billing address email is the request's.
+	 *
+	 * @param int|null             $customer_id Customer id, or null for a guest contract.
+	 * @param array<string, mixed> $args        Contract fields overriding the defaults.
+	 * @return int Contract id.
+	 */
+	private function seed_contract_with_request_email( ?int $customer_id, array $args = [] ): int {
+		return $this->seed_contract(
+			array_merge(
+				[
+					'customer_id' => $customer_id,
+					'addresses'   => [ 'billing' => array_merge( self::BILLING_ADDRESS, [ 'email' => self::EMAIL ] ) ],
+				],
+				$args
+			)
+		);
+	}
+
+	/**
+	 * The ids of the Lite contracts with an address email equal to the request's.
+	 *
+	 * @return array<int, int>
+	 */
+	private function find_by_request_email(): array {
+		return array_map(
+			static function ( ContractView $contract ): int {
+				return $contract->get_id();
+			},
+			Contracts::list_for_address_email( self::EMAIL, 50, 0, [ 'extension_slug' => Package::EXTENSION_SLUG ] )
+		);
+	}
+
+	public function test_a_guest_subscription_is_found_by_its_address_email_and_erased(): void {
+		$this->set_erasure( true );
+		$guest = $this->seed_contract_with_request_email( null );
+
+		$responses = $this->erase_all();
+
+		$this->assertSame( [ sprintf( 'Cancelled subscription #%d and removed its personal data.', $guest ) ], $responses[0]['messages'] );
+		$contract = $this->get_contract( $guest );
+		$this->assertSame( ContractStatus::CANCELLED, $contract->get_status() );
+		$this->assertSame( 'deleted@site.invalid', ( (array) $contract->get_addresses() )['billing']['email'] );
+		$this->assertSame( [], $this->find_by_request_email(), 'The erased contract is not found again.' );
+		$this->assertSame( [], $this->erase_all()[0]['messages'] );
+	}
+
+	public function test_a_subscription_whose_account_was_deleted_is_erased(): void {
+		$this->set_erasure( true );
+		$email       = 'orphan@example.com';
+		$customer_id = $this->create_customer( [ 'user_email' => $email ] );
+		$orphan      = $this->seed_contract(
+			[
+				'customer_id' => $customer_id,
+				'status'      => ContractStatus::CANCELLED,
+				'addresses'   => [ 'billing' => array_merge( self::BILLING_ADDRESS, [ 'email' => $email ] ) ],
+			]
+		);
+		require_once ABSPATH . 'wp-admin/includes/user.php';
+		wp_delete_user( $customer_id );
+		$erasers = apply_filters( 'wp_privacy_personal_data_erasers', [] );
+
+		$response = call_user_func( $erasers[ Package::EXTENSION_SLUG ]['callback'], $email, 1 );
+
+		$this->assertSame( [ sprintf( 'Removed personal data from subscription #%d.', $orphan ) ], $response['messages'] );
+		$contract = $this->get_contract( $orphan );
+		$this->assertNull( $contract->get_customer_id() );
+		$this->assertSame( 'deleted@site.invalid', ( (array) $contract->get_addresses() )['billing']['email'] );
+	}
+
+	public function test_a_subscription_found_by_both_reads_is_erased_once(): void {
+		$this->set_erasure( true );
+		$both  = $this->seed_contract_with_request_email( $this->customer_id, [ 'status' => ContractStatus::CANCELLED ] );
+		$other = $this->seed_contract_with_request_email( $this->create_customer(), [ 'status' => ContractStatus::CANCELLED ] );
+
+		$responses = $this->erase_all();
+
+		$this->assertCount( 1, $responses );
+		$this->assertSame(
+			[
+				sprintf( 'Removed personal data from subscription #%d.', $both ),
+				sprintf( 'Removed personal data from subscription #%d.', $other ),
+			],
+			$responses[0]['messages'],
+			'Each contract is erased once; another account\'s contract with the email is in scope.'
+		);
+		$this->assertNull( $this->get_contract( $both )->get_customer_id() );
+		$this->assertNull( $this->get_contract( $other )->get_customer_id() );
+		$this->assertSame( [], $this->find_by_request_email() );
+		$this->assertSame( [], Contracts::list_for_customer( $this->customer_id, 50, 0, [ 'extension_slug' => Package::EXTENSION_SLUG ] ) );
+	}
+
+	public function test_twelve_guest_subscriptions_are_erased_over_two_calls(): void {
+		$this->set_erasure( true );
+		$ids = [];
+		for ( $i = 0; $i < 12; $i++ ) {
+			$ids[] = $this->seed_contract_with_request_email( null, [ 'status' => ContractStatus::CANCELLED ] );
+		}
+
+		$first  = $this->erase( 1 );
+		$second = $this->erase( 2 );
+
+		$this->assertFalse( $first['done'] );
+		$this->assertCount( 10, $first['messages'] );
+		$this->assertTrue( $second['done'] );
+		$this->assertSame(
+			[
+				sprintf( 'Removed personal data from subscription #%d.', $ids[10] ),
+				sprintf( 'Removed personal data from subscription #%d.', $ids[11] ),
+			],
+			$second['messages'],
+			'Erased contracts leave the email read, so the second call erases the rest.'
+		);
+		$this->assertSame( [], $this->find_by_request_email() );
+	}
+
+	public function test_a_guest_subscription_is_retained_with_erasure_off(): void {
+		$guest = $this->seed_contract_with_request_email( null );
+
+		$response = $this->erase();
+
+		$this->assertSame( [ sprintf( 'Personal data within subscription #%d has been retained. %s', $guest, self::WARNING ) ], $response['messages'] );
+		$this->assertSame( self::EMAIL, ( (array) $this->get_contract( $guest )->get_addresses() )['billing']['email'] );
+	}
+
 	public function test_a_held_lock_retains_the_subscription_until_a_rerun(): void {
 		$this->set_erasure( true );
 		$contract_id = $this->create_contract( $this->customer_id, [ 'status' => 'cancelled' ] );
