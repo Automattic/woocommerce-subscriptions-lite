@@ -4,8 +4,10 @@
  *
  * Only when the merchant has turned on {@see ErasureSetting}; otherwise every subscription is
  * reported as retained. A running subscription is cancelled through {@see Cancellation} first,
- * then anonymised like an ended one: addresses anonymised in place, payment references cleared,
- * and the customer link cleared last. Each subscription is erased under its contract lock.
+ * then erased like an ended one: its history replaced by one `personal-data-removed` entry by
+ * the merchant, addresses anonymised in place, payment references cleared, and the customer
+ * link cleared. Each subscription is erased under its contract lock, and every write leaves it
+ * findable by the lookup until its personal data is gone, so a rerun completes a failed one.
  *
  * WordPress calls an eraser with only the email and a page, and erased subscriptions drop out
  * of the lookup, so every call reads the set afresh and erases the next eligible ones. Any
@@ -25,6 +27,7 @@ use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
 use Automattic\WooCommerce\SubscriptionsEngine\Core\Entity\ContractStatus;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\Cancellation;
+use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\History;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\HeldLocks;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 use RuntimeException;
@@ -42,6 +45,11 @@ final class Eraser {
 	 * Operation label of the eraser's contract lock.
 	 */
 	public const OPERATION = 'privacy-erase';
+
+	/**
+	 * `source` of the `personal-data-removed` history entry the eraser writes.
+	 */
+	private const HISTORY_SOURCE = 'erasure-request';
 
 	/**
 	 * Contracts erased per call.
@@ -109,7 +117,8 @@ final class Eraser {
 	 */
 	public function erase( string $email_address, int $page = 1 ) {
 		try {
-			$contracts = RequesterContracts::get_for_email( $email_address );
+			$account_id = RequesterContracts::get_account_id( $email_address );
+			$contracts  = RequesterContracts::get_for_email( $email_address, $account_id );
 		} catch ( Throwable $e ) {
 			wc_get_logger()->error(
 				sprintf( 'Privacy erasure: subscriptions could not be read (%s).', get_class( $e ) ),
@@ -142,7 +151,7 @@ final class Eraser {
 
 		$failed = false;
 		foreach ( array_slice( $eligible, 0, self::BATCH_SIZE ) as $contract_id ) {
-			$outcome = $this->erase_contract( $contract_id );
+			$outcome = $this->erase_contract( $contract_id, $account_id );
 			if ( null === $outcome ) {
 				continue;
 			}
@@ -174,14 +183,16 @@ final class Eraser {
 	}
 
 	/**
-	 * Cancel a running contract, then anonymise it, under its lock. Exceptions are reported as
-	 * a failure for the contract, never thrown; each failure is logged with the step it hit.
+	 * Cancel a running contract, then replace its history and anonymise it, under its lock.
+	 * Exceptions are reported as a failure for the contract, never thrown; each failure is
+	 * logged with the step it hit.
 	 *
 	 * @param int $contract_id Contract id.
+	 * @param int $account_id  The requester's account id, or 0 without one.
 	 * @return array{message: string, removed: bool, failed: bool}|null The outcome; null when the
 	 *                                                                  contract is gone or not Lite's.
 	 */
-	private function erase_contract( int $contract_id ): ?array {
+	private function erase_contract( int $contract_id, int $account_id ): ?array {
 		$lock = null;
 		$step = 'lock';
 		try {
@@ -224,10 +235,17 @@ final class Eraser {
 				}
 			}
 
-			$step = 'anonymise';
-			$this->anonymise( $contract, $lock );
-			$step = 'unlink';
-			$this->unlink( $contract, $lock );
+			$step = 'history';
+			$this->replace_history( $contract, $lock );
+			// Only the requester's own contracts stay findable through the account read once their
+			// emails are anonymised; any other contract is unlinked in the anonymising write.
+			$owned_by_requester = $account_id > 0 && $contract->get_customer_id() === $account_id;
+			$step               = 'anonymise';
+			$this->anonymise( $contract, $lock, ! $owned_by_requester );
+			if ( $owned_by_requester ) {
+				$step = 'unlink';
+				$this->unlink( $contract, $lock );
+			}
 
 			return [
 				'message' => $was_running
@@ -255,42 +273,65 @@ final class Eraser {
 	}
 
 	/**
-	 * Anonymise the addresses and clear the payment references. The customer link stays until
-	 * {@see self::unlink()}, so the account lookup still finds the contract if a later step fails.
+	 * Delete every history entry, then record one `personal-data-removed` entry as the merchant,
+	 * with the current user's id. The deletion is logged with its count. A failed removal entry
+	 * is logged by {@see History} and does not stop the erasure.
+	 *
+	 * @param ContractView $contract The contract as read under the lock.
+	 * @param ContractLock $lock     The held lock.
+	 */
+	private function replace_history( ContractView $contract, ContractLock $lock ): void {
+		$deleted = Contracts::delete_history( $contract->get_id(), [ 'extension_slug' => Package::EXTENSION_SLUG ], $lock );
+		wc_get_logger()->info(
+			sprintf( 'Privacy erasure: deleted %d history entries of contract %d.', $deleted, $contract->get_id() ),
+			[
+				'source'      => Package::EXTENSION_SLUG,
+				'contract_id' => $contract->get_id(),
+			]
+		);
+
+		History::add_as_merchant( $contract->get_id(), History::TYPE_PERSONAL_DATA_REMOVED, [ 'payload' => [ 'source' => self::HISTORY_SOURCE ] ] );
+	}
+
+	/**
+	 * Anonymise the addresses and clear the payment references. With `$unlink`, the same write
+	 * clears the customer link: for a contract found by its billing email, which the lookup loses
+	 * with that email. Otherwise the link stays until {@see self::unlink()}, so the account read
+	 * still finds the contract if a later step fails. The engine writes the contract row first,
+	 * then each address in the order given, with billing last: a failed address write keeps the
+	 * billing email that finds the contract, so a rerun completes it.
 	 *
 	 * @param ContractView $contract The contract as read under the lock, with its addresses.
 	 * @param ContractLock $lock     The held lock.
+	 * @param bool         $unlink   Whether to clear the customer link in this write.
 	 * @throws RuntimeException If the write finds the contract missing.
 	 */
-	private function anonymise( ContractView $contract, ContractLock $lock ): void {
-		$anonymised = Contracts::update(
-			$contract->get_id(),
-			[
-				'extension_slug'       => Package::EXTENSION_SLUG,
-				'addresses'            => self::anonymise_addresses( $contract->get_addresses() ?? [] ),
-				'payment_token_id'     => null,
-				'payment_method_title' => null,
-			],
-			$lock
-		);
+	private function anonymise( ContractView $contract, ContractLock $lock, bool $unlink ): void {
+		$fields = [
+			'extension_slug'       => Package::EXTENSION_SLUG,
+			'addresses'            => self::anonymise_addresses( $contract->get_addresses() ?? [] ),
+			'payment_token_id'     => null,
+			'payment_method_title' => null,
+		];
+		if ( $unlink && null !== $contract->get_customer_id() ) {
+			$fields['customer_id'] = null;
+		}
+
+		$anonymised = Contracts::update( $contract->get_id(), $fields, $lock );
 		if ( null === $anonymised ) {
 			throw new RuntimeException( 'The contract was not found for the anonymising write.' );
 		}
 	}
 
 	/**
-	 * Clear the customer link: the final write, after which the account lookup no longer finds
-	 * the contract.
+	 * Clear the link to the requester's account: the final write, after which the account read
+	 * no longer finds the contract.
 	 *
-	 * @param ContractView $contract The contract as read under the lock.
+	 * @param ContractView $contract The contract as read under the lock, linked to the requester.
 	 * @param ContractLock $lock     The held lock.
 	 * @throws RuntimeException If the write finds the contract missing.
 	 */
 	private function unlink( ContractView $contract, ContractLock $lock ): void {
-		if ( null === $contract->get_customer_id() ) {
-			return;
-		}
-
 		$unlinked = Contracts::update(
 			$contract->get_id(),
 			[
@@ -305,22 +346,30 @@ final class Eraser {
 	}
 
 	/**
-	 * Every address with each non-empty field anonymised; empty fields stay as they are.
+	 * Every address with each non-empty field anonymised; empty fields stay as they are. The
+	 * billing address comes last, so the engine anonymises the lookup's email after the rest.
 	 *
 	 * @param array<string, array<string, mixed>> $addresses Addresses by type.
 	 * @return array<string, array<string, mixed>>
 	 */
 	private static function anonymise_addresses( array $addresses ): array {
+		$anonymised = [];
 		foreach ( $addresses as $type => $address ) {
 			foreach ( $address as $field => $value ) {
-				if ( null === $value || '' === $value ) {
-					continue;
+				if ( null !== $value && '' !== $value ) {
+					$address[ $field ] = wp_privacy_anonymize_data( self::ADDRESS_DATA_TYPES[ $field ] ?? 'text', (string) $value );
 				}
-				$addresses[ $type ][ $field ] = wp_privacy_anonymize_data( self::ADDRESS_DATA_TYPES[ $field ] ?? 'text', (string) $value );
 			}
+			$anonymised[ $type ] = $address;
 		}
 
-		return $addresses;
+		if ( isset( $anonymised['billing'] ) ) {
+			$billing = $anonymised['billing'];
+			unset( $anonymised['billing'] );
+			$anonymised['billing'] = $billing;
+		}
+
+		return $anonymised;
 	}
 
 	/**
@@ -385,7 +434,7 @@ final class Eraser {
 	 * the step that failed and the reason only, no personal data.
 	 *
 	 * @param int    $contract_id Contract id.
-	 * @param string $step        The failing step: lock, read, cancel, anonymise or unlink.
+	 * @param string $step        The failing step: lock, read, cancel, history, anonymise or unlink.
 	 * @param string $reason      Reason: the lock holder, an error code or the exception class and code.
 	 */
 	private static function log_failure( int $contract_id, string $step, string $reason ): void {

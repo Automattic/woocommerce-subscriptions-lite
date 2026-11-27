@@ -2,9 +2,13 @@
 /**
  * RequesterContracts - the Lite contracts of the person a privacy request is for.
  *
- * Found through the WordPress account with the request's email: every Lite contract of that
- * customer, in every status. A customer has few contracts, so the whole set is read on every
- * call, which lets the exporter and the eraser page without keeping state.
+ * Two reads, unioned by contract id: every Lite contract of the WordPress account with the
+ * request's email, and every Lite contract whose billing email is that email, as WooCommerce
+ * Subscriptions matches. The second finds guest contracts, contracts whose account was deleted
+ * and contracts of another account billed to this email. Every status. A customer has few
+ * contracts, so the whole set is read on every call, which lets the exporter and the eraser
+ * page without keeping state; an erased contract has no customer and an anonymised email, so
+ * neither read finds it.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Privacy
  */
@@ -30,23 +34,48 @@ final class RequesterContracts {
 	private const READ_SIZE = 50;
 
 	/**
-	 * The Lite contracts of the account with `$email`, oldest first; empty when no account
-	 * has that email. The views carry no items or addresses.
+	 * The id of the WordPress account with the request's email, or 0 when there is none.
 	 *
 	 * @param string $email The request's email address.
+	 */
+	public static function get_account_id( string $email ): int {
+		$user = get_user_by( 'email', $email );
+
+		return false === $user ? 0 : $user->ID;
+	}
+
+	/**
+	 * The Lite contracts of the requester's account and those billed to `$email`, each once,
+	 * oldest first. Only the views found by the billing email carry items and addresses.
+	 *
+	 * @param string $email      The request's email address.
+	 * @param int    $account_id The requester's account id from {@see self::get_account_id()}, or 0.
 	 * @return array<int, ContractView>
 	 * @throws \RuntimeException If an engine read fails.
 	 */
-	public static function get_for_email( string $email ): array {
-		$user = get_user_by( 'email', $email );
-		if ( false === $user ) {
+	public static function get_for_email( string $email, int $account_id ): array {
+		$contracts = self::get_account_contracts( $account_id ) + self::get_billing_email_contracts( $email );
+
+		ksort( $contracts );
+
+		return array_values( $contracts );
+	}
+
+	/**
+	 * The Lite contracts of the account, by id; empty without an account.
+	 *
+	 * @param int $account_id Account id, or 0.
+	 * @return array<int, ContractView>
+	 */
+	private static function get_account_contracts( int $account_id ): array {
+		if ( $account_id <= 0 ) {
 			return [];
 		}
 
 		$contracts = [];
 		$offset    = 0;
 		do {
-			$page = Contracts::list_for_customer( $user->ID, self::READ_SIZE, $offset, [ 'extension_slug' => Package::EXTENSION_SLUG ] );
+			$page = Contracts::list_for_customer( $account_id, self::READ_SIZE, $offset, [ 'extension_slug' => Package::EXTENSION_SLUG ] );
 			foreach ( $page as $contract ) {
 				$contracts[ $contract->get_id() ] = $contract;
 			}
@@ -54,8 +83,55 @@ final class RequesterContracts {
 			$full_page = count( $page ) === self::READ_SIZE;
 		} while ( $full_page );
 
-		ksort( $contracts );
+		return $contracts;
+	}
 
-		return array_values( $contracts );
+	/**
+	 * The Lite contracts whose billing email is `$email`, by id, as read with their items and
+	 * addresses. The engine read matches a billing or shipping email; each candidate is re-read
+	 * to keep billing matches only. The engine pages over its own matches, so the filter never
+	 * skips one.
+	 *
+	 * @param string $email The request's email address.
+	 * @return array<int, ContractView>
+	 */
+	private static function get_billing_email_contracts( string $email ): array {
+		$contracts = [];
+		$offset    = 0;
+		do {
+			$page = Contracts::list_for_address_email( $email, self::READ_SIZE, $offset, [ 'extension_slug' => Package::EXTENSION_SLUG ] );
+			foreach ( $page as $candidate ) {
+				$contract = Contracts::get( $candidate->get_id() );
+				if ( null === $contract ) {
+					continue;
+				}
+
+				// The database matched one of the two emails; the approximation only rules shipping
+				// in, so a match the collation makes and PHP misses (`ß` and `ss`) is still kept.
+				$addresses = $contract->get_addresses() ?? [];
+				$billing   = self::is_same_email( (string) ( $addresses['billing']['email'] ?? '' ), $email );
+				$shipping  = self::is_same_email( (string) ( $addresses['shipping']['email'] ?? '' ), $email );
+				if ( $billing || ! $shipping ) {
+					$contracts[ $candidate->get_id() ] = $contract;
+				}
+			}
+			$offset   += self::READ_SIZE;
+			$full_page = count( $page ) === self::READ_SIZE;
+		} while ( $full_page );
+
+		return $contracts;
+	}
+
+	/**
+	 * Whether two emails look equal to the engine read: trimmed, and without regard to case or
+	 * accents, close to the default database collation but not identical to it.
+	 *
+	 * @param string $stored    The stored email.
+	 * @param string $requested The request's email.
+	 */
+	private static function is_same_email( string $stored, string $requested ): bool {
+		$stored = trim( $stored );
+
+		return '' !== $stored && strtolower( remove_accents( $stored ) ) === strtolower( remove_accents( trim( $requested ) ) );
 	}
 }

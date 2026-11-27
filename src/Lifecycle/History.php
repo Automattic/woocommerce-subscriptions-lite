@@ -4,7 +4,8 @@
  *
  * Every entry carries Lite's `actor` (a role and a user id) in its payload: a store manager
  * acting in wp-admin is the merchant, even on their own subscription; elsewhere the
- * subscription's customer is the customer; a background run is the system. The write uses the
+ * subscription's customer is the customer; a background run is the system; an admin tool may
+ * record its entries as the merchant outright ({@see self::add_as_merchant()}). The write uses the
  * lock this request holds on the contract ({@see HeldLocks}), so a flow that lost its lock
  * records nothing; a note, written outside any flow, holds no lock. An entry describes a
  * contract write that has already happened, so a failed history write is logged and never
@@ -68,6 +69,12 @@ final class History {
 	 * Entry type: a store manager added a note; its payload carries the `text`.
 	 */
 	public const TYPE_NOTE = 'note';
+
+	/**
+	 * Entry type: a privacy erasure removed the subscription's personal data and every earlier
+	 * entry; its payload carries the `source`.
+	 */
+	public const TYPE_PERSONAL_DATA_REMOVED = 'personal-data-removed';
 
 	/**
 	 * Actor role: the subscription's customer.
@@ -136,7 +143,7 @@ final class History {
 	 * @return bool Whether the entry was recorded; false after a logged failure or a taken creation key.
 	 */
 	public static function add( ContractView $contract, string $type, array $fields = [] ): bool {
-		return self::write( $contract->get_id(), $type, $fields, $contract );
+		return self::write( $contract->get_id(), $type, $fields, $contract, null );
 	}
 
 	/**
@@ -147,7 +154,30 @@ final class History {
 	 * @param array<string, mixed> $fields      Optional `cycle_id`, `payload` (beyond the actor) and `creation_key`.
 	 */
 	public static function add_system( int $contract_id, string $type, array $fields = [] ): void {
-		self::write( $contract_id, $type, $fields, null );
+		self::write( $contract_id, $type, $fields, null, null );
+	}
+
+	/**
+	 * Record an entry done by the current user as a store manager, whatever the request: for an
+	 * admin tool such as the privacy eraser, which never acts as the customer. The user id is
+	 * the current user's, or null without one.
+	 *
+	 * @param int                  $contract_id Contract id.
+	 * @param string               $type        Entry type, one of the `TYPE_*` constants.
+	 * @param array<string, mixed> $fields      Optional `cycle_id`, `payload` (beyond the actor) and `creation_key`.
+	 */
+	public static function add_as_merchant( int $contract_id, string $type, array $fields = [] ): void {
+		$user_id = get_current_user_id();
+		self::write(
+			$contract_id,
+			$type,
+			$fields,
+			null,
+			[
+				'role'    => self::ROLE_MERCHANT,
+				'user_id' => $user_id > 0 ? $user_id : null,
+			]
+		);
 	}
 
 	/**
@@ -193,18 +223,19 @@ final class History {
 	 * the actor lookup included, is logged with the contract id, the entry type and the message,
 	 * and not thrown.
 	 *
-	 * @param int                  $contract_id Contract id.
-	 * @param string               $type        Entry type.
-	 * @param array<string, mixed> $fields      Optional `cycle_id`, `payload` and `creation_key`.
-	 * @param ContractView|null    $contract    The contract the current user acted on, or null for Lite itself.
+	 * @param int                       $contract_id Contract id.
+	 * @param string                    $type        Entry type.
+	 * @param array<string, mixed>      $fields      Optional `cycle_id`, `payload` and `creation_key`.
+	 * @param ContractView|null         $contract    The contract the current user acted on, or null for Lite itself.
+	 * @param array<string, mixed>|null $actor       The actor the caller states, or null to derive it from `$contract`.
 	 * @return bool Whether the entry was recorded.
 	 */
-	private static function write( int $contract_id, string $type, array $fields, ?ContractView $contract ): bool {
+	private static function write( int $contract_id, string $type, array $fields, ?ContractView $contract, ?array $actor ): bool {
 		try {
 			$args = [
 				'extension_slug' => Package::EXTENSION_SLUG,
 				'type'           => $type,
-				'payload'        => [ 'actor' => self::get_actor( $contract ) ] + (array) ( $fields['payload'] ?? [] ),
+				'payload'        => [ 'actor' => $actor ?? self::get_actor( $contract ) ] + (array) ( $fields['payload'] ?? [] ),
 			];
 			if ( isset( $fields['cycle_id'] ) ) {
 				$args['cycle_id'] = $fields['cycle_id'];

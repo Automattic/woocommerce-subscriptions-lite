@@ -7,8 +7,9 @@
  * title. That covers what WooCommerce Subscriptions exports for a subscription, except the
  * created date, IP address and browser user agent, which a contract does not store. Like that
  * export, it leaves out the last payment, last attempt and trial end dates and the discount,
- * shipping and tax totals. Ten contracts per page; the set does not change during an export,
- * so a page is a slice of it.
+ * shipping and tax totals. A "Subscription history" group adds an item per contract with history
+ * entries: one row per entry, its date and Lite's label, without a note's text. Ten contracts per
+ * page; the set does not change during an export, so a page is a slice of it.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Privacy
  */
@@ -19,8 +20,10 @@ namespace Automattic\WooCommerce\SubscriptionsLite\Privacy;
 
 use Automattic\WooCommerce\SubscriptionsEngine\Api\Contracts;
 use Automattic\WooCommerce\SubscriptionsEngine\Api\View\ContractView;
+use Automattic\WooCommerce\SubscriptionsEngine\Api\View\HistoryEntryView;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\StatusLabels;
 use Automattic\WooCommerce\SubscriptionsLite\Contracts\AddressFields;
+use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\History;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Throwable;
 use WP_Error;
@@ -39,9 +42,19 @@ final class Exporter {
 	public const GROUP_ID = 'woocommerce-subscriptions-lite';
 
 	/**
+	 * Export group id of the contracts' history entries.
+	 */
+	public const HISTORY_GROUP_ID = 'woocommerce-subscriptions-lite-history';
+
+	/**
 	 * Contracts exported per page.
 	 */
 	private const PAGE_SIZE = 10;
+
+	/**
+	 * History entries read per engine call.
+	 */
+	private const HISTORY_READ_SIZE = 100;
 
 	/**
 	 * Register WordPress hooks. Priority 10, after WooCommerce's exporters (5), so its groups
@@ -82,12 +95,20 @@ final class Exporter {
 		$page = max( 1, $page );
 
 		try {
-			$contracts = RequesterContracts::get_for_email( $email_address );
-			$data      = [];
+			$requester_id = RequesterContracts::get_account_id( $email_address );
+			$contracts    = RequesterContracts::get_for_email( $email_address, $requester_id );
+			$data         = [];
 			foreach ( array_slice( $contracts, ( $page - 1 ) * self::PAGE_SIZE, self::PAGE_SIZE ) as $listed ) {
-				$contract = Contracts::get( $listed->get_id() );
-				if ( null !== $contract ) {
-					$data[] = $this->get_item( $contract );
+				// A view found by its billing email was read in full already.
+				$contract = null === $listed->get_addresses() ? Contracts::get( $listed->get_id() ) : $listed;
+				if ( null === $contract ) {
+					continue;
+				}
+
+				$data[]  = $this->get_item( $contract );
+				$history = $this->get_history_item( $contract->get_id(), $requester_id );
+				if ( null !== $history ) {
+					$data[] = $history;
 				}
 			}
 		} catch ( Throwable $e ) {
@@ -121,6 +142,68 @@ final class Exporter {
 			'group_description' => __( 'User&#8217;s subscription data.', 'woocommerce-subscriptions-lite' ),
 			'item_id'           => 'contract-' . $contract->get_id(),
 			'data'              => $this->get_rows( $contract ),
+		];
+	}
+
+	/**
+	 * The history export item of one contract, newest entry first; null when it has none.
+	 *
+	 * @param int $contract_id  Contract id.
+	 * @param int $requester_id The requester's user id, or 0 when no account has the email.
+	 * @return array<string, mixed>|null
+	 */
+	private function get_history_item( int $contract_id, int $requester_id ): ?array {
+		$rows   = [];
+		$offset = 0;
+		do {
+			$entries = Contracts::get_history(
+				$contract_id,
+				[
+					'limit'  => self::HISTORY_READ_SIZE,
+					'offset' => $offset,
+				]
+			);
+			foreach ( $entries as $entry ) {
+				$rows[] = $this->get_history_row( $entry, $requester_id );
+			}
+			$offset   += self::HISTORY_READ_SIZE;
+			$full_page = count( $entries ) === self::HISTORY_READ_SIZE;
+		} while ( $full_page );
+
+		if ( [] === $rows ) {
+			return null;
+		}
+
+		return [
+			'group_id'          => self::HISTORY_GROUP_ID,
+			'group_label'       => __( 'Subscription history', 'woocommerce-subscriptions-lite' ),
+			'group_description' => __( 'What happened to the user&#8217;s subscriptions.', 'woocommerce-subscriptions-lite' ),
+			'item_id'           => 'contract-' . $contract_id . '-history',
+			'data'              => $rows,
+		];
+	}
+
+	/**
+	 * The export row of one history entry: when, and Lite's label for what happened, with
+	 * "by you" when the requester did it as the subscription's customer. The only place that
+	 * decides what an entry exports: no payload content is exported, so a note shows its label
+	 * and date but never its text.
+	 *
+	 * @param HistoryEntryView $entry        History entry.
+	 * @param int              $requester_id The requester's user id, or 0 when no account has the email.
+	 * @return array{name: string, value: string}
+	 */
+	private function get_history_row( HistoryEntryView $entry, int $requester_id ): array {
+		$actor        = ( $entry->get_payload() ?? [] )['actor'] ?? [];
+		$label        = StatusLabels::history_type_label( $entry->get_type() );
+		$by_requester = $requester_id > 0
+			&& History::ROLE_CUSTOMER === ( $actor['role'] ?? null )
+			&& (int) ( $actor['user_id'] ?? 0 ) === $requester_id;
+
+		return [
+			'name'  => self::format_date( $entry->get_date_created_gmt() ),
+			/* translators: %s: what happened to the subscription, e.g. "Cancelled". */
+			'value' => $by_requester ? sprintf( __( '%s, by you', 'woocommerce-subscriptions-lite' ), $label ) : $label,
 		];
 	}
 

@@ -24,6 +24,7 @@ use Automattic\WooCommerce\SubscriptionsLite\Admin\DetailRenderer;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\NoteController;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\PageController;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\RowActionResult;
+use Automattic\WooCommerce\SubscriptionsLite\Admin\StatusLabels;
 use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\History as LifecycleHistory;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Utilities\Formatter;
@@ -178,7 +179,7 @@ final class History {
 		<tr>
 			<td><?php echo esc_html( self::get_date_label( $entry->get_date_created_gmt() ) ); ?></td>
 			<td>
-				<?php echo esc_html( $is_lite ? self::get_type_label( $entry->get_type() ) : $entry->get_type() ); ?>
+				<?php echo esc_html( $is_lite ? StatusLabels::history_type_label( $entry->get_type() ) : $entry->get_type() ); ?>
 				<?php if ( null !== $note ) : ?>
 					<p class="wc-subs-lite-contract-history-note"><?php echo nl2br( esc_html( $note ) ); ?></p>
 				<?php endif; ?>
@@ -200,26 +201,6 @@ final class History {
 		}
 
 		return (string) wp_date( wc_date_format() . ' ' . wc_time_format(), $timestamp );
-	}
-
-	/**
-	 * The label of an entry type: Lite's types are translated, any other type shows its slug.
-	 *
-	 * @param string $type Entry type.
-	 */
-	private static function get_type_label( string $type ): string {
-		$labels = [
-			LifecycleHistory::TYPE_CREATED                => __( 'Subscription created', 'woocommerce-subscriptions-lite' ),
-			LifecycleHistory::TYPE_HELD                   => __( 'Put on hold', 'woocommerce-subscriptions-lite' ),
-			LifecycleHistory::TYPE_REACTIVATED            => __( 'Reactivated', 'woocommerce-subscriptions-lite' ),
-			LifecycleHistory::TYPE_CANCELLED              => __( 'Cancelled', 'woocommerce-subscriptions-lite' ),
-			LifecycleHistory::TYPE_CANCELLATION_SCHEDULED => __( 'Set to end with the current period', 'woocommerce-subscriptions-lite' ),
-			LifecycleHistory::TYPE_RENEWAL_PAID           => __( 'Renewal paid', 'woocommerce-subscriptions-lite' ),
-			LifecycleHistory::TYPE_RENEWAL_FAILED         => __( 'Renewal failed', 'woocommerce-subscriptions-lite' ),
-			LifecycleHistory::TYPE_NOTE                   => __( 'Note', 'woocommerce-subscriptions-lite' ),
-		];
-
-		return $labels[ $type ] ?? $type;
 	}
 
 	/**
