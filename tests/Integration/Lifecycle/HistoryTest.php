@@ -58,7 +58,7 @@ final class HistoryTest extends LiteIntegrationTestCase {
 		);
 	}
 
-	public function test_a_store_manager_acting_on_their_own_subscription_is_its_customer(): void {
+	public function test_a_store_manager_acting_on_their_own_subscription_outside_wp_admin_is_its_customer(): void {
 		$manager_id  = self::factory()->user->create( [ 'role' => 'administrator' ] );
 		$contract_id = $this->seed_contract( [ 'customer_id' => $manager_id ] );
 		wp_set_current_user( $manager_id );
@@ -66,6 +66,81 @@ final class HistoryTest extends LiteIntegrationTestCase {
 		History::add( $this->get_contract( $contract_id ), History::TYPE_HELD );
 
 		$this->assertSame( History::ROLE_CUSTOMER, $this->get_history( $contract_id )[0]->get_payload()['actor']['role'] );
+	}
+
+	public function test_a_store_manager_acting_on_their_own_subscription_in_wp_admin_is_the_merchant(): void {
+		$manager_id  = self::factory()->user->create( [ 'role' => 'shop_manager' ] );
+		$contract_id = $this->seed_contract( [ 'customer_id' => $manager_id ] );
+		wp_set_current_user( $manager_id );
+		set_current_screen( 'subscriptions_page_wc-subscriptions-lite' );
+
+		History::add( $this->get_contract( $contract_id ), History::TYPE_HELD );
+
+		$this->assertSame(
+			[
+				'role'    => History::ROLE_MERCHANT,
+				'user_id' => $manager_id,
+			],
+			$this->get_history( $contract_id )[0]->get_payload()['actor']
+		);
+	}
+
+	public function test_a_store_manager_acting_on_their_own_subscription_through_admin_ajax_is_its_customer(): void {
+		$manager_id  = self::factory()->user->create( [ 'role' => 'administrator' ] );
+		$contract_id = $this->seed_contract( [ 'customer_id' => $manager_id ] );
+		wp_set_current_user( $manager_id );
+		set_current_screen( 'subscriptions_page_wc-subscriptions-lite' );
+		add_filter( 'wp_doing_ajax', '__return_true' );
+
+		History::add( $this->get_contract( $contract_id ), History::TYPE_HELD );
+
+		$this->assertSame( History::ROLE_CUSTOMER, $this->get_history( $contract_id )[0]->get_payload()['actor']['role'] );
+	}
+
+	public function test_a_customer_who_cannot_manage_the_store_stays_the_customer_in_wp_admin(): void {
+		$customer_id = $this->create_customer();
+		$contract_id = $this->seed_contract( [ 'customer_id' => $customer_id ] );
+		wp_set_current_user( $customer_id );
+		set_current_screen( 'profile' );
+
+		History::add( $this->get_contract( $contract_id ), History::TYPE_HELD );
+
+		$this->assertSame( History::ROLE_CUSTOMER, $this->get_history( $contract_id )[0]->get_payload()['actor']['role'] );
+	}
+
+	public function test_a_background_run_in_wp_admin_stays_the_systems(): void {
+		$manager_id  = self::factory()->user->create( [ 'role' => 'administrator' ] );
+		$contract_id = $this->seed_contract( [ 'customer_id' => $manager_id ] );
+		wp_set_current_user( $manager_id );
+		set_current_screen( 'subscriptions_page_wc-subscriptions-lite' );
+		add_filter( 'wp_doing_cron', '__return_true' );
+
+		History::add( $this->get_contract( $contract_id ), History::TYPE_HELD );
+
+		$this->assertSame(
+			[
+				'role'    => History::ROLE_SYSTEM,
+				'user_id' => null,
+			],
+			$this->get_history( $contract_id )[0]->get_payload()['actor']
+		);
+	}
+
+	public function test_a_system_entry_in_wp_admin_by_a_store_manager_who_is_the_customer_stays_the_systems(): void {
+		$manager_id  = self::factory()->user->create( [ 'role' => 'administrator' ] );
+		$contract_id = $this->seed_contract( [ 'customer_id' => $manager_id ] );
+		wp_set_current_user( $manager_id );
+		set_current_screen( 'subscriptions_page_wc-subscriptions-lite' );
+
+		History::add_system( $contract_id, History::TYPE_RENEWAL_FAILED );
+
+		$this->assertSame(
+			[
+				'role'    => History::ROLE_SYSTEM,
+				'user_id' => null,
+			],
+			$this->get_history( $contract_id )[0]->get_payload()['actor']
+		);
 	}
 
 	public function test_an_entry_with_no_user_is_the_systems(): void {
@@ -136,6 +211,39 @@ final class HistoryTest extends LiteIntegrationTestCase {
 			],
 			$this->get_history( $contract_id )[0]->get_payload()['actor']
 		);
+	}
+
+	/**
+	 * @testWith ["action_scheduler_after_execute"]
+	 *           ["action_scheduler_failed_execution"]
+	 *           ["action_scheduler_canceled_corrupted_action"]
+	 *
+	 * @param string $end_hook Action Scheduler hook that ends the execution.
+	 */
+	public function test_an_entry_inside_a_scheduled_action_is_the_systems_until_it_ends( string $end_hook ): void {
+		$manager_id  = self::factory()->user->create( [ 'role' => 'administrator' ] );
+		$contract_id = $this->seed_contract( [ 'customer_id' => $manager_id ] );
+		wp_set_current_user( $manager_id );
+		set_current_screen( 'tools_page_action-scheduler' );
+
+		do_action( 'action_scheduler_begin_execute', 1, 'WP Admin' );
+		History::add( $this->get_contract( $contract_id ), History::TYPE_HELD );
+		$end_args = [
+			'action_scheduler_after_execute'             => [ 1, new \ActionScheduler_NullAction(), 'WP Admin' ],
+			'action_scheduler_failed_execution'          => [ 1, new \Exception( 'Failed.' ), 'WP Admin' ],
+			'action_scheduler_canceled_corrupted_action' => [ 1 ],
+		];
+		do_action( $end_hook, ...$end_args[ $end_hook ] );
+		History::add( $this->get_contract( $contract_id ), History::TYPE_REACTIVATED );
+
+		$this->assertSame(
+			[
+				'role'    => History::ROLE_SYSTEM,
+				'user_id' => null,
+			],
+			$this->get_history( $contract_id, History::TYPE_HELD )[0]->get_payload()['actor']
+		);
+		$this->assertSame( History::ROLE_MERCHANT, $this->get_history( $contract_id, History::TYPE_REACTIVATED )[0]->get_payload()['actor']['role'], 'The flag clears when the action ends.' );
 	}
 
 	public function test_an_actor_lookup_that_throws_is_logged_and_not_thrown(): void {

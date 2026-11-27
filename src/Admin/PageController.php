@@ -55,6 +55,11 @@ final class PageController {
 	const ACTION_CANCEL = 'woocommerce_subscriptions_lite_cancel_admin';
 
 	/**
+	 * `admin-post.php` action for the "Add note" form in the History box.
+	 */
+	const ACTION_ADD_NOTE = 'woocommerce_subscriptions_lite_add_note';
+
+	/**
 	 * Default number of subscriptions shown on the list view.
 	 */
 	const PER_PAGE = 20;

@@ -279,6 +279,23 @@ final class EraserTest extends LiteIntegrationTestCase {
 		);
 	}
 
+	public function test_an_erasure_through_admin_ajax_records_the_cancel_by_the_merchant(): void {
+		$this->set_erasure( true );
+		$contract_id = $this->create_contract( $this->customer_id );
+		set_current_screen( 'tools_page_remove_personal_data' );
+		add_filter( 'wp_doing_ajax', '__return_true' );
+
+		$this->erase();
+
+		$this->assertSame(
+			[
+				'role'    => History::ROLE_MERCHANT,
+				'user_id' => get_current_user_id(),
+			],
+			$this->get_history( $contract_id, History::TYPE_CANCELLED )[0]->get_payload()['actor']
+		);
+	}
+
 	public function test_a_draft_is_cancelled_then_anonymised(): void {
 		$this->set_erasure( true );
 		$contract_id = $this->seed_contract(

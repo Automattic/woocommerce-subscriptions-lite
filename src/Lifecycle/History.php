@@ -2,10 +2,13 @@
 /**
  * History - records what happened to a subscription as entries in its engine contract history.
  *
- * Every entry carries Lite's `actor` (a role and a user id) in its payload. The write uses the
+ * Every entry carries Lite's `actor` (a role and a user id) in its payload: a store manager
+ * acting in wp-admin is the merchant, even on their own subscription; elsewhere the
+ * subscription's customer is the customer; a background run is the system. The write uses the
  * lock this request holds on the contract ({@see HeldLocks}), so a flow that lost its lock
- * records nothing. An entry describes a contract write that has already happened, so a failed
- * history write is logged and never fails the flow that called it.
+ * records nothing; a note, written outside any flow, holds no lock. An entry describes a
+ * contract write that has already happened, so a failed history write is logged and never
+ * fails the flow that called it.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Lifecycle
  */
@@ -62,6 +65,11 @@ final class History {
 	public const TYPE_RENEWAL_FAILED = 'renewal-failed';
 
 	/**
+	 * Entry type: a store manager added a note; its payload carries the `text`.
+	 */
+	public const TYPE_NOTE = 'note';
+
+	/**
 	 * Actor role: the subscription's customer.
 	 */
 	public const ROLE_CUSTOMER = 'customer';
@@ -84,16 +92,51 @@ final class History {
 	private const MERCHANT_CAPABILITY = 'manage_woocommerce';
 
 	/**
-	 * Record an entry done by the current user: the customer when it is the subscription's
-	 * customer, a merchant when it can manage WooCommerce, else the system. Inside a background
-	 * run (WP-Cron or the Action Scheduler queue) it is the system, whatever user the run carries.
+	 * Whether an Action Scheduler action is running in this request, from any runner (the queue,
+	 * WP-CLI or a "Run" link under Tools > Scheduled Actions).
+	 *
+	 * @var bool
+	 */
+	private static $in_scheduled_action = false;
+
+	/**
+	 * Track Action Scheduler executions, so an entry written inside one is the system's.
+	 */
+	public static function register(): void {
+		add_action( 'action_scheduler_begin_execute', [ self::class, 'mark_scheduled_action_started' ] );
+		add_action( 'action_scheduler_after_execute', [ self::class, 'mark_scheduled_action_ended' ] );
+		add_action( 'action_scheduler_failed_execution', [ self::class, 'mark_scheduled_action_ended' ] );
+		// A corrupted action is cancelled after `begin_execute` with neither of the two above.
+		add_action( 'action_scheduler_canceled_corrupted_action', [ self::class, 'mark_scheduled_action_ended' ] );
+	}
+
+	/**
+	 * Note that an Action Scheduler action started running.
+	 */
+	public static function mark_scheduled_action_started(): void {
+		self::$in_scheduled_action = true;
+	}
+
+	/**
+	 * Note that the running Action Scheduler action ended.
+	 */
+	public static function mark_scheduled_action_ended(): void {
+		self::$in_scheduled_action = false;
+	}
+
+	/**
+	 * Record an entry done by the current user: a merchant when a store manager acts in wp-admin,
+	 * else the customer when it is the subscription's customer, a merchant when it can manage
+	 * WooCommerce, or the system. Inside a background run (WP-Cron or any Action Scheduler action,
+	 * also one run by hand from wp-admin) it is the system, whatever user the run carries.
 	 *
 	 * @param ContractView         $contract The contract the entry is about.
 	 * @param string               $type     Entry type, one of the `TYPE_*` constants.
 	 * @param array<string, mixed> $fields   Optional `cycle_id`, `payload` (beyond the actor) and `creation_key`.
+	 * @return bool Whether the entry was recorded; false after a logged failure or a taken creation key.
 	 */
-	public static function add( ContractView $contract, string $type, array $fields = [] ): void {
-		self::write( $contract->get_id(), $type, $fields, $contract );
+	public static function add( ContractView $contract, string $type, array $fields = [] ): bool {
+		return self::write( $contract->get_id(), $type, $fields, $contract );
 	}
 
 	/**
@@ -109,7 +152,10 @@ final class History {
 
 	/**
 	 * The actor of an entry: Lite's own when there is no acting contract view, the request has no
-	 * user or it runs in the background; else the current user's role on the contract.
+	 * user, it runs in WP-Cron or inside an Action Scheduler action. In wp-admin (admin-post.php included, admin-ajax.php not)
+	 * a store manager is the merchant; this changes the result only for a store manager who is
+	 * the subscription's customer. Elsewhere the subscription's customer is the customer, a store
+	 * manager the merchant, and any other user the system with that user's id.
 	 *
 	 * @param ContractView|null $contract The contract the current user acted on, or null for Lite itself.
 	 * @return array{role: string, user_id: int|null}
@@ -117,17 +163,22 @@ final class History {
 	private static function get_actor( ?ContractView $contract ): array {
 		$user_id = get_current_user_id();
 		// A background run may carry the cookies of whoever's request started it.
-		if ( null === $contract || $user_id <= 0 || wp_doing_cron() || doing_action( 'action_scheduler_run_queue' ) ) {
+		if ( null === $contract || $user_id <= 0 || wp_doing_cron() || self::$in_scheduled_action || doing_action( 'action_scheduler_run_queue' ) ) {
 			return [
 				'role'    => self::ROLE_SYSTEM,
 				'user_id' => null,
 			];
 		}
 
+		$is_merchant = user_can( $user_id, self::MERCHANT_CAPABILITY );
+		$in_wp_admin = is_admin() && ! wp_doing_ajax();
+
 		$role = self::ROLE_SYSTEM;
-		if ( $contract->get_customer_id() === $user_id ) {
+		if ( $is_merchant && $in_wp_admin ) {
+			$role = self::ROLE_MERCHANT;
+		} elseif ( $contract->get_customer_id() === $user_id ) {
 			$role = self::ROLE_CUSTOMER;
-		} elseif ( user_can( $user_id, self::MERCHANT_CAPABILITY ) ) {
+		} elseif ( $is_merchant ) {
 			$role = self::ROLE_MERCHANT;
 		}
 
@@ -146,8 +197,9 @@ final class History {
 	 * @param string               $type        Entry type.
 	 * @param array<string, mixed> $fields      Optional `cycle_id`, `payload` and `creation_key`.
 	 * @param ContractView|null    $contract    The contract the current user acted on, or null for Lite itself.
+	 * @return bool Whether the entry was recorded.
 	 */
-	private static function write( int $contract_id, string $type, array $fields, ?ContractView $contract ): void {
+	private static function write( int $contract_id, string $type, array $fields, ?ContractView $contract ): bool {
 		try {
 			$args = [
 				'extension_slug' => Package::EXTENSION_SLUG,
@@ -161,7 +213,7 @@ final class History {
 				$args['creation_key'] = $fields['creation_key'];
 			}
 
-			Contracts::add_history_entry( $contract_id, $args, HeldLocks::get( $contract_id ) );
+			$entry = Contracts::add_history_entry( $contract_id, $args, HeldLocks::get( $contract_id ) );
 		} catch ( Throwable $e ) {
 			wc_get_logger()->error(
 				sprintf( 'History: the %s entry of contract %d could not be recorded: %s', $type, $contract_id, $e->getMessage() ),
@@ -171,6 +223,9 @@ final class History {
 					'type'        => $type,
 				]
 			);
+			return false;
 		}
+
+		return null !== $entry;
 	}
 }

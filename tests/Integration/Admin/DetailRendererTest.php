@@ -3,7 +3,7 @@
  * Integration tests for the detail-screen meta-box registration.
  *
  * Asserts the screen registers the section boxes in the order-edit arrangement:
- * details -> addresses -> items -> billing history in the main column, actions +
+ * details -> addresses -> items -> billing history -> history in the main column, actions +
  * schedule + customer on the side.
  *
  * @package Automattic\WooCommerce\SubscriptionsLite\Tests
@@ -52,7 +52,15 @@ final class DetailRendererTest extends LiteIntegrationTestCase {
 		$this->assertLessThan( $addresses_pos, $data_pos, 'Details register before addresses.' );
 		$this->assertLessThan( $items_pos, $addresses_pos, 'Addresses register before items, so the column reads details -> addresses -> items.' );
 
-		$this->assertArrayHasKey( 'wc-subs-lite-history', $boxes['normal']['default'] ?? [] );
+		$normal_default = $boxes['normal']['default'] ?? [];
+		$this->assertSame( 'Billing history', $normal_default['wc-subs-lite-history']['title'] ?? null );
+		$this->assertSame( 'History', $normal_default[ DetailRenderer::HISTORY_BOX_ID ]['title'] ?? null );
+		$default_keys = array_keys( $normal_default );
+		$this->assertLessThan(
+			array_search( DetailRenderer::HISTORY_BOX_ID, $default_keys, true ),
+			array_search( 'wc-subs-lite-history', $default_keys, true ),
+			'The History box follows Billing history.'
+		);
 		$this->assertArrayHasKey( 'wc-subs-lite-actions', $boxes['side']['high'] ?? [] );
 		$this->assertArrayHasKey( 'wc-subs-lite-schedule', $boxes['side']['default'] ?? [] );
 		$this->assertArrayHasKey( 'wc-subs-lite-customer', $boxes['side']['default'] ?? [] );
@@ -79,6 +87,57 @@ final class DetailRendererTest extends LiteIntegrationTestCase {
 
 		$this->assertStringContainsString( 'Subscription #' . $id, $html );
 		$this->assertStringNotContainsString( 'wc-subs-lite-lock-notice', $html );
+	}
+
+	public function test_a_collapsed_history_box_opens_while_a_note_outcome_waits(): void {
+		require_once ABSPATH . 'wp-admin/includes/post.php';
+		$id      = $this->create_contract( $this->create_customer() );
+		$user_id = self::factory()->user->create( [ 'role' => 'administrator' ] );
+		wp_set_current_user( $user_id );
+		set_current_screen( 'subscriptions_page_wc-subscriptions-lite' );
+		$screen_id = get_current_screen()->id;
+		update_user_option( $user_id, 'closedpostboxes_' . $screen_id, [ DetailRenderer::HISTORY_BOX_ID ] );
+
+		$this->assertSame( 'closed', postbox_classes( DetailRenderer::HISTORY_BOX_ID, $screen_id ), 'The box starts collapsed.' );
+
+		set_transient(
+			'woocommerce_subscriptions_lite_note_notice_' . $user_id . '_' . $id,
+			[
+				'type'    => 'success',
+				'message' => 'Note added.',
+				'invalid' => false,
+			],
+			60
+		);
+		DetailRenderer::setup( $id );
+
+		$this->assertSame( '', postbox_classes( DetailRenderer::HISTORY_BOX_ID, $screen_id ) );
+		$this->assertSame( [ DetailRenderer::HISTORY_BOX_ID ], get_user_option( 'closedpostboxes_' . $screen_id, $user_id ), 'The saved state is kept.' );
+	}
+
+	public function test_a_hidden_history_box_shows_while_a_note_outcome_waits(): void {
+		$id      = $this->create_contract( $this->create_customer() );
+		$user_id = self::factory()->user->create( [ 'role' => 'administrator' ] );
+		wp_set_current_user( $user_id );
+		set_current_screen( 'subscriptions_page_wc-subscriptions-lite' );
+		$screen = get_current_screen();
+		update_user_option( $user_id, 'metaboxhidden_' . $screen->id, [ DetailRenderer::HISTORY_BOX_ID, 'wc-subs-lite-items' ] );
+
+		$this->assertContains( DetailRenderer::HISTORY_BOX_ID, get_hidden_meta_boxes( $screen ), 'The box starts hidden.' );
+
+		set_transient(
+			'woocommerce_subscriptions_lite_note_notice_' . $user_id . '_' . $id,
+			[
+				'type'    => 'error',
+				'message' => 'The note is empty. Type a note before adding it.',
+				'invalid' => true,
+			],
+			60
+		);
+		DetailRenderer::setup( $id );
+
+		$this->assertSame( [ 'wc-subs-lite-items' ], get_hidden_meta_boxes( $screen ), 'Only the History box is shown; other hidden boxes stay hidden.' );
+		$this->assertSame( [ DetailRenderer::HISTORY_BOX_ID, 'wc-subs-lite-items' ], get_user_option( 'metaboxhidden_' . $screen->id, $user_id ), 'The saved preference is kept.' );
 	}
 
 	/**

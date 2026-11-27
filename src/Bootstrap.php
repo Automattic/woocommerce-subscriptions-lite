@@ -97,6 +97,9 @@ final class Bootstrap {
 		// every request.
 		Lifecycle\Renewal\Settlement::register();
 
+		// History: an entry written inside any Action Scheduler action is the system's.
+		Lifecycle\History::register();
+
 		// Customer portal (My Account): the subscriptions list + single
 		// subscription detail, with the lifecycle actions (cancel / hold /
 		// reactivate) over the namespaced Interactivity API store. Endpoints
@@ -115,11 +118,13 @@ final class Bootstrap {
 		Privacy\Eraser::register();
 
 		// Admin (back office only): the WooCommerce > Subscriptions list + detail
-		// page and its Renew now / Cancel handlers (Lite's renewal and cancel flows).
+		// page, its Renew now / Cancel handlers (Lite's renewal and cancel flows)
+		// and its add-note handler.
 		// Front-end requests never need this.
 		if ( is_admin() ) {
 			Admin\PageController::register();
 			Admin\RowActionController::register();
+			Admin\NoteController::register();
 
 			// Register the WooCommerce Settings > Subscriptions tab (plans manager).
 			Admin\SettingsPage::register();

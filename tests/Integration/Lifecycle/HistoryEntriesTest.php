@@ -394,6 +394,33 @@ final class HistoryEntriesTest extends LiteIntegrationTestCase {
 		$this->assertSame( [ 'actor' => self::system_actor() ], $reactivated->get_payload() );
 	}
 
+	public function test_renewal_entries_in_wp_admin_by_a_store_manager_who_is_the_customer_stay_the_systems(): void {
+		$manager_id  = $this->create_customer( [ 'role' => 'administrator' ] );
+		$contract_id = $this->create_contract( $manager_id, [ 'payment_method' => 'cod' ] );
+		$order       = $this->create_renewal_order(
+			$contract_id,
+			$manager_id,
+			[
+				'status'       => OrderStatus::PENDING,
+				'cycle_status' => CycleStatus::PENDING,
+			]
+		);
+		wp_set_current_user( $manager_id );
+		set_current_screen( 'woocommerce_page_wc-orders' );
+
+		$order->update_status( OrderStatus::FAILED );
+		$order = wc_get_order( $order->get_id() );
+		$order->update_status( OrderStatus::PROCESSING ); // Marked processing on the order screen.
+
+		$this->assertSame(
+			[ History::TYPE_CREATED, History::TYPE_RENEWAL_FAILED, History::TYPE_HELD, History::TYPE_RENEWAL_PAID, History::TYPE_REACTIVATED ],
+			$this->get_history_types( $contract_id )
+		);
+		foreach ( array_slice( $this->get_history( $contract_id ), 1 ) as $entry ) {
+			$this->assertSame( self::system_actor(), $entry->get_payload()['actor'], $entry->get_type() . ' is the system\'s.' );
+		}
+	}
+
 	public function test_a_paid_renewal_during_a_customer_hold_records_no_reactivated_entry(): void {
 		$customer_id = $this->create_customer();
 		$contract_id = $this->create_contract(

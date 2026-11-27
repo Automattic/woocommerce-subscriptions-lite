@@ -23,6 +23,7 @@ use Automattic\WooCommerce\SubscriptionsLite\Admin\MetaBoxes\Actions;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\PageController;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\RowActionController;
 use Automattic\WooCommerce\SubscriptionsLite\Admin\RowActionResult;
+use Automattic\WooCommerce\SubscriptionsLite\Lifecycle\History;
 use Automattic\WooCommerce\SubscriptionsLite\Package;
 use Automattic\WooCommerce\SubscriptionsLite\Tests\Integration\LiteIntegrationTestCase;
 use RuntimeException;
@@ -226,6 +227,26 @@ final class RowActionControllerTest extends LiteIntegrationTestCase {
 		$this->assertSame( ContractStatus::CANCELLED, $this->get_contract( $contract_id )->get_status() );
 		$this->assertNull( $this->get_contract( $contract_id )->get_next_payment_gmt() );
 		$this->assert_lock_released( $contract_id );
+	}
+
+	public function test_cancel_in_wp_admin_by_a_store_manager_who_is_the_customer_records_the_merchant(): void {
+		$manager_id  = self::factory()->user->create( [ 'role' => 'shop_manager' ] );
+		$contract_id = $this->seed_contract( [ 'customer_id' => $manager_id ] );
+		wp_set_current_user( $manager_id );
+		set_current_screen( 'subscriptions_page_wc-subscriptions-lite' );
+
+		$result = ( new RowActionController() )->handle_cancel( [ 'contract_id' => $contract_id ] );
+
+		$this->assertTrue( $result->is_success() );
+		$entries = $this->get_history( $contract_id, History::TYPE_CANCELLED );
+		$this->assertCount( 1, $entries );
+		$this->assertSame(
+			[
+				'role'    => History::ROLE_MERCHANT,
+				'user_id' => $manager_id,
+			],
+			$entries[0]->get_payload()['actor']
+		);
 	}
 
 	public function test_cancel_reports_a_missing_contract_as_not_found(): void {

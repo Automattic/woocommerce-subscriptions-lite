@@ -179,6 +179,11 @@ $status-pending-cancellation-fg: #b45917;
 	margin-top: variables.$grid-unit-10;
 }
 
+/* History box: a long word or URL in a note wraps, not widening the page. */
+.wc-subs-lite-contract-history-note {
+	overflow-wrap: anywhere;
+}
+
 /*
  * Items table: the price, quantity and total columns read compact and
  * right-aligned, like the order-items box on the WooCommerce order edit screen.
