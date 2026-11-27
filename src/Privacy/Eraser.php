@@ -297,8 +297,9 @@ final class Eraser {
 	 * Anonymise the addresses and clear the payment references. With `$unlink`, the same write
 	 * clears the customer link: for a contract found by its billing email, which the lookup loses
 	 * with that email. Otherwise the link stays until {@see self::unlink()}, so the account read
-	 * still finds the contract if a later step fails. The contract row is written before the
-	 * addresses, so a failed address write keeps the email that finds the contract.
+	 * still finds the contract if a later step fails. The engine writes the contract row first,
+	 * then each address in the order given, with billing last: a failed address write keeps the
+	 * billing email that finds the contract, so a rerun completes it.
 	 *
 	 * @param ContractView $contract The contract as read under the lock, with its addresses.
 	 * @param ContractLock $lock     The held lock.
@@ -345,22 +346,30 @@ final class Eraser {
 	}
 
 	/**
-	 * Every address with each non-empty field anonymised; empty fields stay as they are.
+	 * Every address with each non-empty field anonymised; empty fields stay as they are. The
+	 * billing address comes last, so the engine anonymises the lookup's email after the rest.
 	 *
 	 * @param array<string, array<string, mixed>> $addresses Addresses by type.
 	 * @return array<string, array<string, mixed>>
 	 */
 	private static function anonymise_addresses( array $addresses ): array {
+		$anonymised = [];
 		foreach ( $addresses as $type => $address ) {
 			foreach ( $address as $field => $value ) {
-				if ( null === $value || '' === $value ) {
-					continue;
+				if ( null !== $value && '' !== $value ) {
+					$address[ $field ] = wp_privacy_anonymize_data( self::ADDRESS_DATA_TYPES[ $field ] ?? 'text', (string) $value );
 				}
-				$addresses[ $type ][ $field ] = wp_privacy_anonymize_data( self::ADDRESS_DATA_TYPES[ $field ] ?? 'text', (string) $value );
 			}
+			$anonymised[ $type ] = $address;
 		}
 
-		return $addresses;
+		if ( isset( $anonymised['billing'] ) ) {
+			$billing = $anonymised['billing'];
+			unset( $anonymised['billing'] );
+			$anonymised['billing'] = $billing;
+		}
+
+		return $anonymised;
 	}
 
 	/**

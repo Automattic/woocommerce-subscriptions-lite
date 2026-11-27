@@ -46,7 +46,7 @@ final class RequesterContracts {
 
 	/**
 	 * The Lite contracts of the requester's account and those billed to `$email`, each once,
-	 * oldest first. The views carry no items or addresses.
+	 * oldest first. Only the views found by the billing email carry items and addresses.
 	 *
 	 * @param string $email      The request's email address.
 	 * @param int    $account_id The requester's account id from {@see self::get_account_id()}, or 0.
@@ -87,9 +87,10 @@ final class RequesterContracts {
 	}
 
 	/**
-	 * The Lite contracts whose billing email is `$email`, by id. The engine read matches a
-	 * billing or shipping email; each candidate is re-read to keep billing matches only. The
-	 * engine pages over its own matches, so the filter never skips one.
+	 * The Lite contracts whose billing email is `$email`, by id, as read with their items and
+	 * addresses. The engine read matches a billing or shipping email; each candidate is re-read
+	 * to keep billing matches only. The engine pages over its own matches, so the filter never
+	 * skips one.
 	 *
 	 * @param string $email The request's email address.
 	 * @return array<int, ContractView>
@@ -100,10 +101,18 @@ final class RequesterContracts {
 		do {
 			$page = Contracts::list_for_address_email( $email, self::READ_SIZE, $offset, [ 'extension_slug' => Package::EXTENSION_SLUG ] );
 			foreach ( $page as $candidate ) {
-				$contract  = Contracts::get( $candidate->get_id() );
-				$addresses = null === $contract ? [] : ( $contract->get_addresses() ?? [] );
-				if ( self::is_same_email( (string) ( $addresses['billing']['email'] ?? '' ), $email ) ) {
-					$contracts[ $candidate->get_id() ] = $candidate;
+				$contract = Contracts::get( $candidate->get_id() );
+				if ( null === $contract ) {
+					continue;
+				}
+
+				// The database matched one of the two emails; the approximation only rules shipping
+				// in, so a match the collation makes and PHP misses (`ß` and `ss`) is still kept.
+				$addresses = $contract->get_addresses() ?? [];
+				$billing   = self::is_same_email( (string) ( $addresses['billing']['email'] ?? '' ), $email );
+				$shipping  = self::is_same_email( (string) ( $addresses['shipping']['email'] ?? '' ), $email );
+				if ( $billing || ! $shipping ) {
+					$contracts[ $candidate->get_id() ] = $contract;
 				}
 			}
 			$offset   += self::READ_SIZE;
@@ -114,8 +123,8 @@ final class RequesterContracts {
 	}
 
 	/**
-	 * Whether two emails match as the engine read matches them: trimmed, and without regard to
-	 * case or accents, like the default database collation.
+	 * Whether two emails look equal to the engine read: trimmed, and without regard to case or
+	 * accents, close to the default database collation but not identical to it.
 	 *
 	 * @param string $stored    The stored email.
 	 * @param string $requested The request's email.

@@ -372,7 +372,7 @@ final class EraserTest extends LiteIntegrationTestCase {
 		);
 	}
 
-	public function test_a_lock_lost_after_the_history_delete_is_reported_as_held_and_a_rerun_completes_it(): void {
+	public function test_a_lock_lost_before_the_anonymise_step_is_reported_as_held_and_a_rerun_completes_it(): void {
 		$this->set_erasure( true );
 		$contract_id = $this->create_contract( $this->customer_id, [ 'status' => 'cancelled' ] );
 		$this->capture_log();
@@ -710,6 +710,33 @@ final class EraserTest extends LiteIntegrationTestCase {
 			'Erased contracts leave the email read, so the second call erases the rest.'
 		);
 		$this->assertSame( [], $this->find_by_request_email() );
+	}
+
+	public function test_a_failure_between_the_two_address_writes_keeps_the_billing_email_and_a_rerun_completes_it(): void {
+		$this->set_erasure( true );
+		$contract_id = $this->seed_contract(
+			[
+				'customer_id' => $this->create_customer(),
+				'status'      => ContractStatus::CANCELLED,
+				'addresses'   => [
+					'billing'  => array_merge( self::BILLING_ADDRESS, [ 'email' => self::EMAIL ] ),
+					'shipping' => self::SHIPPING_ADDRESS,
+				],
+			]
+		);
+		$this->fail_next_query( '/INSERT INTO \S*wc_subscription_contract_addresses/', 1 );
+
+		$response = $this->erase();
+
+		$this->assertStringStartsWith( 'Personal data could not be removed from subscription #', $response['messages'][0] );
+		$addresses = (array) $this->get_contract( $contract_id )->get_addresses();
+		$this->assertSame( '[deleted]', $addresses['shipping']['address_1'], 'The shipping address was written first.' );
+		$this->assertSame( self::EMAIL, $addresses['billing']['email'], 'The billing email that finds the contract is written last.' );
+
+		$this->erase_all();
+
+		$this->assert_erased( $contract_id );
+		$this->assertSame( 'deleted@site.invalid', ( (array) $this->get_contract( $contract_id )->get_addresses() )['billing']['email'] );
 	}
 
 	public function test_a_subscription_with_only_the_shipping_email_is_not_erased(): void {

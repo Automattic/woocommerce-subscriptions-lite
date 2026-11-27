@@ -99,7 +99,8 @@ final class Exporter {
 			$contracts    = RequesterContracts::get_for_email( $email_address, $requester_id );
 			$data         = [];
 			foreach ( array_slice( $contracts, ( $page - 1 ) * self::PAGE_SIZE, self::PAGE_SIZE ) as $listed ) {
-				$contract = Contracts::get( $listed->get_id() );
+				// A view found by its billing email was read in full already.
+				$contract = null === $listed->get_addresses() ? Contracts::get( $listed->get_id() ) : $listed;
 				if ( null === $contract ) {
 					continue;
 				}

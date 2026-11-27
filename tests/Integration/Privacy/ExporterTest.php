@@ -463,6 +463,14 @@ final class ExporterTest extends LiteIntegrationTestCase {
 		$this->assertSame( [ 'contract-' . $upper, 'contract-' . $accented ], array_column( $response['data'], 'item_id' ) );
 	}
 
+	public function test_a_billing_email_the_database_matches_is_kept_when_php_compares_it_differently(): void {
+		$sharp_s  = $this->seed_contract_with_email( null, 'straße@example.com' );
+		$cyrillic = $this->seed_contract_with_email( null, 'ЖЕНЯ@example.com' );
+
+		$this->assertSame( [ 'contract-' . $sharp_s ], array_column( $this->assert_export( $this->export( 'strasse@example.com' ) )['data'], 'item_id' ) );
+		$this->assertSame( [ 'contract-' . $cyrillic ], array_column( $this->assert_export( $this->export( 'женя@example.com' ) )['data'], 'item_id' ) );
+	}
+
 	public function test_another_extensions_contract_with_the_email_is_left_out(): void {
 		$this->seed_contract_with_email( null, self::EMAIL, [ 'extension_slug' => self::FOREIGN_EXTENSION_SLUG ] );
 
